@@ -39,7 +39,7 @@ function toIso(d: Date): string {
   return d.toISOString();
 }
 
-export default function OrdersPage() {
+export function OrdersPage() {
   const { companyId, isLoading: companyLoading } = useCompany();
 
   // ───── 필터 상태 ─────
