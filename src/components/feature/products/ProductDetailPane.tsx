@@ -5,7 +5,7 @@
  */
 import { Pencil, Trash2 } from 'lucide-react';
 import type { Product } from '@/hooks/queries/useProducts';
-import { categoryLabel } from './ProductFilterBar';
+import { getCategoryLabel } from '@/constants/categories';
 
 interface Props {
   product: Product | null;
@@ -62,7 +62,7 @@ export function ProductDetailPane({ product, onEdit, onDelete }: Props) {
               fontSize: 11,
             }}
           >
-            {categoryLabel(product.category)}
+            {getCategoryLabel(product.category)}
           </span>
           <h2
             className="disp"
@@ -171,7 +171,7 @@ export function ProductDetailPane({ product, onEdit, onDelete }: Props) {
           }}
         >
           <InfoRow label="제품코드" value={product.code} numeric />
-          <InfoRow label="카테고리" value={categoryLabel(product.category)} />
+          <InfoRow label="카테고리" value={getCategoryLabel(product.category)} />
           <InfoRow label="단위" value={product.unit} />
           <InfoRow
             label="USD 단가"

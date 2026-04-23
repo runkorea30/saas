@@ -4,6 +4,7 @@
  */
 import { Search, Tag } from 'lucide-react';
 import { MultiChip, Segmented } from '@/components/feature/orders/primitives';
+import { getCategoryLabel } from '@/constants/categories';
 
 export type ProductActiveFilter = 'all' | 'active' | 'inactive';
 
@@ -17,17 +18,6 @@ interface Props {
   categoryOptions: string[];
   totalFiltered: number;
   totalAll: number;
-}
-
-const CATEGORY_LABELS: Record<string, string> = {
-  paint: '페인트',
-  sewing: '소잉',
-  finish: '마감재',
-  tool: '공구',
-};
-
-function labelOf(cat: string): string {
-  return CATEGORY_LABELS[cat] ?? cat;
 }
 
 export function ProductFilterBar({
@@ -93,7 +83,7 @@ export function ProductFilterBar({
         onChange={onCategoryChange}
         options={categoryOptions.map((c) => ({
           id: c,
-          label: labelOf(c),
+          label: getCategoryLabel(c),
         }))}
       />
 
@@ -117,5 +107,3 @@ export function ProductFilterBar({
     </div>
   );
 }
-
-export { labelOf as categoryLabel };

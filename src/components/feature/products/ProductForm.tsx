@@ -11,6 +11,11 @@
  */
 import { useMemo, useState } from 'react';
 import type { Product, ProductCreateInput } from '@/hooks/queries/useProducts';
+import {
+  CATEGORY_OPTIONS,
+  PRODUCT_CATEGORIES,
+  getCategoryLabel,
+} from '@/constants/categories';
 
 interface Props {
   initial?: Product | null;
@@ -58,10 +63,24 @@ export function ProductForm({
 }: Props) {
   const isEdit = Boolean(initial);
 
+  // 표준 카테고리(4종) + DB 에 남아있는 비표준 레거시 카테고리의 합집합.
+  // 레거시 항목이 있으면 preset select 에서 원본 키 그대로 재선택 가능하게 해준다.
+  const presetOptions = useMemo(() => {
+    const extras = knownCategories
+      .filter(
+        (c) => !(PRODUCT_CATEGORIES as ReadonlyArray<string>).includes(c),
+      )
+      .map((c) => ({ value: c, label: getCategoryLabel(c) }));
+    return [...CATEGORY_OPTIONS, ...extras];
+  }, [knownCategories]);
+
+  const presetValues = useMemo(
+    () => presetOptions.map((o) => o.value),
+    [presetOptions],
+  );
+
   const initialCategoryMode: 'preset' | 'custom' =
-    initial && !knownCategories.includes(initial.category)
-      ? 'custom'
-      : 'preset';
+    initial && !presetValues.includes(initial.category) ? 'custom' : 'preset';
 
   const [form, setForm] = useState<FormState>({
     code: initial?.code ?? '',
@@ -70,7 +89,7 @@ export function ProductForm({
     categoryPreset:
       initial && initialCategoryMode === 'preset'
         ? initial.category
-        : (knownCategories[0] ?? ''),
+        : PRODUCT_CATEGORIES[0],
     categoryCustom:
       initial && initialCategoryMode === 'custom' ? initial.category : '',
     unit: initial?.unit ?? 'ea',
@@ -185,20 +204,17 @@ export function ProductForm({
           {form.categoryMode === 'preset' ? (
             <select
               value={form.categoryPreset}
-              disabled={busy || knownCategories.length === 0}
+              disabled={busy}
               onChange={(e) =>
                 setForm((f) => ({ ...f, categoryPreset: e.target.value }))
               }
               style={{ ...inputStyle(!!errors.category, !!busy), flex: 1 }}
             >
-              {knownCategories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
+              {presetOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
                 </option>
               ))}
-              {knownCategories.length === 0 && (
-                <option value="">(등록된 카테고리 없음)</option>
-              )}
             </select>
           ) : (
             <input

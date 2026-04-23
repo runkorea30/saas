@@ -15,7 +15,7 @@ import {
   type ColumnDef,
 } from '@/hooks/useResizableColumns';
 import type { Product } from '@/hooks/queries/useProducts';
-import { categoryLabel } from './ProductFilterBar';
+import { getCategoryLabel } from '@/constants/categories';
 
 interface Props {
   products: Product[];
@@ -162,7 +162,7 @@ export function ProductListTable({
 
                 <CellText value={p.name} bold ink="ink" />
 
-                <CellText value={categoryLabel(p.category)} small muted />
+                <CellText value={getCategoryLabel(p.category)} small muted />
 
                 <CellText
                   value={fmtWon(p.sell_price)}
