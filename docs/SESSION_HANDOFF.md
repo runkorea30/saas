@@ -244,24 +244,29 @@ NOTIFY pgrst, 'reload schema';
 
 ---
 
-### 카테고리 영/한 매핑 일원화 (2026-04-24 기록)
-- **현재 상태**:
-  - DB 저장값: 영문 (`paint` / `sewing` / `finish` / `tool`)
-  - 목록·상세 패널 표시: 한글 매핑 (페인트 / 소잉 / 마감재 / 공구) — `ProductFilterBar.tsx` 내 `CATEGORY_LABELS`
-  - 제품 생성/수정 모달의 카테고리 select: 영문 raw 그대로 노출
-- **문제**: 같은 화면 안에서도 표시 불일치
-- **해결 방향**:
-  - `src/constants/categories.ts` 신설 — `CATEGORY_LABELS` 매핑 상수 1곳
-  - DB 저장값은 영문 유지, 화면 표시는 전부 한글 매핑 경유
-  - 목록·상세·모달 select·필터 칩 등 카테고리 표시하는 모든 곳에서 재사용
-- **영향 범위**: Products / 재고현황 / 수입매입 / 발주서 / 손익(카테고리별 집계) 등 제품 참조하는 전 페이지
-- **우선순위**: 다음 페이지 양산 시작 전에 처리 권장 (재사용 극대화)
+### ✅ 카테고리 영/한 매핑 일원화 — 완료 (2026-04-24, `c48e53b`)
+- **결과물**: `src/constants/categories.ts`
+  - `PRODUCT_CATEGORIES` (as const) + `ProductCategoryKey` union
+  - `CATEGORY_LABELS` / `getCategoryLabel(key)` / `CATEGORY_OPTIONS`
+  - 매핑 누락 키는 원본 반환(안전 폴백) — 레거시/커스텀 카테고리 보호
+- **사용법**:
+  ```ts
+  import { getCategoryLabel, CATEGORY_OPTIONS } from '@/constants/categories';
+  // 목록·상세: getCategoryLabel(p.category) → '페인트'
+  // select: CATEGORY_OPTIONS.map(o => <option value={o.value}>{o.label}</option>)
+  ```
+- **적용**: ProductFilterBar / ListTable / DetailPane / Form 전부 이 모듈 경유. DB 저장값은 영문 유지.
 
-### Toast 전역 Provider 승격 (2026-04-24 기록)
-- **현재 상태**: `ProductsPage` 에만 로컬 `useState<ToastMsg|null>` + `<Toast />` 붙음
-- **문제**: 다음 페이지들에서도 동일 토스트 필요 — 페이지마다 중복 설치 비효율
-- **해결 방향**: App 루트에 `ToastProvider` 승격 + `useToast()` 훅 전역 사용
-- **우선순위**: 다음 페이지 작업 시작 시점에 처리 (Products 이후 첫 CRUD 페이지 작업 전)
+### ✅ Toast 전역 Provider 승격 — 완료 (2026-04-24, `220d27d`)
+- **결과물**: `ToastProvider`, `useToast()` 훅 (`src/components/ui/Toast.tsx`)
+- **Provider 래핑**: `main.tsx` — `BrowserRouter > ToastProvider > App`. 다른 페이지는 훅만 호출하면 즉시 사용 가능.
+- **사용법**:
+  ```ts
+  const { showToast } = useToast();
+  showToast({ kind: 'success', text: '저장했습니다' });
+  // kind: 'success' | 'error' | 'info', duration 생략 시 2500ms
+  ```
+- **정책**: 단일 슬롯(한 번에 하나). 연속 호출 시 기존 토스트 즉시 교체 + 타이머 재시작.
 
 ### 포맷·표시
 - **KPI 통화 포맷 혼재**: "540만" / "12.8M" / "₩128,430,000" 섞임 → 전체 페이지 완성 후 `fmtMoney()` 공용 함수로 통일
@@ -282,20 +287,30 @@ NOTIFY pgrst, 'reload schema';
 
 ## 7. 다음 세션 진입점
 
-### 옵션 A (권장) — 나머지 11 페이지 병렬 구현
-도메인별 일관 패턴 확립됐으므로 병렬 진행 가능:
+### 다음 작업: **재고현황 페이지** (첫 양산 페이지)
+- 경로: `/inventory/stock`
+- 지위: Products 완료 + 선결 인프라(Toast 전역화 · 카테고리 매핑 일원화) 정리 완료 → 나머지 페이지 양산의 **첫 테스트 케이스**
+- 참고할 가장 최근 페이지: **Products (Phase B)** — CRUD + 공용 인프라 전부 활용 중
+- **사용 가능한 공용 인프라** (바로 import 해서 쓸 수 있는 것들):
+  - `useToast()` — 재고 조정 성공/실패, 파손 처리 완료 등 알림
+  - `Modal` / `ConfirmDialog` — 재고 조정 모달 / 파손·반품 확인 다이얼로그
+  - `useResizableSplit` / `useResizableColumns` — 2단(목록+상세) 또는 3단 레이아웃 + 테이블 컬럼 폭 저장
+  - `koreanSort` (`companyNameSortKey` · `compareCompanyName`) — 거래처·공급처 컬럼 정렬
+  - `getCategoryLabel` / `CATEGORY_OPTIONS` — 카테고리 필터 칩, 상세 표시
+  - `ProductDetailPane` · `ProductListTable` 구조 — master-detail split 레퍼런스
+- **비즈니스 계산식**: `calcCurrentStock(companyId, productId)` 이미 구현됨 (`src/utils/calculations.ts`) — 기초재고 + 입고 + 반품 - 파손 - 올해판매 반영.
+
+### 후속 페이지 (재고현황 이후)
 - `/sales/order-entry` — 수동주문입력
 - `/sales/invoices` — 송장대장
-- `/inventory/stock` — 재고현황
 - `/inventory/purchase` — 수입/매입
 - `/inventory/purchase-orders` — 발주서 (PO 템플릿 필요)
-- `/inventory/products` — 제품리스트
 - `/finance/receivables` — 미수금
 - `/finance/banking` — 은행거래 (입금 매칭)
 - `/finance/tax-invoices` — 세금계산서 발행
-- `/finance/pnl` — 손익계산서 (calcCostOfSales 선행 필요)
+- `/finance/pnl` — 손익계산서 (`calcCostOfSales` 선행 필요)
 
-### 옵션 B — Auth 우선
+### 옵션 — Auth 우선
 - Supabase Auth + memberships 도입
 - §5 원복 작업 병행
 - 이후 나머지 페이지 구현
