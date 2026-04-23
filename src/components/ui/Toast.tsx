@@ -1,12 +1,22 @@
 /**
- * 간단한 토스트 (페이지 로컬 상태 기반).
+ * 라이트웨이트 토스트 — Portal 기반, 2.5s 자동 닫힘, 호버 시 타이머 일시정지.
  *
- * - 페이지에서 `const [toast, setToast] = useState<ToastMsg|null>(null)` 로 쓰고,
- *   렌더: `{toast && <Toast {...toast} onClose={() => setToast(null)} />}`.
- * - `duration` ms 후 자동 닫힘 (기본 2500). 호버 시 타이머 일시정지.
- * - 🟡 추후 전역 Toast Provider 로 승격 고려 (SESSION_HANDOFF TODO).
+ * 전역 사용 (권장):
+ * 1) `main.tsx`에서 `<ToastProvider>` 로 앱을 감싸준다.
+ * 2) 컴포넌트에서 `const { showToast } = useToast()` 후
+ *    `showToast({ kind: 'success', text: '완료' })` 로 호출.
+ *
+ * 저수준(`<Toast />`) 은 Provider 내부에서만 사용. 페이지에서 직접 렌더하지 말 것.
  */
-import { useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { CheckCircle, XCircle, Info } from 'lucide-react';
 
@@ -93,4 +103,56 @@ export function Toast({ kind, text, duration = 2500, onClose }: Props) {
     </div>,
     document.body,
   );
+}
+
+/* ─────────────────────────────── Provider / hook ─────────────────────────────── */
+
+interface ToastContextValue {
+  showToast: (msg: ToastMsg) => void;
+}
+
+const ToastContext = createContext<ToastContextValue | null>(null);
+
+/**
+ * 전역 Toast Provider. `main.tsx`에서 앱 루트 바깥쪽에 래핑한다.
+ *
+ * 단일 슬롯(한 번에 하나) 정책. 새 토스트 호출 시 기존 것을 즉시 교체하고 타이머도 재시작한다.
+ */
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [toast, setToast] = useState<ToastMsg | null>(null);
+  // 동일 메시지 연속 호출 시에도 Toast 를 remount 해서 타이머를 재시작하기 위한 키.
+  const [seq, setSeq] = useState(0);
+
+  const showToast = useCallback((msg: ToastMsg) => {
+    setToast(msg);
+    setSeq((n) => n + 1);
+  }, []);
+
+  const handleClose = useCallback(() => {
+    setToast(null);
+  }, []);
+
+  return (
+    <ToastContext.Provider value={{ showToast }}>
+      {children}
+      {toast && <Toast key={seq} {...toast} onClose={handleClose} />}
+    </ToastContext.Provider>
+  );
+}
+
+/**
+ * 전역 Toast 훅.
+ *
+ * 사용 예:
+ * ```tsx
+ * const { showToast } = useToast();
+ * showToast({ kind: 'success', text: '저장했습니다' });
+ * ```
+ */
+export function useToast(): ToastContextValue {
+  const ctx = useContext(ToastContext);
+  if (!ctx) {
+    throw new Error('useToast must be used within <ToastProvider>');
+  }
+  return ctx;
 }

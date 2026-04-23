@@ -29,7 +29,7 @@ import { ProductDetailPane } from '@/components/feature/products/ProductDetailPa
 import { ProductForm } from '@/components/feature/products/ProductForm';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { Toast, type ToastMsg } from '@/components/ui/Toast';
+import { useToast } from '@/components/ui/Toast';
 
 /** 편집 대상: 'new' = 신규 생성 모달, Product = 수정 모달, null = 닫힘. */
 type EditTarget = 'new' | Product | null;
@@ -53,7 +53,7 @@ export function ProductsPage() {
   // ───── CRUD 상태 ─────
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
-  const [toast, setToast] = useState<ToastMsg | null>(null);
+  const { showToast } = useToast();
 
   // ───── 스플릿 (공용 훅) ─────
   const {
@@ -147,10 +147,10 @@ export function ProductsPage() {
         onSuccess: (created) => {
           setEditTarget(null);
           setSelectedId(created.id);
-          setToast({ kind: 'success', text: `「${created.name}」 제품을 추가했습니다` });
+          showToast({ kind: 'success', text: `「${created.name}」 제품을 추가했습니다` });
         },
         onError: (e) => {
-          setToast({ kind: 'error', text: e.message });
+          showToast({ kind: 'error', text: e.message });
         },
       });
     } else if (editTarget && typeof editTarget !== 'string') {
@@ -160,10 +160,10 @@ export function ProductsPage() {
           onSuccess: (updated) => {
             setEditTarget(null);
             setSelectedId(updated.id);
-            setToast({ kind: 'success', text: `「${updated.name}」 제품을 저장했습니다` });
+            showToast({ kind: 'success', text: `「${updated.name}」 제품을 저장했습니다` });
           },
           onError: (e) => {
-            setToast({ kind: 'error', text: e.message });
+            showToast({ kind: 'error', text: e.message });
           },
         },
       );
@@ -182,10 +182,10 @@ export function ProductsPage() {
       onSuccess: () => {
         setDeleteTarget(null);
         if (selectedId === target.id) setSelectedId(null);
-        setToast({ kind: 'success', text: `「${target.name}」 제품을 삭제했습니다` });
+        showToast({ kind: 'success', text: `「${target.name}」 제품을 삭제했습니다` });
       },
       onError: (e) => {
-        setToast({ kind: 'error', text: e.message });
+        showToast({ kind: 'error', text: e.message });
       },
     });
   };
@@ -415,8 +415,6 @@ export function ProductsPage() {
         onConfirm={confirmDelete}
         busy={deleteMut.isPending}
       />
-
-      {toast && <Toast {...toast} onClose={() => setToast(null)} />}
     </div>
   );
 }
