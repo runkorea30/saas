@@ -10,7 +10,9 @@ export type CompanyStatus = 'trial' | 'active' | 'suspended';
 
 export type SubscriptionStatus = 'active' | 'past_due' | 'canceled';
 
-export type OrderStatus = 'draft' | 'confirmed' | 'shipped' | 'done';
+// 🔴 Phase 2: 'canceled' 추가. DB check constraint도 동시 갱신됨
+// (migration: phase2_orders_status_canceled_and_dev_anon_select).
+export type OrderStatus = 'draft' | 'confirmed' | 'shipped' | 'done' | 'canceled';
 
 export type OrderSource = 'manual' | 'portal' | 'ai';
 

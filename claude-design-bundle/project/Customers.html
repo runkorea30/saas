@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>거래처 — MochiCraft</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..600&family=Inter+Tight:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" rel="stylesheet">
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<link rel="stylesheet" href="src/tokens.css">
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/*EDITMODE-BEGIN*/var TWEAKS = {"theme":"light","brand":"burgundy","density":"medium","grain":true}/*EDITMODE-END*/;
+</script>
+
+<script type="text/babel" data-presets="react" src="src/icons.jsx"></script>
+<script type="text/babel" data-presets="react" src="src/data.jsx"></script>
+<script type="text/babel" data-presets="react" src="src/shell.jsx"></script>
+<script type="text/babel" data-presets="react" src="src/topnav.jsx"></script>
+<script type="text/babel" data-presets="react" src="src/tweaks.jsx"></script>
+<script type="text/babel" data-presets="react" src="src/components.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState: useStateX, useEffect: useEffectX } = React;
+
+const BRAND_MAP_X = {
+  burgundy: { brand: "#6B1F2A", deep: "#541620", ink: "#3B0E15", wash: "#F3E4DE", wash2: "#EAD1C8",
+              dark: { brand: "#C47A80", deep: "#B15F66", ink: "#E8C1C3", wash: "#3A1F23", wash2: "#4A2329" } },
+  tan:      { brand: "#A0633A", deep: "#7C4A28", ink: "#3A2416", wash: "#F1E3D1", wash2: "#E4CBA8",
+              dark: { brand: "#D19A6E", deep: "#B27D50", ink: "#F1E3D1", wash: "#3A2A1D", wash2: "#4A3828" } },
+  oxblood:  { brand: "#8B2C2A", deep: "#6D1E1C", ink: "#3B0E0D", wash: "#F1D8D3", wash2: "#E5B8B0",
+              dark: { brand: "#D08A86", deep: "#B86C68", ink: "#F1D8D3", wash: "#3B1F1C", wash2: "#4E2822" } },
+  espresso: { brand: "#3E2723", deep: "#261410", ink: "#140907", wash: "#D9CCC2", wash2: "#C1B0A3",
+              dark: { brand: "#B89A8A", deep: "#97796A", ink: "#E8DBD0", wash: "#2A201C", wash2: "#3A2E27" } },
+  olive:    { brand: "#5A6B3A", deep: "#434F28", ink: "#1F2610", wash: "#E3E7D1", wash2: "#C9D1A8",
+              dark: { brand: "#A8B880", deep: "#8C9C66", ink: "#E3E7D1", wash: "#232A19", wash2: "#333C24" } },
+  navy:     { brand: "#2A3E5A", deep: "#1C2C45", ink: "#0B1322", wash: "#D7DFEC", wash2: "#B4C1D6",
+              dark: { brand: "#8DA4C5", deep: "#6E88B0", ink: "#D7DFEC", wash: "#1A2233", wash2: "#25324A" } },
+};
+function applyBrandX(id, theme) {
+  const b = BRAND_MAP_X[id] || BRAND_MAP_X.burgundy;
+  const r = document.documentElement;
+  const s = (theme === "dark" || theme === "grey") ? b.dark : b;
+  r.style.setProperty("--brand", s.brand);
+  r.style.setProperty("--brand-deep", s.deep || s.brand);
+  r.style.setProperty("--brand-ink", s.ink);
+  r.style.setProperty("--brand-wash", s.wash);
+  r.style.setProperty("--brand-wash-2", s.wash2);
+}
+
+function CustomersApp() {
+  const [theme, setTheme] = useStateX(TWEAKS.theme || "light");
+  const [tweaks, setTweaks] = useStateX(TWEAKS);
+
+  useEffectX(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    applyBrandX(tweaks.brand, theme);
+  }, [theme, tweaks.brand]);
+  useEffectX(() => {
+    document.body.style.backgroundImage = tweaks.grain ? "" : "none";
+  }, [tweaks.grain]);
+  useEffectX(() => { if (tweaks.theme !== theme) setTheme(tweaks.theme); }, [tweaks.theme]);
+
+  const toggleTheme = () => {
+    const cycle = { light: "grey", grey: "dark", dark: "light" };
+    const next = cycle[theme] || "light";
+    setTheme(next); setTweaks(s => ({ ...s, theme: next }));
+    window.parent.postMessage({ type: "__edit_mode_set_keys", edits: { theme: next } }, "*");
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }} data-screen-label="03 Customers">
+      <TopNav theme={theme} onToggleTheme={toggleTheme} active="sales"/>
+      <main style={{ flex: 1, padding: "24px 32px 40px", maxWidth: 1720, width: "100%", margin: "0 auto" }}>
+        <PageHeader
+          crumbs={["판매", "거래처"]}
+          title="거래처"
+          summary={[
+            { label: "총 거래처", value: "10곳" },
+            { label: "활성", value: "9", tone: "success" },
+            { label: "미수금 발생", value: "7곳", tone: "danger" },
+          ]}
+          actions={<>
+            <button className="btn" style={{ height: 32, fontSize: 12.5 }}><I.download size={13}/> 엑셀 내보내기</button>
+            <button className="btn primary" style={{ height: 32, fontSize: 12.5 }}><I.plus size={13}/> 거래처 추가</button>
+          </>}
+        />
+        <EmptyState
+          icon="users"
+          title="거래처 화면은 준비 중입니다"
+          body="다음 라운드에서 등급 필터 · 포털 발급 · Drawer 상세 · 거래 이력 타임라인을 포함해 구현합니다. 지금은 상단 내비게이션만 라이브 상태입니다."
+          primary={<>+ 거래처 추가</>}
+          secondary={<>엑셀 일괄 업로드</>}
+        />
+      </main>
+      <TweaksPanel state={tweaks} setState={setTweaks}/>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("app")).render(<CustomersApp/>);
+</script>
+</body>
+</html>

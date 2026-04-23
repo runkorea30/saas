@@ -50,6 +50,7 @@ supabase/.temp/
 # Tooling (세션/플러그인 로컬 상태 — 레포에 넣지 않음)
 .bkit/
 .claude/
+.playwright-mcp/
 
 # TypeScript
 *.tsbuildinfo
