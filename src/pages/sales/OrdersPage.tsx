@@ -7,10 +7,10 @@
  * 🔴 CLAUDE.md §2: 계산 로직은 utils/calculations (여기서는 직접 호출 X, Detail 내부에서 calcSupplyAmount 사용).
  * 🔴 CLAUDE.md §5: 서버 조회는 useOrders(TanStack + fetchAllRows). 기간만 서버, 나머지는 useMemo.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Download, Plus } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
+import { useResizableSplit } from '@/hooks/useResizableSplit';
 import { useOrders } from '@/hooks/queries/useOrders';
 import { OrderFilterBar } from '@/components/feature/orders/OrderFilterBar';
 import { OrderListTable } from '@/components/feature/orders/OrderListTable';
@@ -21,18 +21,6 @@ import type { OrderStatus } from '@/types/common';
 import type { Order, PeriodKey, SourceFilter } from '@/types/orders';
 
 const PER_PAGE = 14;
-const SPLIT_KEY = 'mc.orders.split';
-
-function loadSplit(): number {
-  try {
-    const s = localStorage.getItem(SPLIT_KEY);
-    if (!s) return 55;
-    const n = parseFloat(s);
-    return Number.isFinite(n) ? n : 55;
-  } catch {
-    return 55;
-  }
-}
 
 /** 연월일 yyyy-mm-dd → ISO 문자열(Asia/Seoul KST 가정 단순화). */
 function toIso(d: Date): string {
@@ -58,37 +46,12 @@ export function OrdersPage() {
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [page, setPage] = useState(1);
 
-  // ───── 스플릿 드래그 ─────
-  const splitRef = useRef<HTMLDivElement>(null);
-  const [splitPct, setSplitPct] = useState<number>(loadSplit);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(SPLIT_KEY, String(splitPct));
-    } catch {
-      /* noop */
-    }
-  }, [splitPct]);
-
-  const startSplitDrag = (e: ReactMouseEvent) => {
-    e.preventDefault();
-    if (!splitRef.current) return;
-    const rect = splitRef.current.getBoundingClientRect();
-    const onMove = (ev: MouseEvent) => {
-      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
-      setSplitPct(Math.max(30, Math.min(75, pct)));
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  };
+  // ───── 스플릿 (공용 훅) ─────
+  const {
+    leftPercent,
+    onDragStart: startSplitDrag,
+    containerRef: splitRef,
+  } = useResizableSplit({ pageKey: 'orders', defaultLeftPercent: 55 });
 
   // ───── 기간 계산 ─────
   const [rangeStart, rangeEnd] = useMemo(() => {
@@ -304,7 +267,7 @@ export function OrdersPage() {
           ref={splitRef}
           style={{
             display: 'grid',
-            gridTemplateColumns: `${splitPct}% 6px minmax(0, 1fr)`,
+            gridTemplateColumns: `minmax(0, ${leftPercent}%) 6px minmax(0, 1fr)`,
             alignItems: 'start',
             gap: 0,
           }}

@@ -92,6 +92,46 @@ Orders/Customers 페이지 공통:
 - 기존 `:hover` 셀렉터 전부 `:not(:disabled):hover` 로 수정 → disabled 상태에선 hover 색 변화 없음
 - **적용 범위**: 모든 페이지의 `<button className="btn-base ..." disabled>` 에 자동 적용 (인라인 스타일 불필요)
 
+### `src/hooks/useResizableSplit.ts`
+좌우 스플릿 폭 리사이저 공용 훅.
+- **시그니처**: `useResizableSplit({ pageKey: string, defaultLeftPercent?: number })`
+- **반환**: `{ leftPercent, onDragStart, containerRef }`
+- **저장 키**: `mc.${pageKey}.split` (숫자 퍼센트)
+- **범위**: 25~75% 강제 clamp. 저장값이 범위 밖이면 defaultLeftPercent 로 복원.
+- **사용처 (Phase C 완료)**:
+  - `ProductsPage` pageKey='products', default 58
+  - `OrdersPage` pageKey='orders', default 55
+  - `CustomersPage` pageKey='customers', default 58
+- 기존 `mc.{orders|customers|products}.split` 저장값은 형식 동일 → 마이그레이션 불필요.
+
+### `src/hooks/useResizableColumns.ts`
+테이블 컬럼 폭 리사이저 공용 훅.
+- **시그니처**: `useResizableColumns({ pageKey, columns: { key, defaultWidth, minWidth? }[] })`
+- **반환**: `{ widths: Record<key, px>, draggingKey: string|null, onResizeStart: (key) => (e) => void, resetColumn: (key) => void, reset: () => void }`
+- **저장 키**: `mc.${pageKey}.columns` (JSON {key: width})
+- **minWidth 기본값**: 60px. 이하로 못 줄어듦.
+- **신규 컬럼 하위 호환**: 저장값에 없는 key 는 defaultWidth 적용.
+- **사용처 (Phase C 완료)**:
+  - `ProductListTable` 7컬럼 (code 140 / name 280 / category 90 / sell_price 100 / supply_price 100 / unit_price_usd 90 / status 80)
+  - `OrderListTable` 5컬럼 (order_date 120 / customer_name 220 / quantity 90 / total_amount 120 / status 90) — status 컬럼 분리, RET 플래그는 거래처 컬럼에 인라인
+  - `CustomerListTable` 8컬럼 (grade 44 / customer_name 260 / contact 150 / settlement 80 / total_sales 130 / balance 130 / last_order 110 / status 60)
+- **체크박스 열**: Products 40px / Orders·Customers 32px 고정 (리사이저 없음).
+- **구 저장 키 `mc.orders.cols`** — OrderListTable 구버전(3개 컬럼)에서 사용. 새 키 `mc.orders.columns` 와 공존하되 읽지 않음 (고아 상태). 수동 정리 불필요.
+
+### `src/components/common/ResizeHandle.tsx`  🆕
+컬럼 헤더 우측에 부착하는 공용 드래그 핸들.
+- **히트 영역**: 12px (시각선 양쪽 ~5px 투명 패딩). 헤더 위아래 10px 바깥까지 잡힘.
+- **3단계 시각 피드백**:
+  - idle: 1px hairline `var(--line-strong)` opacity 0.6
+  - hover: 2px `var(--brand)` opacity 1
+  - drag: 3px `var(--brand)` opacity 1 (transition 제거 → 즉각 반응)
+- **더블클릭**: `onReset` 콜백으로 해당 컬럼 기본 폭 복원.
+- **자동 title**: "드래그로 폭 조절 · 더블클릭으로 기본값 복원".
+- **호스트 요구사항**: 부모 셀에 `position: relative`.
+
+### 잘린 텍스트 자동 tooltip (전 테이블 공통)
+`overflow: hidden + text-overflow: ellipsis` 셀 전부에 `title={value}` 속성 부착 — 호버 시 브라우저 기본 tooltip 으로 전체 텍스트 확인 가능.
+
 ### `src/utils/calculations.ts` 확장 (이번 세션)
 신규 구현:
 - `calcMonthlySales(companyId, year, month)`

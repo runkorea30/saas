@@ -1,9 +1,13 @@
 /**
- * Orders 좌측 마스터 리스트. 컬럼 너비 드래그 가능 + localStorage 영속.
- * 행 선택(단일) + 체크박스(다중) 분리 — 클릭=선택, 체크박스=일괄 대상.
+ * Orders 좌측 마스터 리스트.
+ *
+ * - 컬럼 5개(주문일/거래처/수량/총액/상태) 전부 드래그 리사이즈.
+ *   pageKey='orders' → `mc.orders.columns` localStorage 저장.
+ * - 공용 `useResizableColumns` + `ResizeHandle` 사용 (hairline → hover → drag).
+ * - 체크박스 열은 32px 고정(리사이저 없음).
+ * - 행 선택(단일) + 체크박스(다중) 분리 — 클릭=선택, 체크박스=일괄.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import { useMemo } from 'react';
 import {
   Check,
   EmptyState,
@@ -11,26 +15,31 @@ import {
   StatusBadge,
   fmtDate,
 } from './primitives';
+import { ResizeHandle } from '@/components/common/ResizeHandle';
+import {
+  useResizableColumns,
+  type ColumnDef,
+} from '@/hooks/useResizableColumns';
 import type { Order } from '@/types/orders';
 
-interface ColumnWidths {
-  date: number;
-  qty: number;
-  total: number;
+type Align = 'left' | 'right' | 'center';
+
+interface OrderColumnDef extends ColumnDef {
+  label: string;
+  align: Align;
 }
 
-const DEFAULT_COLS: ColumnWidths = { date: 130, qty: 60, total: 120 };
-const COLS_KEY = 'mc.orders.cols';
+const CHECKBOX_COL_PX = 32;
+const ROW_GAP_PX = 10;
+const ROW_PADDING_X_PX = 14;
 
-function loadCols(): ColumnWidths {
-  try {
-    const s = localStorage.getItem(COLS_KEY);
-    if (!s) return DEFAULT_COLS;
-    return { ...DEFAULT_COLS, ...JSON.parse(s) };
-  } catch {
-    return DEFAULT_COLS;
-  }
-}
+const COLUMN_DEFS: ReadonlyArray<OrderColumnDef> = [
+  { key: 'order_date',    defaultWidth: 120, minWidth: 100, label: '주문일', align: 'left' },
+  { key: 'customer_name', defaultWidth: 220, minWidth: 140, label: '거래처', align: 'left' },
+  { key: 'quantity',      defaultWidth: 90,  minWidth: 70,  label: '수량',   align: 'right' },
+  { key: 'total_amount',  defaultWidth: 120, minWidth: 100, label: '총액',   align: 'right' },
+  { key: 'status',        defaultWidth: 90,  minWidth: 70,  label: '상태',   align: 'center' },
+];
 
 export interface OrderListTableProps {
   orders: Order[];
@@ -96,41 +105,14 @@ export function OrderListTable(props: OrderListTableProps) {
     onResetFilters,
   } = props;
 
-  const [cols, setCols] = useState<ColumnWidths>(loadCols);
-  const hdrRef = useRef<HTMLDivElement>(null);
+  const { widths, draggingKey, onResizeStart, resetColumn } = useResizableColumns({
+    pageKey: 'orders',
+    columns: COLUMN_DEFS,
+  });
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(COLS_KEY, JSON.stringify(cols));
-    } catch {
-      /* noop */
-    }
-  }, [cols]);
-
-  const startColDrag =
-    (key: keyof ColumnWidths, min: number, max: number) =>
-    (e: ReactMouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const startX = e.clientX;
-      const startW = cols[key];
-      const onMove = (ev: MouseEvent) => {
-        const next = Math.max(min, Math.min(max, startW + (ev.clientX - startX)));
-        setCols((c) => ({ ...c, [key]: next }));
-      };
-      const onUp = () => {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-      };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-    };
-
-  const gridCols = `32px ${cols.date}px minmax(0, 1fr) ${cols.qty}px ${cols.total}px`;
+  const gridTemplate = `${CHECKBOX_COL_PX}px ${COLUMN_DEFS.map(
+    (c) => `${widths[c.key]}px`,
+  ).join(' ')}`;
 
   const rangeText = useMemo(() => {
     if (totalFiltered === 0) return '0건';
@@ -144,127 +126,150 @@ export function OrderListTable(props: OrderListTableProps) {
       className="card-surface"
       style={{ padding: 0, overflow: 'hidden', minWidth: 0 }}
     >
-      {/* Header row */}
-      <div
-        ref={hdrRef}
-        style={{
-          display: 'grid',
-          gridTemplateColumns: gridCols,
-          gap: 10,
-          padding: '10px 14px',
-          background: 'var(--surface-2)',
-          borderBottom: '1px solid var(--line)',
-          fontSize: 10.5,
-          fontWeight: 500,
-          color: 'var(--ink-3)',
-          textTransform: 'uppercase',
-          letterSpacing: '0.08em',
-          fontFamily: 'var(--font-num)',
-          alignItems: 'center',
-        }}
-      >
-        <Check
-          on={allPageChecked}
-          indet={!allPageChecked && somePageChecked}
-          onChange={onTogglePageChecked}
-        />
-        <div style={{ position: 'relative' }}>
-          주문일
-          <ColHandle onMouseDown={startColDrag('date', 90, 220)} />
+      <div style={{ overflowX: 'auto' }}>
+        {/* Header */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: gridTemplate,
+            gap: ROW_GAP_PX,
+            padding: `10px ${ROW_PADDING_X_PX}px`,
+            background: 'var(--surface-2)',
+            borderBottom: '1px solid var(--line)',
+            fontSize: 10.5,
+            fontWeight: 500,
+            color: 'var(--ink-3)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+            fontFamily: 'var(--font-num)',
+            alignItems: 'center',
+          }}
+        >
+          <Check
+            on={allPageChecked}
+            indet={!allPageChecked && somePageChecked}
+            onChange={onTogglePageChecked}
+          />
+          {COLUMN_DEFS.map((col) => (
+            <HeaderCell
+              key={col.key}
+              label={col.label}
+              align={col.align}
+              onResizeStart={onResizeStart(col.key)}
+              isDragging={draggingKey === col.key}
+              onReset={() => resetColumn(col.key)}
+            />
+          ))}
         </div>
-        <div>거래처</div>
-        <div style={{ textAlign: 'right', position: 'relative' }}>
-          <ColHandle onMouseDown={startColDrag('qty', 48, 140)} side="left" />
-          수량
-          <ColHandle onMouseDown={startColDrag('qty', 48, 140)} />
-        </div>
-        <div style={{ textAlign: 'right', position: 'relative' }}>
-          <ColHandle onMouseDown={startColDrag('total', 80, 220)} side="left" />
-          총액
-        </div>
-      </div>
 
-      {/* Body rows */}
-      {isLoading ? (
-        <div style={{ padding: 44, textAlign: 'center', color: 'var(--ink-3)', fontSize: 13 }}>
-          주문 내역 불러오는 중…
-        </div>
-      ) : orders.length === 0 ? (
-        <EmptyState
-          title="조건에 맞는 주문이 없어요"
-          body="기간을 넓히거나 필터를 초기화해 보세요."
-          secondary="필터 초기화"
-          onSecondary={onResetFilters}
-        />
-      ) : (
-        orders.map((o) => {
-          const d = new Date(o.order_date);
-          const sel = o.id === selectedId;
-          const isChecked = !!checked[o.id];
-          const totalQty = o.items.reduce((s, it) => s + Math.abs(it.quantity), 0);
-          const hasReturn = o.items.some((it) => it.is_return);
-          return (
-            <div
-              key={o.id}
-              onClick={() => onSelect(o.id)}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: gridCols,
-                gap: 10,
-                padding: '11px 14px',
-                borderBottom: '1px solid var(--line)',
-                borderLeft: sel ? '3px solid var(--brand)' : '3px solid transparent',
-                paddingLeft: sel ? 11 : 14,
-                background: sel
-                  ? 'var(--brand-wash)'
-                  : isChecked
-                    ? 'var(--surface-2)'
-                    : 'transparent',
-                cursor: 'pointer',
-                alignItems: 'center',
-                transition: 'background .12s',
-              }}
-              onMouseEnter={(e) => {
-                if (!sel) e.currentTarget.style.background = 'var(--surface-2)';
-              }}
-              onMouseLeave={(e) => {
-                if (!sel)
-                  e.currentTarget.style.background = isChecked
-                    ? 'var(--surface-2)'
-                    : 'transparent';
-              }}
-            >
-              <div onClick={(e) => e.stopPropagation()}>
-                <Check on={isChecked} onChange={() => onToggleChecked(o.id)} />
-              </div>
-
+        {/* Body */}
+        {isLoading ? (
+          <div style={{ padding: 44, textAlign: 'center', color: 'var(--ink-3)', fontSize: 13 }}>
+            주문 내역 불러오는 중…
+          </div>
+        ) : orders.length === 0 ? (
+          <EmptyState
+            title="조건에 맞는 주문이 없어요"
+            body="기간을 넓히거나 필터를 초기화해 보세요."
+            secondary="필터 초기화"
+            onSecondary={onResetFilters}
+          />
+        ) : (
+          orders.map((o) => {
+            const d = new Date(o.order_date);
+            const sel = o.id === selectedId;
+            const isChecked = !!checked[o.id];
+            const totalQty = o.items.reduce(
+              (s, it) => s + Math.abs(it.quantity),
+              0,
+            );
+            const hasReturn = o.items.some((it) => it.is_return);
+            const customerName = o.customer?.name ?? '—';
+            return (
               <div
+                key={o.id}
+                onClick={() => onSelect(o.id)}
                 style={{
-                  fontFamily: 'var(--font-num)',
-                  fontSize: 11.5,
-                  color: 'var(--ink-2)',
-                  lineHeight: 1.35,
-                  minWidth: 0,
+                  display: 'grid',
+                  gridTemplateColumns: gridTemplate,
+                  gap: ROW_GAP_PX,
+                  padding: `11px ${ROW_PADDING_X_PX}px`,
+                  borderBottom: '1px solid var(--line)',
+                  borderLeft: sel
+                    ? '3px solid var(--brand)'
+                    : '3px solid transparent',
+                  paddingLeft: sel ? 11 : 14,
+                  background: sel
+                    ? 'var(--brand-wash)'
+                    : isChecked
+                      ? 'var(--surface-2)'
+                      : 'transparent',
+                  cursor: 'pointer',
+                  alignItems: 'center',
+                  transition: 'background .12s',
+                }}
+                onMouseEnter={(e) => {
+                  if (!sel) e.currentTarget.style.background = 'var(--surface-2)';
+                }}
+                onMouseLeave={(e) => {
+                  if (!sel)
+                    e.currentTarget.style.background = isChecked
+                      ? 'var(--surface-2)'
+                      : 'transparent';
                 }}
               >
-                <div style={{ color: 'var(--ink)', fontWeight: 500 }}>{fmtDate(d)}</div>
+                <div onClick={(e) => e.stopPropagation()}>
+                  <Check on={isChecked} onChange={() => onToggleChecked(o.id)} />
+                </div>
+
+                {/* 주문일 */}
                 <div
                   style={{
-                    color: 'var(--ink-3)',
-                    fontSize: 10.5,
-                    whiteSpace: 'nowrap',
+                    fontFamily: 'var(--font-num)',
+                    fontSize: 11.5,
+                    color: 'var(--ink-2)',
+                    lineHeight: 1.35,
+                    minWidth: 0,
                     overflow: 'hidden',
-                    textOverflow: 'ellipsis',
                   }}
                 >
-                  {String(d.getHours()).padStart(2, '0')}:
-                  {String(d.getMinutes()).padStart(2, '0')} · {o.id.slice(0, 6)}
+                  <div
+                    style={{
+                      color: 'var(--ink)',
+                      fontWeight: 500,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                    title={fmtDate(d)}
+                  >
+                    {fmtDate(d)}
+                  </div>
+                  <div
+                    style={{
+                      color: 'var(--ink-3)',
+                      fontSize: 10.5,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                    title={`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} · ${o.id.slice(0, 6)}`}
+                  >
+                    {String(d.getHours()).padStart(2, '0')}:
+                    {String(d.getMinutes()).padStart(2, '0')} · {o.id.slice(0, 6)}
+                  </div>
                 </div>
-              </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                <GradeBadge grade={o.customer?.grade ?? null} size="sm" />
-                <div style={{ minWidth: 0, flex: 1 }}>
+                {/* 거래처 */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    minWidth: 0,
+                  }}
+                >
+                  <GradeBadge grade={o.customer?.grade ?? null} size="sm" />
                   <div
                     style={{
                       fontSize: 13,
@@ -273,69 +278,99 @@ export function OrderListTable(props: OrderListTableProps) {
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
+                      flex: 1,
+                      minWidth: 0,
                     }}
+                    title={customerName}
                   >
-                    {o.customer?.name ?? '—'}
+                    {customerName}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 1 }}>
-                    <StatusBadge status={o.status} />
-                    {hasReturn && (
-                      <span
-                        style={{
-                          fontSize: 9.5,
-                          color: 'var(--danger)',
-                          fontWeight: 500,
-                          fontFamily: 'var(--font-num)',
-                          letterSpacing: '0.04em',
-                        }}
-                      >
-                        RET
-                      </span>
-                    )}
-                  </div>
+                  {hasReturn && (
+                    <span
+                      title="반품 포함"
+                      style={{
+                        fontSize: 9.5,
+                        color: 'var(--danger)',
+                        fontWeight: 500,
+                        fontFamily: 'var(--font-num)',
+                        letterSpacing: '0.04em',
+                        flexShrink: 0,
+                      }}
+                    >
+                      RET
+                    </span>
+                  )}
                 </div>
-              </div>
 
-              <div
-                style={{
-                  textAlign: 'right',
-                  fontFamily: 'var(--font-num)',
-                  fontSize: 12.5,
-                  color: 'var(--ink-2)',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {totalQty}
-                <span style={{ color: 'var(--ink-4)', fontSize: 10.5, marginLeft: 2 }}>ea</span>
-              </div>
-
-              <div
-                style={{
-                  textAlign: 'right',
-                  fontFamily: 'var(--font-num)',
-                  whiteSpace: 'nowrap',
-                }}
-              >
+                {/* 수량 */}
                 <div
                   style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: 'var(--ink)',
-                    fontVariantNumeric: 'tabular-nums',
+                    textAlign: 'right',
+                    fontFamily: 'var(--font-num)',
+                    fontSize: 12.5,
+                    color: 'var(--ink-2)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                  title={`${totalQty} ea`}
+                >
+                  {totalQty}
+                  <span
+                    style={{ color: 'var(--ink-4)', fontSize: 10.5, marginLeft: 2 }}
+                  >
+                    ea
+                  </span>
+                </div>
+
+                {/* 총액 */}
+                <div
+                  style={{
+                    textAlign: 'right',
+                    fontFamily: 'var(--font-num)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                  title={`₩${o.total_amount.toLocaleString('ko-KR')}`}
+                >
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: 'var(--ink)',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {o.total_amount.toLocaleString('ko-KR')}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      color: 'var(--ink-4)',
+                      letterSpacing: '0.04em',
+                    }}
+                  >
+                    KRW
+                  </div>
+                </div>
+
+                {/* 상태 */}
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    minWidth: 0,
                   }}
                 >
-                  {o.total_amount.toLocaleString('ko-KR')}
-                </div>
-                <div
-                  style={{ fontSize: 10, color: 'var(--ink-4)', letterSpacing: '0.04em' }}
-                >
-                  KRW
+                  <StatusBadge status={o.status} />
                 </div>
               </div>
-            </div>
-          );
-        })
-      )}
+            );
+          })
+        )}
+      </div>
 
       {/* Pagination */}
       {totalFiltered > 0 && totalPages > 1 && (
@@ -408,40 +443,39 @@ export function OrderListTable(props: OrderListTableProps) {
   );
 }
 
-function ColHandle({
-  onMouseDown,
-  side = 'right',
+// ───────────────────────────────────────────────────────────
+
+function HeaderCell({
+  label,
+  align,
+  onResizeStart,
+  isDragging,
+  onReset,
 }: {
-  onMouseDown: (e: ReactMouseEvent) => void;
-  side?: 'left' | 'right';
+  label: string;
+  align: Align;
+  onResizeStart: (e: React.MouseEvent) => void;
+  isDragging: boolean;
+  onReset: () => void;
 }) {
-  const [hover, setHover] = useState(false);
   return (
     <div
-      onMouseDown={onMouseDown}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
       style={{
-        position: 'absolute',
-        [side]: -8,
-        top: -10,
-        bottom: -10,
-        width: 14,
-        cursor: 'col-resize',
-        zIndex: 2,
+        position: 'relative',
+        textAlign: align,
+        minWidth: 0,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        paddingRight: 8,
       }}
+      title={label}
     >
-      <div
-        style={{
-          position: 'absolute',
-          left: '50%',
-          top: 0,
-          bottom: 0,
-          width: hover ? 2 : 1,
-          background: hover ? 'var(--brand)' : 'transparent',
-          transform: 'translateX(-50%)',
-          transition: 'background .12s, width .12s',
-        }}
+      {label}
+      <ResizeHandle
+        onResizeStart={onResizeStart}
+        isDragging={isDragging}
+        onReset={onReset}
       />
     </div>
   );

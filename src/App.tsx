@@ -15,6 +15,7 @@ import { PlaceholderPage } from '@/components/common/PlaceholderPage';
 import { HomePage } from '@/pages/HomePage';
 import { OrdersPage } from '@/pages/sales/OrdersPage';
 import { CustomersPage } from '@/pages/settings/CustomersPage';
+import { ProductsPage } from '@/pages/inventory/ProductsPage';
 
 function App() {
   return (
@@ -34,7 +35,7 @@ function App() {
           <Route path="stock" element={<PlaceholderPage />} />
           <Route path="purchase" element={<PlaceholderPage />} />
           <Route path="purchase-orders" element={<PlaceholderPage />} />
-          <Route path="products" element={<PlaceholderPage />} />
+          <Route path="products" element={<ProductsPage />} />
         </Route>
 
         <Route path="finance">

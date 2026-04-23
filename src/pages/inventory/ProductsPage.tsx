@@ -1,39 +1,33 @@
 /**
- * 거래처 페이지 — 설정 > 거래처.
+ * 제품리스트 페이지 — 재고매입 > 제품리스트.
  *
  * 구조: PageHeader · FilterBar · SplitLayout(List | divider | Detail)
  *
  * 🔴 CLAUDE.md §1: company_id는 useCompany() 훅에서만.
- * 🔴 CLAUDE.md §2: 집계는 utils/calculations + 훅 경유.
- * 🔴 CLAUDE.md §5: 서버 조회는 useCustomers/useCustomerAggregates/useCustomerOrders.
+ * 🔴 CLAUDE.md §5: 서버 조회는 useProducts 경유 (fetchAllRows 내부).
+ * 🟠 Round 1: 조회만. 제품 추가/수정/삭제는 Round 2.
+ *    재고 섹션 숨김(Q6). calcCurrentStock 호출 금지.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Download, Plus } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useResizableSplit } from '@/hooks/useResizableSplit';
+import { useProducts } from '@/hooks/queries/useProducts';
 import {
-  useCustomers,
-  useCustomerAggregates,
-  useCustomerOrders,
-} from '@/hooks/queries/useCustomers';
-import {
-  CustomerFilterBar,
-  type ActiveFilter,
-} from '@/components/feature/customers/CustomerFilterBar';
-import { CustomerListTable } from '@/components/feature/customers/CustomerListTable';
-import { CustomerDetailPane } from '@/components/feature/customers/CustomerDetailPane';
+  ProductFilterBar,
+  type ProductActiveFilter,
+} from '@/components/feature/products/ProductFilterBar';
+import { ProductListTable } from '@/components/feature/products/ProductListTable';
+import { ProductDetailPane } from '@/components/feature/products/ProductDetailPane';
 
-export function CustomersPage() {
+export function ProductsPage() {
   const { companyId, isLoading: companyLoading } = useCompany();
-
-  const customersQuery = useCustomers(companyId);
-  const aggregatesQuery = useCustomerAggregates(companyId);
+  const productsQuery = useProducts(companyId);
 
   // ───── 필터 상태 ─────
   const [query, setQuery] = useState('');
-  const [gradeSel, setGradeSel] = useState<string[]>([]);
-  const [activeFilter, setActiveFilter] = useState<ActiveFilter>('all');
-  const [receivableOnly, setReceivableOnly] = useState(false);
+  const [categorySel, setCategorySel] = useState<string[]>([]);
+  const [activeFilter, setActiveFilter] = useState<ProductActiveFilter>('all');
 
   // ───── 선택/체크 상태 ─────
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -44,60 +38,52 @@ export function CustomersPage() {
     leftPercent,
     onDragStart: startSplitDrag,
     containerRef: splitRef,
-  } = useResizableSplit({ pageKey: 'customers', defaultLeftPercent: 58 });
+  } = useResizableSplit({ pageKey: 'products', defaultLeftPercent: 58 });
 
   // ───── 필터링 ─────
-  const customers = customersQuery.data ?? [];
-  const aggregates = aggregatesQuery.data;
+  const products = productsQuery.data ?? [];
+
+  // 현재 로드된 제품에서 등장한 카테고리만 option 으로.
+  const categoryOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of products) set.add(p.category);
+    return Array.from(set).sort();
+  }, [products]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return customers.filter((c) => {
-      if (activeFilter === 'active' && !c.is_active) return false;
-      if (activeFilter === 'inactive' && c.is_active) return false;
-      if (gradeSel.length && !(c.grade && gradeSel.includes(c.grade))) return false;
-      if (receivableOnly) {
-        const bal = aggregates?.get(c.id)?.balance ?? 0;
-        if (bal <= 0) return false;
-      }
+    return products.filter((p) => {
+      if (activeFilter === 'active' && !p.is_active) return false;
+      if (activeFilter === 'inactive' && p.is_active) return false;
+      if (categorySel.length && !categorySel.includes(p.category)) return false;
       if (q) {
-        const inName = c.name.toLowerCase().includes(q);
-        const inContact =
-          (c.contact1?.toLowerCase().includes(q) ?? false) ||
-          (c.contact2?.toLowerCase().includes(q) ?? false);
-        const inBiz = c.business?.name.toLowerCase().includes(q) ?? false;
-        if (!inName && !inContact && !inBiz) return false;
+        const inCode = p.code.toLowerCase().includes(q);
+        const inName = p.name.toLowerCase().includes(q);
+        if (!inCode && !inName) return false;
       }
       return true;
     });
-  }, [customers, aggregates, activeFilter, gradeSel, receivableOnly, query]);
+  }, [products, activeFilter, categorySel, query]);
 
   // ───── 요약 ─────
   const summary = useMemo(() => {
-    const total = customers.length;
-    const active = customers.filter((c) => c.is_active).length;
-    let withReceivables = 0;
-    if (aggregates) {
-      for (const c of customers) {
-        const bal = aggregates.get(c.id)?.balance ?? 0;
-        if (bal > 0) withReceivables += 1;
-      }
-    }
-    return { total, active, withReceivables };
-  }, [customers, aggregates]);
+    const total = products.length;
+    const active = products.filter((p) => p.is_active).length;
+    const categories = new Set(products.map((p) => p.category)).size;
+    return { total, active, categories };
+  }, [products]);
 
   // ───── 선택 동기화 ─────
   useEffect(() => {
-    if (!selectedId || !filtered.find((c) => c.id === selectedId)) {
+    if (!selectedId || !filtered.find((p) => p.id === selectedId)) {
       setSelectedId(filtered[0]?.id ?? null);
     }
   }, [filtered, selectedId]);
 
-  const selectedCustomer = filtered.find((c) => c.id === selectedId) ?? null;
-  const ordersQuery = useCustomerOrders(companyId, selectedId);
+  const selectedProduct = filtered.find((p) => p.id === selectedId) ?? null;
 
   // ───── 체크박스 전체 ─────
-  const allIds = filtered.map((c) => c.id);
+  const allIds = filtered.map((p) => p.id);
   const allChecked = allIds.length > 0 && allIds.every((id) => checked[id]);
   const someChecked = allIds.some((id) => checked[id]);
   const toggleAll = () => {
@@ -119,13 +105,11 @@ export function CustomersPage() {
 
   const resetFilters = () => {
     setQuery('');
-    setGradeSel([]);
+    setCategorySel([]);
     setActiveFilter('all');
-    setReceivableOnly(false);
   };
 
-  const isLoading =
-    companyLoading || customersQuery.isLoading || aggregatesQuery.isLoading;
+  const isLoading = companyLoading || productsQuery.isLoading;
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -150,7 +134,7 @@ export function CustomersPage() {
               marginBottom: 6,
             }}
           >
-            설정 › 거래처
+            재고매입 › 제품리스트
           </div>
           <div
             style={{
@@ -169,7 +153,7 @@ export function CustomersPage() {
                 color: 'var(--ink)',
               }}
             >
-              거래처
+              제품리스트
             </h1>
             <div
               style={{
@@ -180,16 +164,15 @@ export function CustomersPage() {
                 paddingBottom: 4,
               }}
             >
-              <SummaryItem label="총 거래처" value={`${summary.total}곳`} />
+              <SummaryItem label="총 제품" value={`${summary.total}개`} />
               <SummaryItem
                 label="활성"
                 value={`${summary.active}`}
                 tone="success"
               />
               <SummaryItem
-                label="미수금 발생"
-                value={`${summary.withReceivables}곳`}
-                tone={summary.withReceivables > 0 ? 'danger' : undefined}
+                label="카테고리"
+                value={`${summary.categories}종`}
               />
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -209,27 +192,26 @@ export function CustomersPage() {
                 className="btn-base primary"
                 style={{ height: 32, fontSize: 12.5 }}
               >
-                <Plus size={13} /> 거래처 추가
+                <Plus size={13} /> 제품 추가
               </button>
             </div>
           </div>
         </header>
 
-        <CustomerFilterBar
+        <ProductFilterBar
           query={query}
           onQueryChange={setQuery}
-          gradeSel={gradeSel}
-          onGradeChange={setGradeSel}
+          categorySel={categorySel}
+          onCategoryChange={setCategorySel}
           activeFilter={activeFilter}
           onActiveFilterChange={setActiveFilter}
-          receivableOnly={receivableOnly}
-          onReceivableOnlyChange={setReceivableOnly}
+          categoryOptions={categoryOptions}
           totalFiltered={filtered.length}
-          totalAll={customers.length}
+          totalAll={products.length}
         />
 
-        {/* 에러 배너 (List/Aggregate 중 하나라도 실패 시) */}
-        {(customersQuery.error || aggregatesQuery.error) && (
+        {/* 에러 배너 */}
+        {productsQuery.error && (
           <div
             style={{
               padding: '10px 14px',
@@ -240,8 +222,7 @@ export function CustomersPage() {
               marginBottom: 12,
             }}
           >
-            데이터 일부 로딩 실패:{' '}
-            {(customersQuery.error ?? aggregatesQuery.error)?.message}
+            제품 목록 로딩 실패: {productsQuery.error.message}
           </div>
         )}
 
@@ -254,9 +235,8 @@ export function CustomersPage() {
             gap: 0,
           }}
         >
-          <CustomerListTable
-            customers={filtered}
-            aggregates={aggregates}
+          <ProductListTable
+            products={filtered}
             selectedId={selectedId}
             onSelect={setSelectedId}
             checked={checked}
@@ -312,15 +292,7 @@ export function CustomersPage() {
             />
           </div>
 
-          <CustomerDetailPane
-            customer={selectedCustomer}
-            aggregate={
-              selectedCustomer ? aggregates?.get(selectedCustomer.id) : undefined
-            }
-            orders={ordersQuery.data}
-            ordersLoading={ordersQuery.isLoading}
-            ordersError={ordersQuery.error as Error | null}
-          />
+          <ProductDetailPane product={selectedProduct} />
         </div>
       </main>
     </div>
