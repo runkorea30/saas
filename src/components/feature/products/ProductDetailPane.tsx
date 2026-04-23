@@ -1,16 +1,19 @@
 /**
  * Products Detail Pane.
- * 헤더(상품명+상태) + KPI 3(판매가/공급가/마진율) + 기본 정보.
- * 🟠 Round 1: 재고/판매 섹션 완전 숨김 (Q6). 수정/삭제 버튼도 Round 2에서.
+ * 헤더(상품명+상태) · 액션(편집/삭제) · KPI 3(판매가/공급가/마진율) · 기본 정보.
+ * 🟠 재고/판매 섹션 숨김 (inventory_lots 데이터 부재, Q6).
  */
+import { Pencil, Trash2 } from 'lucide-react';
 import type { Product } from '@/hooks/queries/useProducts';
 import { categoryLabel } from './ProductFilterBar';
 
 interface Props {
   product: Product | null;
+  onEdit?: (product: Product) => void;
+  onDelete?: (product: Product) => void;
 }
 
-export function ProductDetailPane({ product }: Props) {
+export function ProductDetailPane({ product, onEdit, onDelete }: Props) {
   if (!product) {
     return (
       <div
@@ -91,10 +94,48 @@ export function ProductDetailPane({ product }: Props) {
           </span>
         </div>
         <div
-          className="num"
-          style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 6 }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginTop: 6,
+          }}
         >
-          {product.code}
+          <div
+            className="num"
+            style={{ fontSize: 11.5, color: 'var(--ink-3)' }}
+          >
+            {product.code}
+          </div>
+          {(onEdit || onDelete) && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              {onEdit && (
+                <button
+                  type="button"
+                  className="btn-base"
+                  onClick={() => onEdit(product)}
+                  style={{ height: 28, fontSize: 12 }}
+                >
+                  <Pencil size={12} /> 편집
+                </button>
+              )}
+              {onDelete && (
+                <button
+                  type="button"
+                  className="btn-base"
+                  onClick={() => onDelete(product)}
+                  style={{
+                    height: 28,
+                    fontSize: 12,
+                    color: 'var(--danger)',
+                    borderColor: 'var(--danger-wash)',
+                  }}
+                >
+                  <Trash2 size={12} /> 삭제
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

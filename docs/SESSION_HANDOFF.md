@@ -13,9 +13,10 @@
 | Phase 3 | 전역 Shell + 2단 Nav + 라우트 스텁 | ✅ 완료 |
 | Phase 3.5 | Home Dashboard 실구현 | ✅ 완료 (2026-04-24) |
 | Phase 3.6 | Customers 페이지 실구현 | ✅ 완료 (2026-04-24) |
-| Phase 4 | 나머지 11 페이지 + Auth 도입 | 대기 |
+| Phase 3.7 | Products 페이지 — 조회 + CRUD | ✅ 완료 (2026-04-24) |
+| Phase 4 | 나머지 10 페이지 + Auth 도입 | 대기 |
 
-**페이지 진도: 3 / 14 구현 완료**
+**페이지 진도: 4 / 14 구현 완료**
 
 - `/` — 홈 대시보드 (KPI + Today + Chart + Timeline)
 - `/sales/orders` — 주문내역 (필터/목록/상세 split)
@@ -132,6 +133,25 @@ Orders/Customers 페이지 공통:
 ### 잘린 텍스트 자동 tooltip (전 테이블 공통)
 `overflow: hidden + text-overflow: ellipsis` 셀 전부에 `title={value}` 속성 부착 — 호버 시 브라우저 기본 tooltip 으로 전체 텍스트 확인 가능.
 
+### `src/components/ui/Modal.tsx`  🆕 (Phase B)
+공용 모달 — `createPortal` 로 body 에 렌더.
+- **시그니처**: `<Modal open onClose title width? footer?>{children}</Modal>`
+- ESC · backdrop 클릭 · X 버튼으로 닫기. 오픈 시 body scroll 잠금.
+- 오픈 시 자동 포커스, 닫힘 시 원래 활성 요소로 복귀.
+- busy 중 닫기를 막으려면 호출부에서 `onClose={busy ? () => {} : actualClose}`.
+
+### `src/components/ui/ConfirmDialog.tsx`  🆕 (Phase B)
+Modal 위에 빌드된 확인 다이얼로그.
+- **시그니처**: `<ConfirmDialog open onClose title body confirmLabel? cancelLabel? confirmVariant?: 'default'|'danger' onConfirm busy? />`
+- `variant='danger'` 시 확인 버튼 danger 색 — 삭제 플로우 기본값.
+- `busy=true` 시 버튼 disabled + "처리 중…" 레이블.
+
+### `src/components/ui/Toast.tsx`  🆕 (Phase B, 페이지 로컬)
+라이트웨이트 토스트 — Portal 기반, 2.5s 자동 닫힘, 호버 시 타이머 일시정지.
+- **시그니처**: `<Toast kind text duration? onClose />`, `type ToastMsg = { kind: 'success'|'error'|'info', text, duration? }`
+- **현재 사용**: `ProductsPage` 로컬 state `useState<ToastMsg|null>` 로 관리.
+- 🟡 **TODO**: 전역 Toast Provider + `useToast()` 훅으로 승격 (여러 페이지에서 쓸 때).
+
 ### `src/utils/calculations.ts` 확장 (이번 세션)
 신규 구현:
 - `calcMonthlySales(companyId, year, month)`
@@ -159,6 +179,10 @@ Orders/Customers 페이지 공통:
 - `ALTER DEFAULT PRIVILEGES ... TO anon`
 - 시퀀스 `GRANT` to anon
 - `phase2_orders_status_canceled_and_dev_anon_select` 마이그레이션 내 `anon SELECT` 6개
+- **Phase B 추가** (`20260424000000_phase_b_products_dev_anon_write.sql`):
+  - `products_dev_anon_insert` 정책
+  - `products_dev_anon_update` 정책
+  - `GRANT INSERT, UPDATE ON mochicraft_demo.products TO anon`
 
 ### 원복 SQL
 ```sql

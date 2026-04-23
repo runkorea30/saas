@@ -5,9 +5,9 @@
  * 🔴 CLAUDE.md §5: fetchAllRows 경유.
  * 🟠 soft delete: deleted_at IS NULL 필터, 삭제 시 deleted_at = now().
  *
- * Round 1(조회): useProducts 만 구현.
- * Round 2(CRUD): useCreateProduct / useUpdateProduct / useDeleteProduct 는
- *                시그니처만 선언, 호출 시 throw (이번 라운드 호출 경로 없음).
+ * Mutation 에러 처리:
+ * - PostgrestError.code === '23505' (UNIQUE 위반) → "이미 사용 중인 제품코드입니다"
+ * - 그 외는 error.message 전파 → 페이지 toast 로 노출.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { PostgrestError } from '@supabase/supabase-js';
@@ -43,7 +43,10 @@ export interface ProductCreateInput {
   is_active: boolean;
 }
 
-export type ProductUpdateInput = Partial<ProductCreateInput> & { id: string };
+export interface ProductUpdateArgs {
+  id: string;
+  changes: Partial<ProductCreateInput>;
+}
 
 type RangeableQuery<T> = {
   range(
@@ -52,12 +55,24 @@ type RangeableQuery<T> = {
   ): PromiseLike<{ data: T[] | null; error: PostgrestError | null }>;
 };
 
+const PRODUCT_SELECT =
+  'id, code, name, category, sell_price, supply_price, unit_price_usd, unit, is_active, created_at, updated_at';
+
+// ───────────────────────────────────────────────────────────
+// 에러 매핑
+// ───────────────────────────────────────────────────────────
+
+function mapPostgrestError(err: PostgrestError | null): Error | null {
+  if (!err) return null;
+  if (err.code === '23505') {
+    return new Error('이미 사용 중인 제품코드입니다');
+  }
+  return new Error(err.message || '알 수 없는 오류가 발생했습니다');
+}
+
 // ───────────────────────────────────────────────────────────
 // useProducts — 목록 (deleted_at IS NULL, code ASC)
 // ───────────────────────────────────────────────────────────
-
-const PRODUCT_SELECT =
-  'id, code, name, category, sell_price, supply_price, unit_price_usd, unit, is_active, created_at, updated_at';
 
 export function useProducts(companyId: string | null) {
   return useQuery<Product[]>({
@@ -79,44 +94,70 @@ export function useProducts(companyId: string | null) {
 }
 
 // ───────────────────────────────────────────────────────────
-// Mutation 스텁 — Round 2에서 구현
+// Mutations
 // ───────────────────────────────────────────────────────────
 
-/** 🟡 Round 2에서 구현. 현재는 시그니처만 노출. */
-export function useCreateProduct(_companyId: string | null) {
+export function useCreateProduct(companyId: string | null) {
   const qc = useQueryClient();
   return useMutation<Product, Error, ProductCreateInput>({
-    mutationFn: async () => {
-      throw new Error('useCreateProduct: Round 2에서 구현 예정');
+    mutationFn: async (input) => {
+      if (!companyId) throw new Error('회사 정보가 없습니다.');
+      const { data, error } = await supabase
+        .from('products')
+        .insert({ company_id: companyId, ...input })
+        .select(PRODUCT_SELECT)
+        .single();
+      const mapped = mapPostgrestError(error);
+      if (mapped) throw mapped;
+      if (!data) throw new Error('제품 생성 응답이 비어 있습니다');
+      return data as Product;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['products', companyId] });
     },
   });
 }
 
-/** 🟡 Round 2에서 구현. 현재는 시그니처만 노출. */
-export function useUpdateProduct(_companyId: string | null) {
+export function useUpdateProduct(companyId: string | null) {
   const qc = useQueryClient();
-  return useMutation<Product, Error, ProductUpdateInput>({
-    mutationFn: async () => {
-      throw new Error('useUpdateProduct: Round 2에서 구현 예정');
+  return useMutation<Product, Error, ProductUpdateArgs>({
+    mutationFn: async ({ id, changes }) => {
+      if (!companyId) throw new Error('회사 정보가 없습니다.');
+      const { data, error } = await supabase
+        .from('products')
+        .update(changes)
+        .eq('id', id)
+        .eq('company_id', companyId)
+        .is('deleted_at', null)
+        .select(PRODUCT_SELECT)
+        .single();
+      const mapped = mapPostgrestError(error);
+      if (mapped) throw mapped;
+      if (!data) throw new Error('수정 대상 제품을 찾을 수 없습니다');
+      return data as Product;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['products', companyId] });
     },
   });
 }
 
-/** 🟡 Round 2에서 구현 (soft delete). 현재는 시그니처만 노출. */
-export function useDeleteProduct(_companyId: string | null) {
+export function useDeleteProduct(companyId: string | null) {
   const qc = useQueryClient();
   return useMutation<void, Error, string>({
-    mutationFn: async () => {
-      throw new Error('useDeleteProduct: Round 2에서 구현 예정 (soft delete)');
+    mutationFn: async (id) => {
+      if (!companyId) throw new Error('회사 정보가 없습니다.');
+      const { error } = await supabase
+        .from('products')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', id)
+        .eq('company_id', companyId)
+        .is('deleted_at', null);
+      const mapped = mapPostgrestError(error);
+      if (mapped) throw mapped;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['products', companyId] });
     },
   });
 }

@@ -2,27 +2,44 @@
  * 제품리스트 페이지 — 재고매입 > 제품리스트.
  *
  * 구조: PageHeader · FilterBar · SplitLayout(List | divider | Detail)
+ *       + 생성/수정 모달 · 삭제 확인 다이얼로그 · Toast
  *
  * 🔴 CLAUDE.md §1: company_id는 useCompany() 훅에서만.
- * 🔴 CLAUDE.md §5: 서버 조회는 useProducts 경유 (fetchAllRows 내부).
- * 🟠 Round 1: 조회만. 제품 추가/수정/삭제는 Round 2.
- *    재고 섹션 숨김(Q6). calcCurrentStock 호출 금지.
+ * 🔴 CLAUDE.md §5: 서버 조회/변경은 useProducts/useCreate/useUpdate/useDelete 경유.
+ * 🟠 재고 섹션 숨김 (inventory_lots 데이터 부재, Q6). calcCurrentStock 호출 금지.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Download, Plus } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useResizableSplit } from '@/hooks/useResizableSplit';
-import { useProducts } from '@/hooks/queries/useProducts';
+import {
+  useProducts,
+  useCreateProduct,
+  useUpdateProduct,
+  useDeleteProduct,
+  type Product,
+  type ProductCreateInput,
+} from '@/hooks/queries/useProducts';
 import {
   ProductFilterBar,
   type ProductActiveFilter,
 } from '@/components/feature/products/ProductFilterBar';
 import { ProductListTable } from '@/components/feature/products/ProductListTable';
 import { ProductDetailPane } from '@/components/feature/products/ProductDetailPane';
+import { ProductForm } from '@/components/feature/products/ProductForm';
+import { Modal } from '@/components/ui/Modal';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Toast, type ToastMsg } from '@/components/ui/Toast';
+
+/** 편집 대상: 'new' = 신규 생성 모달, Product = 수정 모달, null = 닫힘. */
+type EditTarget = 'new' | Product | null;
 
 export function ProductsPage() {
   const { companyId, isLoading: companyLoading } = useCompany();
   const productsQuery = useProducts(companyId);
+  const createMut = useCreateProduct(companyId);
+  const updateMut = useUpdateProduct(companyId);
+  const deleteMut = useDeleteProduct(companyId);
 
   // ───── 필터 상태 ─────
   const [query, setQuery] = useState('');
@@ -32,6 +49,11 @@ export function ProductsPage() {
   // ───── 선택/체크 상태 ─────
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
+
+  // ───── CRUD 상태 ─────
+  const [editTarget, setEditTarget] = useState<EditTarget>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  const [toast, setToast] = useState<ToastMsg | null>(null);
 
   // ───── 스플릿 (공용 훅) ─────
   const {
@@ -111,6 +133,63 @@ export function ProductsPage() {
 
   const isLoading = companyLoading || productsQuery.isLoading;
 
+  // ───── CRUD 핸들러 ─────
+  const openCreate = () => setEditTarget('new');
+  const openEdit = (p: Product) => setEditTarget(p);
+  const closeEdit = () => {
+    if (createMut.isPending || updateMut.isPending) return;
+    setEditTarget(null);
+  };
+
+  const handleSubmit = (values: ProductCreateInput) => {
+    if (editTarget === 'new') {
+      createMut.mutate(values, {
+        onSuccess: (created) => {
+          setEditTarget(null);
+          setSelectedId(created.id);
+          setToast({ kind: 'success', text: `「${created.name}」 제품을 추가했습니다` });
+        },
+        onError: (e) => {
+          setToast({ kind: 'error', text: e.message });
+        },
+      });
+    } else if (editTarget && typeof editTarget !== 'string') {
+      updateMut.mutate(
+        { id: editTarget.id, changes: values },
+        {
+          onSuccess: (updated) => {
+            setEditTarget(null);
+            setSelectedId(updated.id);
+            setToast({ kind: 'success', text: `「${updated.name}」 제품을 저장했습니다` });
+          },
+          onError: (e) => {
+            setToast({ kind: 'error', text: e.message });
+          },
+        },
+      );
+    }
+  };
+
+  const openDelete = (p: Product) => setDeleteTarget(p);
+  const closeDelete = () => {
+    if (deleteMut.isPending) return;
+    setDeleteTarget(null);
+  };
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    deleteMut.mutate(target.id, {
+      onSuccess: () => {
+        setDeleteTarget(null);
+        if (selectedId === target.id) setSelectedId(null);
+        setToast({ kind: 'success', text: `「${target.name}」 제품을 삭제했습니다` });
+      },
+      onError: (e) => {
+        setToast({ kind: 'error', text: e.message });
+      },
+    });
+  };
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <main
@@ -187,9 +266,8 @@ export function ProductsPage() {
               </button>
               <button
                 type="button"
-                disabled
-                title="다음 라운드에서 지원 예정"
                 className="btn-base primary"
+                onClick={openCreate}
                 style={{ height: 32, fontSize: 12.5 }}
               >
                 <Plus size={13} /> 제품 추가
@@ -292,9 +370,53 @@ export function ProductsPage() {
             />
           </div>
 
-          <ProductDetailPane product={selectedProduct} />
+          <ProductDetailPane
+            product={selectedProduct}
+            onEdit={openEdit}
+            onDelete={openDelete}
+          />
         </div>
       </main>
+
+      {/* 생성/수정 모달 */}
+      <Modal
+        open={editTarget !== null}
+        onClose={closeEdit}
+        title={editTarget === 'new' ? '제품 추가' : '제품 수정'}
+        width={540}
+      >
+        {editTarget !== null && (
+          <ProductForm
+            initial={editTarget === 'new' ? null : editTarget}
+            knownCategories={categoryOptions}
+            onSubmit={handleSubmit}
+            onCancel={closeEdit}
+            busy={createMut.isPending || updateMut.isPending}
+          />
+        )}
+      </Modal>
+
+      {/* 삭제 확인 */}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={closeDelete}
+        title="제품 삭제"
+        body={
+          deleteTarget ? (
+            <>
+              「<strong>{deleteTarget.name}</strong>」 제품을 삭제하시겠습니까?
+              <br />
+              기존 주문에서는 계속 표시됩니다.
+            </>
+          ) : null
+        }
+        confirmLabel="삭제"
+        confirmVariant="danger"
+        onConfirm={confirmDelete}
+        busy={deleteMut.isPending}
+      />
+
+      {toast && <Toast {...toast} onClose={() => setToast(null)} />}
     </div>
   );
 }
