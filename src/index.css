@@ -285,7 +285,7 @@
     cursor: pointer;
     transition: all 0.15s ease;
   }
-  .btn-base:hover {
+  .btn-base:not(:disabled):hover {
     background: var(--surface-2);
     border-color: var(--ink-4);
   }
@@ -294,7 +294,7 @@
     color: #FDFAF4;
     border-color: var(--brand-deep);
   }
-  .btn-base.primary:hover {
+  .btn-base.primary:not(:disabled):hover {
     background: var(--brand-deep);
   }
   .btn-base.ghost {
@@ -302,8 +302,15 @@
     background: transparent;
     color: var(--ink-2);
   }
-  .btn-base.ghost:hover {
+  .btn-base.ghost:not(:disabled):hover {
     background: var(--surface-2);
+  }
+  /* disabled — 🟠 공용 규칙: 모든 btn-base variant 공통으로
+     opacity 0.5 / not-allowed 커서 / hover 색 변화 없음. */
+  .btn-base:disabled,
+  .btn-base[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .ico {

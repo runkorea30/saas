@@ -14,6 +14,7 @@ import { Shell } from '@/components/Shell';
 import { PlaceholderPage } from '@/components/common/PlaceholderPage';
 import { HomePage } from '@/pages/HomePage';
 import { OrdersPage } from '@/pages/sales/OrdersPage';
+import { CustomersPage } from '@/pages/settings/CustomersPage';
 
 function App() {
   return (
@@ -46,7 +47,7 @@ function App() {
 
         <Route path="settings">
           <Route index element={<Navigate to="/settings/customers" replace />} />
-          <Route path="customers" element={<PlaceholderPage />} />
+          <Route path="customers" element={<CustomersPage />} />
         </Route>
 
         {/* 레거시 /orders → /sales/orders */}

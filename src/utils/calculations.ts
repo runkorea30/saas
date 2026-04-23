@@ -225,13 +225,24 @@ export interface TotalReceivablesResult {
   overdueCount: number;
 }
 
+export interface CustomerAggregate {
+  customer_id: string;
+  total_sales: number;
+  paid: number;
+  balance: number; // total_sales - paid
+  order_count: number;
+  last_order_date: string | null;
+  days_since_last: number | null;
+}
+
 /**
- * 모든 거래처 미수금 합계 + 경과 일수 메타.
- * 단일 거래처 calcReceivables 를 N번 호출하는 대신 한 번의 전체 쿼리로 집계.
+ * 거래처별 집계 (주문이 1건 이상 있는 거래처만 포함).
+ * 주문 0인 거래처는 호출부에서 customers 마스터 리스트와 left-merge 하여 0으로 채울 것.
+ * 🟠 orders + bank_transactions 2회 fetch 로 모든 집계를 구성.
  */
-export async function calcTotalReceivables(
+export async function calcCustomerAggregates(
   companyId: string,
-): Promise<TotalReceivablesResult> {
+): Promise<CustomerAggregate[]> {
   const orders = await fetchAllRows<OrderForReceivableRow>(() =>
     supabase
       .from('orders')
@@ -240,35 +251,59 @@ export async function calcTotalReceivables(
       .is('deleted_at', null) as unknown as RangeableQuery<OrderForReceivableRow>,
   );
 
-  const salesByCust = new Map<string, { sales: number; lastDate: string }>();
+  const byCust = new Map<
+    string,
+    { sales: number; count: number; lastDate: string }
+  >();
   for (const o of orders) {
-    const cur = salesByCust.get(o.customer_id) ?? { sales: 0, lastDate: o.order_date };
+    const cur = byCust.get(o.customer_id) ?? {
+      sales: 0,
+      count: 0,
+      lastDate: o.order_date,
+    };
     cur.sales += o.total_amount;
+    cur.count += 1;
     if (o.order_date > cur.lastDate) cur.lastDate = o.order_date;
-    salesByCust.set(o.customer_id, cur);
+    byCust.set(o.customer_id, cur);
   }
 
   const paidByCust = await fetchDepositsByCustomer(companyId);
-
   const now = Date.now();
-  const customers: ReceivableCustomer[] = [];
-  let total = 0;
-  let overdueCount = 0;
 
-  for (const [customerId, { sales, lastDate }] of salesByCust) {
-    const paid = paidByCust.get(customerId) ?? 0;
+  return Array.from(byCust, ([customer_id, { sales, count, lastDate }]): CustomerAggregate => {
+    const paid = paidByCust.get(customer_id) ?? 0;
     const balance = sales - paid;
-    total += balance;
     const days = Math.floor((now - new Date(lastDate).getTime()) / 86_400_000);
-    if (balance > 0 && days > 30) overdueCount += 1;
-    customers.push({
-      customer_id: customerId,
+    return {
+      customer_id,
+      total_sales: sales,
+      paid,
       balance,
+      order_count: count,
       last_order_date: lastDate,
       days_since_last: days,
-    });
-  }
+    };
+  });
+}
 
+/**
+ * 모든 거래처 미수금 합계 + 경과 일수 메타.
+ * calcCustomerAggregates 결과를 재집계한다 (단일 진실 원본 §8).
+ */
+export async function calcTotalReceivables(
+  companyId: string,
+): Promise<TotalReceivablesResult> {
+  const aggregates = await calcCustomerAggregates(companyId);
+  const total = aggregates.reduce((s, a) => s + a.balance, 0);
+  const overdueCount = aggregates.filter(
+    (a) => a.balance > 0 && (a.days_since_last ?? 0) > 30,
+  ).length;
+  const customers: ReceivableCustomer[] = aggregates.map((a) => ({
+    customer_id: a.customer_id,
+    balance: a.balance,
+    last_order_date: a.last_order_date,
+    days_since_last: a.days_since_last,
+  }));
   return { total, customers, overdueCount };
 }
 
