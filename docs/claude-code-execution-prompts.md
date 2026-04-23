@@ -1,4 +1,4 @@
-# Claude Code 실행 프롬프트 (mochicraft-demo 초기 세팅)
+# Claude Code 실행 프롬프트 (saas 초기 세팅)
 
 > 이 문서는 로컬에서 Claude Code를 실행할 때 단계별로 복사·붙여넣기할 프롬프트입니다.
 > **한 번에 다 넣지 마세요.** 각 Phase가 완료된 후 다음 Phase로 진행합니다.
@@ -7,8 +7,8 @@
 
 ## 사전 준비 체크리스트
 
-- [ ] GitHub에 `mochicraft-demo` 빈 레포 생성 (README/gitignore/license 체크 **해제**)
-- [ ] 로컬에 이 폴더(mochicraft-demo) 준비
+- [ ] GitHub에 `saas` 빈 레포 생성 (README/gitignore/license 체크 **해제**)
+- [ ] 로컬에 이 폴더(saas) 준비
 - [ ] Supabase Dashboard → Project Settings → API → **Exposed schemas**에 `mochicraft_demo` 추가 후 Save
 - [ ] Supabase URL + anon key 복사 메모 (Phase 1에서 입력)
 - [ ] 터미널에서 이 폴더로 이동 후 `claude` 실행
@@ -110,7 +110,7 @@ Claude Code 실행 후 다음 프롬프트를 복사해서 붙여넣으세요.
    ```
    → 에러 없이 실행되면 OK
 
-3. GitHub 푸시 확인 — https://github.com/runkorea30/mochicraft-demo 에서 파일 보이는지
+3. GitHub 푸시 확인 — https://github.com/runkorea30/saas 에서 파일 보이는지
 
 ---
 
