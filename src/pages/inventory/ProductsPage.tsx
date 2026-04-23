@@ -230,7 +230,7 @@ export function ProductsPage() {
           ref={splitRef}
           style={{
             display: 'grid',
-            gridTemplateColumns: `minmax(0, ${leftPercent}%) 6px minmax(0, 1fr)`,
+            gridTemplateColumns: `calc(${leftPercent}% - 3px) 6px calc(${100 - leftPercent}% - 3px)`,
             alignItems: 'start',
             gap: 0,
           }}
