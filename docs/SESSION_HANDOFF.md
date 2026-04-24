@@ -218,7 +218,83 @@ NOTIFY pgrst, 'reload schema';
 
 ---
 
+## 주문/재고 도메인 규칙 (2026-04-24 확정)
+
+### A. 재고 차감 방식 — 옵션 A (정석 FIFO)
+
+주문 확정 시 inventory_transactions 테이블에 type='out' 레코드 생성.
+orders.quantity만 보고 추론하는 방식(옵션 B)은 폐기.
+
+이유:
+- DB 스키마가 이미 FIFO 전제로 설계됨 (remaining_quantity, cost_krw/usd, type='out')
+- 손익계산서(Phase 5)에서 FIFO 실원가 계산 필요
+- 감사 추적 가능 (시점별 재고 재현)
+
+### B. 주문 상태별 재고 연동
+
+- pending: 재고 차감 안 함 (장바구니 단계)
+- confirmed / shipped / delivered: 재고 차감 (inventory_transactions insert)
+- canceled: 재고 복원 (기존 out 트랜잭션을 삭제하지 않고, 역방향 복원 트랜잭션 추가)
+
+상태 전이 트리거:
+- pending → confirmed: out 트랜잭션 생성
+- (any) → canceled: 복원 트랜잭션 생성 (감사 추적 위해 기존 것 삭제 금지)
+
+### C. 재고 음수 금지 + 저장 시점 스냅샷 원칙
+
+**핵심**: 재고는 어떤 경우에도 음수가 될 수 없음.
+**핵심**: 주문서는 저장되는 그 순간의 재고 상태로 확정되고, 이후 다른 주문 변동에 소급 영향받지 않음.
+
+작동 방식:
+1. 주문 저장 시점에 가용 재고 확인
+2. 요청 수량 > 재고면 → 확정 수량 = 재고로 clamp (부족분은 0 출고)
+3. 저장 후 다른 주문이 취소/수정되어 재고가 복구되어도 → 이미 저장된 주문서는 건드리지 않음
+4. 복구된 재고는 그 이후 새로 들어오는 주문서에만 적용
+
+### D. 이중 수량 모델 (order_items)
+
+거래처 요청 의도를 보존하기 위해 한 라인에 두 수량을 공존시킴:
+
+- requested_quantity (신규 추가 필요) = 거래처가 원래 요청한 양
+- quantity (기존 컬럼) = 실제 출고 확정 양
+
+UX 표시 규칙:
+- 두 값이 다르면: 흐린 숫자(placeholder)로 requested_quantity 표시 + 진한 input으로 quantity 편집
+- 두 값이 같으면: quantity 하나만 표시 (중복 제거)
+
+재고 0 상품 처리 (중요):
+- 거래처가 재고 0인 상품을 10개 요청해도 라인을 삭제하지 않음
+- requested_quantity = 10, quantity = 0 으로 저장
+- 이유: 거래명세서에서 "주문했지만 품절이어서 못 받았다"를 거래처가 확인할 수 있어야 함
+
+### E. 수동 수량 편집 시 규칙
+
+사용자가 UI에서 quantity를 수정할 수 있음. 단:
+- 변경된 quantity는 재고에 반영됨 (증가분은 재고 차감 추가, 감소분은 재고 복원)
+- 재고가 음수가 될 편집은 거부 + 경고 표시
+- requested_quantity는 편집 불가 (거래처 원래 의도 보존)
+
+### F. Race condition 처리
+
+- 도그푸딩 환경(1~10인 팀)이므로 복잡한 락킹 불필요
+- 단, 주문 저장 시 Supabase RPC 함수로 원자성 보장
+  (재고 SELECT FOR UPDATE + inventory_transactions insert를 하나의 트랜잭션으로)
+
+### G. 기존 데이터 처리
+
+- 현재 orders/order_items/inventory_lots/inventory_transactions 전부 truncate 후 시작
+- 시드/더미 데이터라 보존 가치 없음
+- 향후 기초재고 투입(lot_type='opening')부터 실데이터 축적 시작
+
+---
+
 ## 6. 알려진 TODO (나중에 일괄 정리)
+
+### 주문 페이지 착수 시 선결 작업
+- 마이그레이션: mochicraft_demo.order_items 에 requested_quantity INT NOT NULL DEFAULT 0 컬럼 추가
+- Supabase RPC 함수 작성: create_order_with_stock_check(주문 저장 + 재고 검증 + out 트랜잭션 생성을 원자적으로)
+- src/utils/inventory.ts 신설: clampOrderQuantity, restoreStock 등 단일 검증 유틸
+- 기존 orders/order_items/inventory_* 테이블 truncate
 
 ## 🔴 미해결 이슈 — 리사이저 (2026-04-24)
 
