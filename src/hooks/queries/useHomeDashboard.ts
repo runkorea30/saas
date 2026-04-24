@@ -14,11 +14,11 @@ import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import {
   calcApproxProfitMargin,
-  calcCurrentStock,
+  calcCurrentStockByProduct,
   calcDailySales,
   calcInventoryValue,
   calcMonthlySales,
-  calcOrderSuggestion,
+  calcOrderSuggestionByProduct,
   calcTotalReceivables,
   type ApproxProfitResult,
   type ReceivableCustomer,
@@ -307,31 +307,31 @@ async function fetchLowStock(
     return { items: [], ready: false };
   }
 
-  const products = await fetchAllRows<ProductRow>(() =>
-    supabase
-      .from('products')
-      .select('id, code, name, unit')
-      .eq('company_id', companyId)
-      .eq('is_active', true)
-      .is('deleted_at', null) as unknown as RangeableQuery<ProductRow>,
-  );
+  // 🟠 N+1 해결: 제품별 계산식을 루프로 돌리지 않고, 전 회사 범위 배치 집계 2회로 대체.
+  //    - calcCurrentStockByProduct: inventory_lots / inventory_transactions / order_items(YTD) 각 1회
+  //    - calcOrderSuggestionByProduct: order_items(과거 6개월) 1회
+  //    products 리스트와 병렬 fetch 로 전체 대기시간 최소화.
+  const [products, stockMap, suggestMap] = await Promise.all([
+    fetchAllRows<ProductRow>(() =>
+      supabase
+        .from('products')
+        .select('id, code, name, unit')
+        .eq('company_id', companyId)
+        .eq('is_active', true)
+        .is('deleted_at', null) as unknown as RangeableQuery<ProductRow>,
+    ),
+    calcCurrentStockByProduct(companyId),
+    calcOrderSuggestionByProduct(companyId),
+  ]);
 
-  const rows = await Promise.all(
-    products.map(async (p): Promise<LowStockItem> => {
-      const [onhand, suggest] = await Promise.all([
-        calcCurrentStock(companyId, p.id),
-        calcOrderSuggestion(companyId, p.id),
-      ]);
-      return {
-        product_id: p.id,
-        code: p.code,
-        name: p.name,
-        unit: p.unit,
-        onhand,
-        suggest,
-      };
-    }),
-  );
+  const rows: LowStockItem[] = products.map((p) => ({
+    product_id: p.id,
+    code: p.code,
+    name: p.name,
+    unit: p.unit,
+    onhand: stockMap.get(p.id)?.current ?? 0,
+    suggest: suggestMap.get(p.id) ?? 0,
+  }));
 
   const low = rows
     .filter((r) => r.suggest > 0 && r.onhand < r.suggest * 0.3)
