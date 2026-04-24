@@ -16,6 +16,7 @@ import { HomePage } from '@/pages/HomePage';
 import { OrdersPage } from '@/pages/sales/OrdersPage';
 import { CustomersPage } from '@/pages/settings/CustomersPage';
 import { ProductsPage } from '@/pages/inventory/ProductsPage';
+import { StockPage } from '@/pages/inventory/StockPage';
 
 function App() {
   return (
@@ -32,7 +33,7 @@ function App() {
 
         <Route path="inventory">
           <Route index element={<Navigate to="/inventory/stock" replace />} />
-          <Route path="stock" element={<PlaceholderPage />} />
+          <Route path="stock" element={<StockPage />} />
           <Route path="purchase" element={<PlaceholderPage />} />
           <Route path="purchase-orders" element={<PlaceholderPage />} />
           <Route path="products" element={<ProductsPage />} />

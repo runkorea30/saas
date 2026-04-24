@@ -409,6 +409,127 @@ export async function calcCurrentStock(
 }
 
 /**
+ * 제품별 재고 스냅샷 맵 — 재고현황 페이지 단일 호출용.
+ *
+ * 🟠 N+1 해결: `calcCurrentStock` 을 제품마다 호출하지 않고, 전 회사 범위로
+ *    lots/transactions/order_items 를 **각 1회** 조회하여 Map<product_id, …> 로 집계.
+ * 🟠 `out` 트랜잭션은 order_items 와 중복될 수 있어 집계에서 제외 (단일-제품 계산식과 일관).
+ *    Phase 4 에서 FIFO 실원가로 교체 예정.
+ */
+export interface ProductStockInfo {
+  /** 기초재고 + 매입/수입 lots + 반품 tx − 파손 tx − 올해 판매수량. */
+  current: number;
+  /** lot_type='opening' 합계 — "기초재고" KPI. */
+  opening: number;
+  /** 올해 1/1 ~ 현재 order_items.quantity 합 (is_return=false). */
+  soldThisYear: number;
+  /** 이 제품의 마지막 재고 움직임 ISO — lots.lot_date 또는 tx.transaction_date 중 최대값. */
+  lastMovementAt: string | null;
+}
+
+export const LOW_STOCK_THRESHOLD = 10;
+
+export type StockStatus = 'out' | 'low' | 'normal';
+
+/** 재고 수량 → 상태 분류. */
+export function classifyStockStatus(current: number): StockStatus {
+  if (current <= 0) return 'out';
+  if (current <= LOW_STOCK_THRESHOLD) return 'low';
+  return 'normal';
+}
+
+interface LotSliceRow {
+  product_id: string;
+  lot_type: string;
+  quantity: number;
+  lot_date: string;
+}
+interface TxSliceRow {
+  product_id: string;
+  type: string;
+  quantity: number;
+  transaction_date: string;
+}
+
+export async function calcCurrentStockByProduct(
+  companyId: string,
+): Promise<Map<string, ProductStockInfo>> {
+  const now = new Date();
+  const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1)).toISOString();
+  const yearEnd = new Date(Date.UTC(now.getUTCFullYear() + 1, 0, 1)).toISOString();
+
+  const [lots, txs, sold] = await Promise.all([
+    fetchAllRows<LotSliceRow>(() =>
+      supabase
+        .from('inventory_lots')
+        .select('product_id, lot_type, quantity, lot_date')
+        .eq('company_id', companyId)
+        .is('deleted_at', null) as unknown as RangeableQuery<LotSliceRow>,
+    ),
+    fetchAllRows<TxSliceRow>(() =>
+      supabase
+        .from('inventory_transactions')
+        .select('product_id, type, quantity, transaction_date')
+        .eq('company_id', companyId)
+        .is('deleted_at', null) as unknown as RangeableQuery<TxSliceRow>,
+    ),
+    (async (): Promise<Array<{ product_id: string; quantity: number }>> => {
+      interface SoldRow {
+        product_id: string;
+        quantity: number;
+      }
+      return fetchAllRows<SoldRow>(() =>
+        supabase
+          .from('order_items')
+          .select(
+            'product_id, quantity, order:orders!inner(order_date, company_id, deleted_at)',
+          )
+          .eq('company_id', companyId)
+          .eq('is_return', false)
+          .is('deleted_at', null)
+          .gte('order.order_date', yearStart)
+          .lt('order.order_date', yearEnd) as unknown as RangeableQuery<SoldRow>,
+      );
+    })(),
+  ]);
+
+  const map = new Map<string, ProductStockInfo>();
+  const ensure = (id: string): ProductStockInfo => {
+    let row = map.get(id);
+    if (!row) {
+      row = { current: 0, opening: 0, soldThisYear: 0, lastMovementAt: null };
+      map.set(id, row);
+    }
+    return row;
+  };
+
+  for (const l of lots) {
+    const row = ensure(l.product_id);
+    row.current += l.quantity;
+    if (l.lot_type === 'opening') row.opening += l.quantity;
+    if (!row.lastMovementAt || l.lot_date > row.lastMovementAt) {
+      row.lastMovementAt = l.lot_date;
+    }
+  }
+  for (const t of txs) {
+    const row = ensure(t.product_id);
+    // 'out' 은 order_items 와 중복 → 제외 (단일-제품 calcCurrentStock 과 일관).
+    if (t.type === 'return') row.current += t.quantity;
+    else if (t.type === 'damage') row.current -= t.quantity;
+    if (!row.lastMovementAt || t.transaction_date > row.lastMovementAt) {
+      row.lastMovementAt = t.transaction_date;
+    }
+  }
+  for (const s of sold) {
+    const row = ensure(s.product_id);
+    row.current -= s.quantity;
+    row.soldThisYear += s.quantity;
+  }
+
+  return map;
+}
+
+/**
  * 발주 추천 수량 (DZ 단위).
  * 공식: (과거 6개월 판매합 / 6) × 3개월 / 12.
  */
