@@ -21,7 +21,6 @@ import type {
   ImportInvoiceHeader,
   ImportRow,
   ImportRowInput,
-  ImportUnit,
 } from '@/types/import';
 import {
   computeAdjustedQuantityDefault,

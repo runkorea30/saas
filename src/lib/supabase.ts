@@ -8,6 +8,7 @@
  * `Database` 타입을 `createClient<Database>(...)` 제네릭으로 주입한다.
  */
 import { createClient } from '@supabase/supabase-js';
+import type { Database } from '@/types/database';
 
 const url = import.meta.env.VITE_SUPABASE_URL;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -18,7 +19,7 @@ if (!url || !anonKey) {
   );
 }
 
-export const supabase = createClient(url, anonKey, {
+export const supabase = createClient<Database, 'mochicraft_demo'>(url, anonKey, {
   db: {
     // 🔴 mochicraft_demo 스키마 고정. 모든 쿼리가 이 스키마로 라우팅됨.
     schema: 'mochicraft_demo',

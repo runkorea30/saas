@@ -6,7 +6,6 @@
  * 🔴 CLAUDE.md §5: fetchAllRows 경유.
  */
 import { useQuery } from '@tanstack/react-query';
-import type { PostgrestError } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import {
@@ -58,13 +57,6 @@ export interface CustomerOrder {
   items: CustomerOrderItem[];
 }
 
-type RangeableQuery<T> = {
-  range(
-    from: number,
-    to: number,
-  ): PromiseLike<{ data: T[] | null; error: PostgrestError | null }>;
-};
-
 // ───────────────────────────────────────────────────────────
 // useCustomers — 거래처 + businesses LEFT JOIN
 // ───────────────────────────────────────────────────────────
@@ -85,7 +77,7 @@ export function useCustomers(companyId: string | null) {
           .from('customers')
           .select(CUSTOMER_SELECT)
           .eq('company_id', companyId!)
-          .is('deleted_at', null) as unknown as RangeableQuery<Customer>,
+          .is('deleted_at', null),
       );
       // 서버 ORDER BY 대신 클라이언트에서 한글 상호명 기준 정렬 —
       // "(주)" 같은 접두사를 정렬 키에서 제외.
@@ -139,7 +131,7 @@ export function useCustomerOrders(
           .eq('customer_id', customerId!)
           .is('deleted_at', null)
           .order('order_date', { ascending: false })
-          .limit(10) as unknown as RangeableQuery<CustomerOrder>,
+          .limit(10),
       );
       return rows;
     },

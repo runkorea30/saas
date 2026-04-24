@@ -9,16 +9,15 @@
  * 각각 독립적인 { data, isLoading, error } 로 노출.
  */
 import { useQuery } from '@tanstack/react-query';
-import type { PostgrestError } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import {
   calcApproxProfitMargin,
-  calcCurrentStock,
+  calcCurrentStockByProduct,
   calcDailySales,
   calcInventoryValue,
   calcMonthlySales,
-  calcOrderSuggestion,
+  calcOrderSuggestionByProduct,
   calcTotalReceivables,
   type ApproxProfitResult,
   type ReceivableCustomer,
@@ -104,13 +103,6 @@ export interface TimelineEvent {
   ref: string;
   warn?: boolean;
 }
-
-type RangeableQuery<T> = {
-  range(
-    from: number,
-    to: number,
-  ): PromiseLike<{ data: T[] | null; error: PostgrestError | null }>;
-};
 
 // ───────────────────────────────────────────────────────────
 // KPI
@@ -240,7 +232,7 @@ async function fetchUnreceivedPOs(companyId: string): Promise<UnreceivedPO[]> {
       .eq('company_id', companyId)
       .in('status', ['sent', 'confirmed'])
       .is('deleted_at', null)
-      .order('po_date', { ascending: true }) as unknown as RangeableQuery<PoRow>,
+      .order('po_date', { ascending: true }),
   );
   const now = Date.now();
   return rows.map((r) => ({
@@ -269,7 +261,7 @@ async function fetchOverdueReceivables(
       .select('id, name, grade')
       .eq('company_id', companyId)
       .in('id', ids)
-      .is('deleted_at', null) as unknown as RangeableQuery<CustomerRow>,
+      .is('deleted_at', null),
   );
   const byId = new Map(customers.map((c) => [c.id, c]));
 
@@ -307,31 +299,31 @@ async function fetchLowStock(
     return { items: [], ready: false };
   }
 
-  const products = await fetchAllRows<ProductRow>(() =>
-    supabase
-      .from('products')
-      .select('id, code, name, unit')
-      .eq('company_id', companyId)
-      .eq('is_active', true)
-      .is('deleted_at', null) as unknown as RangeableQuery<ProductRow>,
-  );
+  // 🟠 N+1 해결: 제품별 계산식을 루프로 돌리지 않고, 전 회사 범위 배치 집계 2회로 대체.
+  //    - calcCurrentStockByProduct: inventory_lots / inventory_transactions / order_items(YTD) 각 1회
+  //    - calcOrderSuggestionByProduct: order_items(과거 6개월) 1회
+  //    products 리스트와 병렬 fetch 로 전체 대기시간 최소화.
+  const [products, stockMap, suggestMap] = await Promise.all([
+    fetchAllRows<ProductRow>(() =>
+      supabase
+        .from('products')
+        .select('id, code, name, unit')
+        .eq('company_id', companyId)
+        .eq('is_active', true)
+        .is('deleted_at', null),
+    ),
+    calcCurrentStockByProduct(companyId),
+    calcOrderSuggestionByProduct(companyId),
+  ]);
 
-  const rows = await Promise.all(
-    products.map(async (p): Promise<LowStockItem> => {
-      const [onhand, suggest] = await Promise.all([
-        calcCurrentStock(companyId, p.id),
-        calcOrderSuggestion(companyId, p.id),
-      ]);
-      return {
-        product_id: p.id,
-        code: p.code,
-        name: p.name,
-        unit: p.unit,
-        onhand,
-        suggest,
-      };
-    }),
-  );
+  const rows: LowStockItem[] = products.map((p) => ({
+    product_id: p.id,
+    code: p.code,
+    name: p.name,
+    unit: p.unit,
+    onhand: stockMap.get(p.id)?.current ?? 0,
+    suggest: suggestMap.get(p.id) ?? 0,
+  }));
 
   const low = rows
     .filter((r) => r.suggest > 0 && r.onhand < r.suggest * 0.3)
@@ -350,7 +342,7 @@ async function fetchUnmatchedDeposits(companyId: string): Promise<UnmatchedDepos
       .eq('match_status', 'unmatched')
       .gte('transaction_date', sinceIso)
       .is('deleted_at', null)
-      .order('transaction_date', { ascending: false }) as unknown as RangeableQuery<DepositRow>,
+      .order('transaction_date', { ascending: false }),
   );
   return rows;
 }
@@ -435,7 +427,7 @@ async function fetchTimelineOrders(companyId: string): Promise<TimelineEvent[]> 
       .eq('company_id', companyId)
       .is('deleted_at', null)
       .order('order_date', { ascending: false })
-      .limit(8) as unknown as RangeableQuery<OrderTimelineRow>,
+      .limit(8),
   );
   return rows.map(
     (r): TimelineEvent => ({
@@ -460,7 +452,7 @@ async function fetchTimelineDeposits(companyId: string): Promise<TimelineEvent[]
       .eq('type', 'deposit')
       .is('deleted_at', null)
       .order('transaction_date', { ascending: false })
-      .limit(5) as unknown as RangeableQuery<DepositTimelineRow>,
+      .limit(5),
   );
   return rows.map((r): TimelineEvent => {
     const matched = r.match_status === 'matched';
@@ -486,7 +478,7 @@ async function fetchTimelinePOs(companyId: string): Promise<TimelineEvent[]> {
       .in('status', ['sent', 'confirmed'])
       .is('deleted_at', null)
       .order('po_date', { ascending: false })
-      .limit(5) as unknown as RangeableQuery<PoTimelineRow>,
+      .limit(5),
   );
   return rows.map(
     (r): TimelineEvent => ({
@@ -511,7 +503,7 @@ async function fetchTimelineInvoices(companyId: string): Promise<TimelineEvent[]
       .not('exported_at', 'is', null)
       .is('deleted_at', null)
       .order('exported_at', { ascending: false })
-      .limit(5) as unknown as RangeableQuery<InvoiceTimelineRow>,
+      .limit(5),
   );
   return rows
     .filter((r) => r.exported_at)
@@ -535,7 +527,7 @@ async function fetchTimelineStockTx(companyId: string): Promise<TimelineEvent[]>
       .eq('company_id', companyId)
       .is('deleted_at', null)
       .order('transaction_date', { ascending: false })
-      .limit(5) as unknown as RangeableQuery<StockTxTimelineRow>,
+      .limit(5),
   );
   const typeLabel: Record<string, string> = {
     out: '재고 출고',

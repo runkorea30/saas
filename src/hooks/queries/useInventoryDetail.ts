@@ -6,7 +6,6 @@
  *    `subtype` 으로 렌더링 분기 (opening/purchase/import vs out/return/damage).
  */
 import { useQuery } from '@tanstack/react-query';
-import type { PostgrestError } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 
@@ -47,13 +46,6 @@ export interface InventoryDetailResult {
   }>;
 }
 
-type RangeableQuery<T> = {
-  range(
-    from: number,
-    to: number,
-  ): PromiseLike<{ data: T[] | null; error: PostgrestError | null }>;
-};
-
 export function useInventoryDetail(
   companyId: string | null,
   productId: string | null,
@@ -72,7 +64,8 @@ export function useInventoryDetail(
             .eq('company_id', companyId!)
             .eq('product_id', productId!)
             .is('deleted_at', null)
-            .order('lot_date', { ascending: false }) as unknown as RangeableQuery<InventoryLotRow>,
+            .order('lot_date', { ascending: false })
+            .returns<InventoryLotRow[]>(),
         ),
         fetchAllRows<InventoryTransactionRow>(() =>
           supabase
@@ -83,7 +76,8 @@ export function useInventoryDetail(
             .is('deleted_at', null)
             .order('transaction_date', {
               ascending: false,
-            }) as unknown as RangeableQuery<InventoryTransactionRow>,
+            })
+            .returns<InventoryTransactionRow[]>(),
         ),
       ]);
 
