@@ -28,6 +28,8 @@ export interface Product {
   unit_price_usd: number | null;
   unit: string;
   is_active: boolean;
+  safety_stock: number | null;
+  reorder_point: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -41,6 +43,8 @@ export interface ProductCreateInput {
   unit_price_usd: number | null;
   unit: string;
   is_active: boolean;
+  safety_stock: number | null;
+  reorder_point: number | null;
 }
 
 export interface ProductUpdateArgs {
@@ -49,7 +53,7 @@ export interface ProductUpdateArgs {
 }
 
 const PRODUCT_SELECT =
-  'id, code, name, category, sell_price, supply_price, unit_price_usd, unit, is_active, created_at, updated_at';
+  'id, code, name, category, sell_price, supply_price, unit_price_usd, unit, is_active, safety_stock, reorder_point, created_at, updated_at';
 
 // ───────────────────────────────────────────────────────────
 // 에러 매핑

@@ -1,7 +1,7 @@
 /**
  * Products 생성/수정 폼 (모달 내부에서 사용).
  *
- * 필드 순서: 제품코드 · 상품명 · 카테고리 · 단위 · 판매가 · 공급가 · USD 단가 · 활성여부
+ * 필드 순서: 제품코드 · 상품명 · 카테고리 · 단위 · 판매가 · 공급가 · USD 단가 · 안전재고 · 발주점 · 활성여부
  * - 수정 모드(initial 전달)에서는 제품코드 readonly.
  * - 카테고리 select: 이미 등록된 카테고리 + "직접 입력" 옵션.
  * - 공급가 입력 시 실시간 마진율(부가세포함 판매가 기준) 미리보기.
@@ -35,6 +35,8 @@ interface FormState {
   sell_price: string;
   supply_price: string;
   unit_price_usd: string;
+  safety_stock: string;
+  reorder_point: string;
   is_active: boolean;
 }
 
@@ -99,6 +101,14 @@ export function ProductForm({
       initial?.unit_price_usd !== null && initial?.unit_price_usd !== undefined
         ? String(initial.unit_price_usd)
         : '',
+    safety_stock:
+      initial?.safety_stock !== null && initial?.safety_stock !== undefined
+        ? String(initial.safety_stock)
+        : '',
+    reorder_point:
+      initial?.reorder_point !== null && initial?.reorder_point !== undefined
+        ? String(initial.reorder_point)
+        : '',
     is_active: initial?.is_active ?? true,
   });
   const [errors, setErrors] = useState<FieldError>({});
@@ -117,6 +127,18 @@ export function ProductForm({
     const pct = (margin / sell) * 100;
     return { margin, pct };
   }, [form.sell_price, form.supply_price]);
+
+  // 발주점 < 안전재고 경고 — 제출은 막지 않고 hint 로만 표시.
+  const reorderWarning = useMemo<string | undefined>(() => {
+    const ss = toNumberOrNaN(form.safety_stock);
+    const rp = toNumberOrNaN(form.reorder_point);
+    if (!Number.isFinite(ss) || !Number.isFinite(rp)) return undefined;
+    if (ss <= 0 || rp <= 0) return undefined;
+    if (rp < ss) {
+      return '⚠ 발주점이 안전재고보다 낮습니다. 재발주 전 재고 소진 위험.';
+    }
+    return undefined;
+  }, [form.safety_stock, form.reorder_point]);
 
   const validate = (): FieldError => {
     const e: FieldError = {};
@@ -140,6 +162,19 @@ export function ProductForm({
       if (!Number.isFinite(usd)) e.unit_price_usd = 'USD 단가를 숫자로 입력해 주세요';
       else if (usd < 0) e.unit_price_usd = 'USD 단가는 0 이상이어야 합니다';
     }
+
+    if (form.safety_stock.trim()) {
+      const ss = toNumberOrNaN(form.safety_stock);
+      if (!Number.isFinite(ss)) e.safety_stock = '안전재고를 숫자로 입력해 주세요';
+      else if (ss < 0) e.safety_stock = '안전재고는 0 이상이어야 합니다';
+      else if (!Number.isInteger(ss)) e.safety_stock = '안전재고는 정수여야 합니다';
+    }
+    if (form.reorder_point.trim()) {
+      const rp = toNumberOrNaN(form.reorder_point);
+      if (!Number.isFinite(rp)) e.reorder_point = '발주점을 숫자로 입력해 주세요';
+      else if (rp < 0) e.reorder_point = '발주점은 0 이상이어야 합니다';
+      else if (!Number.isInteger(rp)) e.reorder_point = '발주점은 정수여야 합니다';
+    }
     return e;
   };
 
@@ -157,6 +192,8 @@ export function ProductForm({
       sell_price: toNumberOrNaN(form.sell_price),
       supply_price: toNumberOrNaN(form.supply_price),
       unit_price_usd: toNumberOrNull(form.unit_price_usd),
+      safety_stock: toNumberOrNull(form.safety_stock),
+      reorder_point: toNumberOrNull(form.reorder_point),
       is_active: form.is_active,
     };
     onSubmit(values);
@@ -367,6 +404,53 @@ export function ProductForm({
           }}
         />
       </Field>
+
+      {/* 안전재고 · 발주점 */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field
+          label="안전재고 (선택, 개)"
+          error={errors.safety_stock}
+          hint="재고가 이 수량 아래로 떨어지면 '미달' 배지 표시"
+        >
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={form.safety_stock}
+            disabled={busy}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, safety_stock: e.target.value }))
+            }
+            placeholder="예: 10"
+            style={{
+              ...inputStyle(!!errors.safety_stock, !!busy),
+              textAlign: 'right',
+            }}
+          />
+        </Field>
+
+        <Field
+          label="발주점 (선택, 개)"
+          error={errors.reorder_point}
+          hint={reorderWarning ?? "재고가 이 수량 이하가 되면 '발주 권장' 표시"}
+        >
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={form.reorder_point}
+            disabled={busy}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, reorder_point: e.target.value }))
+            }
+            placeholder="예: 20"
+            style={{
+              ...inputStyle(!!errors.reorder_point, !!busy),
+              textAlign: 'right',
+            }}
+          />
+        </Field>
+      </div>
 
       {/* 액션 */}
       <div
