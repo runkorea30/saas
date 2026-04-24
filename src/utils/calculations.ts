@@ -319,13 +319,6 @@ interface InventoryLotRow {
   cost_krw: number | null;
 }
 
-interface InventoryTxRow {
-  product_id: string;
-  type: string; // 'out' | 'return' | 'damage'
-  quantity: number;
-  transaction_date: string;
-}
-
 /**
  * 현재 재고 자산가치 (부가세 포함).
  * 공식: Σ(remaining_quantity × 로트별 단가) × 1.1.
@@ -349,63 +342,19 @@ export async function calcInventoryValue(companyId: string): Promise<number> {
 }
 
 /**
- * 제품별 현재 재고 수량.
+ * 제품별 현재 재고 수량 (단일 제품 조회용 얇은 래퍼).
  * 공식: 기초 + 수입/매입 + 반품트랜잭션 − 파손트랜잭션 − 판매수량(올해 1/1 ~ 현재).
- * 판매수량 = order_items.quantity SUM (is_return=false) WHERE 올해.
+ *
+ * 🔴 **루프에서 호출 금지**. 내부가 전 회사 범위 배치 fetch 3회이므로, N개 제품을
+ *    Promise.all 로 돌리면 동일한 전체 fetch 가 N회 반복된다. 여러 제품 수량이
+ *    필요하면 `calcCurrentStockByProduct(companyId)` 로 Map 을 한 번에 받아 쓸 것.
  */
 export async function calcCurrentStock(
   companyId: string,
   productId: string,
 ): Promise<number> {
-  const now = new Date();
-  const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1)).toISOString();
-  const yearEnd = new Date(Date.UTC(now.getUTCFullYear() + 1, 0, 1)).toISOString();
-
-  // 1) inventory_lots 입고 (opening/purchase/import).
-  const lots = await fetchAllRows<InventoryLotRow>(() =>
-    supabase
-      .from('inventory_lots')
-      .select('product_id, lot_type, quantity, remaining_quantity, cost_krw')
-      .eq('company_id', companyId)
-      .eq('product_id', productId)
-      .is('deleted_at', null) as unknown as RangeableQuery<InventoryLotRow>,
-  );
-  let qty = 0;
-  for (const l of lots) qty += l.quantity;
-
-  // 2) inventory_transactions: 반품(+) / 파손(-). 'out'은 판매 출고로 아래 order_items와 중복 집계를 피한다.
-  const txs = await fetchAllRows<InventoryTxRow>(() =>
-    supabase
-      .from('inventory_transactions')
-      .select('product_id, type, quantity, transaction_date')
-      .eq('company_id', companyId)
-      .eq('product_id', productId)
-      .is('deleted_at', null) as unknown as RangeableQuery<InventoryTxRow>,
-  );
-  for (const t of txs) {
-    if (t.type === 'return') qty += t.quantity;
-    else if (t.type === 'damage') qty -= t.quantity;
-  }
-
-  // 3) order_items 판매수량 (올해, 반품 제외).
-  interface SoldRow {
-    quantity: number;
-    is_return: boolean;
-  }
-  const sold = await fetchAllRows<SoldRow>(() =>
-    supabase
-      .from('order_items')
-      .select('quantity, is_return, order:orders!inner(order_date, company_id, deleted_at)')
-      .eq('company_id', companyId)
-      .eq('product_id', productId)
-      .eq('is_return', false)
-      .is('deleted_at', null)
-      .gte('order.order_date', yearStart)
-      .lt('order.order_date', yearEnd) as unknown as RangeableQuery<SoldRow>,
-  );
-  for (const s of sold) qty -= s.quantity;
-
-  return qty;
+  const map = await calcCurrentStockByProduct(companyId);
+  return map.get(productId)?.current ?? 0;
 }
 
 /**
@@ -530,34 +479,64 @@ export async function calcCurrentStockByProduct(
 }
 
 /**
- * 발주 추천 수량 (DZ 단위).
+ * 제품별 발주 추천 수량(DZ) 맵 — 단일 order_items fetch 로 전 제품 집계.
+ *
+ * 🟠 N+1 해결: `calcOrderSuggestion` 을 제품마다 호출하지 않고, 전 회사 범위로
+ *    order_items(비반품, 과거 `lookbackMonths`개월)를 **단 1회** 조회해 Map 으로 반환.
+ *
+ * 공식: Math.ceil(Σ quantity / 24) — 단일판과 동일 ((total/6 * 3) / 12).
+ *
+ * @param companyId 회사 UUID
+ * @param lookbackMonths 기본 6개월. JS `setUTCMonth(-N)` 시맨틱과 일치.
+ */
+export async function calcOrderSuggestionByProduct(
+  companyId: string,
+  lookbackMonths: number = 6,
+): Promise<Map<string, number>> {
+  const now = new Date();
+  const lookbackStart = new Date(now);
+  lookbackStart.setUTCMonth(lookbackStart.getUTCMonth() - lookbackMonths);
+
+  interface SoldRow {
+    product_id: string;
+    quantity: number;
+  }
+  const rows = await fetchAllRows<SoldRow>(() =>
+    supabase
+      .from('order_items')
+      .select('product_id, quantity, order:orders!inner(order_date, company_id, deleted_at)')
+      .eq('company_id', companyId)
+      .eq('is_return', false)
+      .is('deleted_at', null)
+      .gte('order.order_date', lookbackStart.toISOString())
+      .lt('order.order_date', now.toISOString()) as unknown as RangeableQuery<SoldRow>,
+  );
+
+  const sumByProduct = new Map<string, number>();
+  for (const r of rows) {
+    sumByProduct.set(r.product_id, (sumByProduct.get(r.product_id) ?? 0) + r.quantity);
+  }
+  const result = new Map<string, number>();
+  for (const [pid, total] of sumByProduct) {
+    result.set(pid, Math.ceil(total / 24)); // DZ(12ea 묶음) 단위.
+  }
+  return result;
+}
+
+/**
+ * 발주 추천 수량 (DZ 단위) — 단일 제품 조회용 얇은 래퍼.
  * 공식: (과거 6개월 판매합 / 6) × 3개월 / 12.
+ *
+ * 🔴 **루프에서 호출 금지**. 내부가 전 회사 범위 배치 fetch 이므로, N개 제품을
+ *    Promise.all 로 돌리면 동일 fetch 가 N회 반복된다. 여러 제품이 필요하면
+ *    `calcOrderSuggestionByProduct(companyId)` 로 Map 을 한 번에 받아 쓸 것.
  */
 export async function calcOrderSuggestion(
   companyId: string,
   productId: string,
 ): Promise<number> {
-  const now = new Date();
-  const sixMonthsAgo = new Date(now);
-  sixMonthsAgo.setUTCMonth(sixMonthsAgo.getUTCMonth() - 6);
-
-  interface SoldRow {
-    quantity: number;
-  }
-  const sold = await fetchAllRows<SoldRow>(() =>
-    supabase
-      .from('order_items')
-      .select('quantity, order:orders!inner(order_date, company_id, deleted_at)')
-      .eq('company_id', companyId)
-      .eq('product_id', productId)
-      .eq('is_return', false)
-      .is('deleted_at', null)
-      .gte('order.order_date', sixMonthsAgo.toISOString())
-      .lt('order.order_date', now.toISOString()) as unknown as RangeableQuery<SoldRow>,
-  );
-  const total = sold.reduce((s, r) => s + r.quantity, 0);
-  // (total/6 * 3) / 12 == total / 24. DZ(12ea 묶음) 단위.
-  return Math.ceil(total / 24);
+  const map = await calcOrderSuggestionByProduct(companyId);
+  return map.get(productId) ?? 0;
 }
 
 // ───────────────────────────────────────────────────────────
