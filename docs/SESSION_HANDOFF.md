@@ -14,14 +14,19 @@
 | Phase 3.5 | Home Dashboard 실구현 | ✅ 완료 (2026-04-24) |
 | Phase 3.6 | Customers 페이지 실구현 | ✅ 완료 (2026-04-24) |
 | Phase 3.7 | Products 페이지 — 조회 + CRUD | ✅ 완료 (2026-04-24) |
-| Phase 4 | 나머지 10 페이지 + Auth 도입 | 대기 |
+| Phase 3.8 | Inventory (재고현황) 페이지 — 기초재고 투입 | ✅ 완료 (2026-04-24) |
+| Phase 3.9 | Import/Purchase 페이지 Phase 1 — 수동 입력 입고확정 | ✅ 완료 (2026-04-24) |
+| Phase 4 | 나머지 7 페이지 + Auth 도입 | 대기 |
 
-**페이지 진도: 4 / 14 구현 완료**
+**페이지 진도: 6 / 13 구현 완료**
 
 - `/` — 홈 대시보드 (KPI + Today + Chart + Timeline)
 - `/sales/orders` — 주문내역 (필터/목록/상세 split)
 - `/settings/customers` — 거래처 (목록/필터/상세 split)
-- 나머지 11 경로는 전부 `<PlaceholderPage />` 상태
+- `/inventory/products` — 제품리스트 (CRUD + 모달)
+- `/inventory/stock` — 재고현황 (기초재고 투입 + KPI)
+- `/inventory/purchase` — 수입/매입 Phase 1 (수동 입력 + 입고확정, PDF 파싱은 Phase 2)
+- 나머지 7 경로는 전부 `<PlaceholderPage />` 상태
 
 ---
 
@@ -289,14 +294,48 @@ UX 표시 규칙:
 - 시드/더미 데이터라 보존 가치 없음
 - 향후 기초재고 투입(lot_type='opening')부터 실데이터 축적 시작
 
+### H. 수입/매입 도메인 규칙 (2026-04-24 확정)
+
+Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계산식은 불변.
+
+1. **운송비 배분 — 금액 비율**
+   - 공식: `(이 행 합계 USD / 전체 실제 합계 USD) × 운송비 총액 USD`
+   - 분모(실제 합계)는 EA 행도 그대로 포함 (예: `992E-20-PAX` 30 EA / $92.40 이슈 해결)
+   - 분모 0 또는 운송비 0 이면 배분액 0 — 사용자 경고 후 진행
+
+2. **수입단가 USD = 합계 USD / 입고수량**
+   - 입고수량 = DZ 단위면 `qty × 12`, EA 면 `qty` (사용자 override 가능)
+   - 별도 "수입원가(USD)" 컬럼은 표시 전용 (= `합계 USD / 원래 수량`, PDF PRICE 칸과 일치, DB 저장 안 됨)
+
+3. **원가 KRW = round((수입단가 + 운송비배분/입고수량) × 환율)**
+   - `inventory_lots.cost_krw` 가 INTEGER 제약이라 반드시 `Math.round`
+   - `cost_usd` = 수입단가 + 낱개 배분 운송비 (numeric)
+   - 환율·입고수량 0 이하면 계산 결과 0 (UI "—" 표시)
+
+4. **Invoice # 중복 — DB UNIQUE 차단**
+   - `idx_import_invoices_unique_number` : `UNIQUE(company_id, invoice_number) WHERE deleted_at IS NULL`
+   - Postgres 23505 → "이미 등록된 Invoice #" Toast (애플리케이션 레벨 사전 체크 없음, DB 강제)
+   - 멀티테이블 트랜잭션 부재 → `inventory_lots` bulk INSERT 실패 시 `import_invoices` HARD DELETE 보상
+
+5. **코드 매칭 — 대시 제거 정규화**
+   - 원본 `"720-01-001"` → `"72001001"`, `"992E-20-PAX"` → `"992E20PAX"`
+   - `products.code` 와 정확 일치해야 매칭. 미매칭 행은 입고확정 비활성 사유.
+
 ---
 
 ## 6. 알려진 TODO (나중에 일괄 정리)
 
+### 수입/매입 Phase 2 — PDF 업로드 + 자동 파싱
+- 의존성: `pdfjs-dist` 도입 (브라우저 PDF 파싱)
+- Angelus 인보이스 포맷 정규식 파서 (PO# · Date · Item # · Description · QTY · PRICE · AMOUNT · Total)
+- 행 순서 무관 필드 매칭 (컬럼 정렬 흐트러져도 추출)
+- 파싱 결과 → 기존 `ImportRowsTable` 에 바로 주입 (수동 입력 UI 재사용)
+- 파서 실패 케이스: 사용자 수동 입력으로 폴백
+
 ### 주문 페이지 착수 시 선결 작업
 - 마이그레이션: mochicraft_demo.order_items 에 requested_quantity INT NOT NULL DEFAULT 0 컬럼 추가
 - Supabase RPC 함수 작성: create_order_with_stock_check(주문 저장 + 재고 검증 + out 트랜잭션 생성을 원자적으로)
-- src/utils/inventory.ts 신설: clampOrderQuantity, restoreStock 등 단일 검증 유틸
+- src/utils/inventory.ts 는 수입/매입 계산 전용으로 이미 사용 중 — 주문용은 다른 파일로 분리 (예: `src/utils/ordering.ts`) 또는 기존 파일에 네임스페이스 추가
 - 기존 orders/order_items/inventory_* 테이블 truncate
 
 ## 🔴 미해결 이슈 — 리사이저 (2026-04-24)
@@ -366,28 +405,38 @@ UX 표시 규칙:
 
 ## 7. 다음 세션 진입점
 
-### 다음 작업: **재고현황 페이지** (첫 양산 페이지)
-- 경로: `/inventory/stock`
-- 지위: Products 완료 + 선결 인프라(Toast 전역화 · 카테고리 매핑 일원화) 정리 완료 → 나머지 페이지 양산의 **첫 테스트 케이스**
-- 참고할 가장 최근 페이지: **Products (Phase B)** — CRUD + 공용 인프라 전부 활용 중
-- **사용 가능한 공용 인프라** (바로 import 해서 쓸 수 있는 것들):
-  - `useToast()` — 재고 조정 성공/실패, 파손 처리 완료 등 알림
-  - `Modal` / `ConfirmDialog` — 재고 조정 모달 / 파손·반품 확인 다이얼로그
-  - `useResizableSplit` / `useResizableColumns` — 2단(목록+상세) 또는 3단 레이아웃 + 테이블 컬럼 폭 저장
-  - `koreanSort` (`companyNameSortKey` · `compareCompanyName`) — 거래처·공급처 컬럼 정렬
-  - `getCategoryLabel` / `CATEGORY_OPTIONS` — 카테고리 필터 칩, 상세 표시
-  - `ProductDetailPane` · `ProductListTable` 구조 — master-detail split 레퍼런스
-- **비즈니스 계산식**: `calcCurrentStock(companyId, productId)` 이미 구현됨 (`src/utils/calculations.ts`) — 기초재고 + 입고 + 반품 - 파손 - 올해판매 반영.
+### (권장) 수입/매입 Phase 2 — PDF 업로드 + 자동 파싱
+- 경로: `/inventory/purchase` (기존 페이지 확장)
+- 지위: Phase 1 수동 입력이 이미 동작하므로 PDF 파서만 끼워 넣으면 됨. Angelus Invoice #80966 실사용 검증 완료.
+- 작업 범위:
+  - `pdfjs-dist` 의존성 추가
+  - 헤더 폼 상단에 "PDF 업로드" 버튼 신설 → 파일 선택 시 파싱 실행
+  - Angelus 포맷 파서: PO# / Invoice Date / Total USD / Shipping / Line items 추출
+  - 파싱 결과를 `setHeader` + `setRowInputs` 로 주입 → 나머지 로직(계산·매칭·입고확정)은 전부 재사용
+  - 파서 실패 시 Toast 경고 + 수동 입력 폴백 유지
 
-### 후속 페이지 (재고현황 이후)
-- `/sales/order-entry` — 수동주문입력
+### (대안) 발주서 페이지
+- 경로: `/inventory/purchase-orders`
+- 독립적이며 `purchase_orders` 테이블 이미 존재. 수입/매입 의존성 없음.
+- `calcOrderSuggestion(companyId, productId)` 이미 구현됨 (과거 6개월 판매 기반 DZ 추천).
+
+### (대안) 수동주문입력 페이지
+- 경로: `/sales/order-entry`
+- **선결 필요**: `order_items.requested_quantity` 컬럼 추가 마이그레이션 + RPC 함수 `create_order_with_stock_check`
+- 주문/재고 도메인 규칙 A~G 전부 적용 대상
+
+### 후속 페이지 (우선순위 무관)
 - `/sales/invoices` — 송장대장
-- `/inventory/purchase` — 수입/매입
-- `/inventory/purchase-orders` — 발주서 (PO 템플릿 필요)
 - `/finance/receivables` — 미수금
 - `/finance/banking` — 은행거래 (입금 매칭)
 - `/finance/tax-invoices` — 세금계산서 발행
 - `/finance/pnl` — 손익계산서 (`calcCostOfSales` 선행 필요)
+
+### 사용 가능한 공용 인프라 (재확인)
+- `useToast()` · `Modal` · `ConfirmDialog` · `useResizableSplit` · `useResizableColumns`
+- `koreanSort` · `getCategoryLabel` / `CATEGORY_OPTIONS`
+- `fetchAllRows` · `useCompany()` · `calcCurrentStockByProduct`
+- **신규 (Phase 3.9)**: `src/utils/inventory.ts` 순수 계산 9종 (`normalizeSourceCode` · `computeAdjustedQuantityDefault` · `computeSourceUnitPriceUsd` · `computeUnitPriceUsd` · `computeShippingAllocationUsd` · `computeCostKrw` · `computeLineTotalKrw` · `computeInvoiceActualTotalUsd` · `hasSignificantTotalDiff`)
 
 ### 옵션 — Auth 우선
 - Supabase Auth + memberships 도입
@@ -409,8 +458,8 @@ UX 표시 규칙:
 - 타입체크: `npx tsc --noEmit` (커밋 전 필수)
 
 ### 최근 커밋
+- `95336f3` feat(import): 수입/매입 Phase 1 — 수동 입력 + 입고확정
+- `048fd8a` feat(inventory): 재고현황 페이지 + 기초재고 투입
+- `663e0bb` chore(rls): mochicraft_demo.inventory_lots anon INSERT 허용 (dev 전용)
+- `e17433e` docs: 주문/재고 도메인 규칙 7종 확정 기록 (2026-04-24)
 - `1fcf1cc` feat(customers): Customers 페이지 + disabled 스타일 공용화 + 회사명 정렬 규칙
-- `5d5db6f` feat(home): Home Dashboard 페이지 구현
-- `87bd298` Phase 3 closeout: migration files + SESSION_HANDOFF update
-- `835e7cb` feat(shell): Phase 3 global Shell with 2-tier top nav + route stubs
-- `451c4d3` feat(orders): Phase 2 Orders page with live Supabase data
