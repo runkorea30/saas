@@ -73,6 +73,8 @@ export interface LowStockItem {
   unit: string;
   onhand: number;
   suggest: number;
+  safety_stock: number | null;
+  reorder_point: number | null;
 }
 
 export interface UnmatchedDeposit {
@@ -88,6 +90,8 @@ export interface TodayData {
   overdueReceivables: OverdueReceivable[];
   lowStock: LowStockItem[];
   unmatchedDeposits: UnmatchedDeposit[];
+  /** safety_stock IS NOT NULL AND onhand < safety_stock 인 제품 수. */
+  safetyShortageCount: number;
   /** 재고 데이터(로트/트랜잭션) 0건이면 lowStock 섹션을 공란으로 안내. */
   inventoryReady: boolean;
 }
@@ -222,6 +226,8 @@ interface ProductRow {
   code: string;
   name: string;
   unit: string;
+  safety_stock: number | null;
+  reorder_point: number | null;
 }
 
 async function fetchUnreceivedPOs(companyId: string): Promise<UnreceivedPO[]> {
@@ -282,7 +288,7 @@ async function fetchOverdueReceivables(
 
 async function fetchLowStock(
   companyId: string,
-): Promise<{ items: LowStockItem[]; ready: boolean }> {
+): Promise<{ items: LowStockItem[]; ready: boolean; safetyShortageCount: number }> {
   // 재고 데이터(로트/트랜잭션)가 전무하면 '준비 전' 로 간주. 불필요한 N쿼리 방지.
   const { count: lotCount } = (await supabase
     .from('inventory_lots')
@@ -296,7 +302,7 @@ async function fetchLowStock(
     .is('deleted_at', null)) as { count: number | null };
 
   if ((lotCount ?? 0) === 0 && (txCount ?? 0) === 0) {
-    return { items: [], ready: false };
+    return { items: [], ready: false, safetyShortageCount: 0 };
   }
 
   // 🟠 N+1 해결: 제품별 계산식을 루프로 돌리지 않고, 전 회사 범위 배치 집계 2회로 대체.
@@ -307,7 +313,7 @@ async function fetchLowStock(
     fetchAllRows<ProductRow>(() =>
       supabase
         .from('products')
-        .select('id, code, name, unit')
+        .select('id, code, name, unit, safety_stock, reorder_point')
         .eq('company_id', companyId)
         .eq('is_active', true)
         .is('deleted_at', null),
@@ -323,12 +329,17 @@ async function fetchLowStock(
     unit: p.unit,
     onhand: stockMap.get(p.id)?.current ?? 0,
     suggest: suggestMap.get(p.id) ?? 0,
+    safety_stock: p.safety_stock,
+    reorder_point: p.reorder_point,
   }));
 
   const low = rows
     .filter((r) => r.suggest > 0 && r.onhand < r.suggest * 0.3)
     .sort((a, b) => a.onhand - b.onhand);
-  return { items: low, ready: true };
+  const safetyShortageCount = rows.filter(
+    (r) => r.safety_stock !== null && r.onhand < r.safety_stock,
+  ).length;
+  return { items: low, ready: true, safetyShortageCount };
 }
 
 async function fetchUnmatchedDeposits(companyId: string): Promise<UnmatchedDeposit[]> {
@@ -364,6 +375,7 @@ export function useTodayData(companyId: string | null) {
         overdueReceivables,
         lowStock: low.items,
         unmatchedDeposits,
+        safetyShortageCount: low.safetyShortageCount,
         inventoryReady: low.ready,
       };
     },

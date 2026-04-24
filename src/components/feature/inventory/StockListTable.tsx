@@ -4,6 +4,8 @@
  * - 컬럼 7개 (체크박스 없음 — 현재 벌크 액션이 없어 단순화).
  * - 현재재고: 0 이하 → danger 색, 0 < n <= 임계값 → warning 색, 그 외 기본.
  * - 상태 dot: 품절(red) / 부족(amber) / 정상(green).
+ * - 제품별 안전재고 배지: current < safety_stock 이면 'danger',
+ *   safety_stock ≤ current < reorder_point 이면 'warning'. 둘 다 NULL 이면 배지 없음.
  * - `last_movement_at` 이 null 이면 `—` 표시.
  */
 import { EmptyState } from '@/components/feature/orders/primitives';
@@ -159,7 +161,14 @@ export function StockListTable({
                 }}
               >
                 <CellText value={r.code} numeric muted />
-                <CellText value={r.name} bold ink="ink" />
+                <NameWithBadge
+                  name={r.name}
+                  badge={stockThresholdBadge(
+                    r.current_stock,
+                    r.safety_stock,
+                    r.reorder_point,
+                  )}
+                />
                 <CellText value={getCategoryLabel(r.category)} small muted />
                 <CellText value={r.unit} small muted />
 
@@ -290,6 +299,69 @@ function CellText({
       {value}
     </div>
   );
+}
+
+function NameWithBadge({
+  name,
+  badge,
+}: {
+  name: string;
+  badge: { label: string; color: string; bg: string } | null;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        minWidth: 0,
+      }}
+      title={name}
+    >
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          fontSize: 13,
+          fontWeight: 500,
+          color: 'var(--ink)',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        {name}
+      </span>
+      {badge && (
+        <span
+          className="chip"
+          style={{
+            color: badge.color,
+            background: badge.bg,
+            fontSize: 10.5,
+            flexShrink: 0,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {badge.label}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function stockThresholdBadge(
+  current: number,
+  safety: number | null,
+  reorder: number | null,
+): { label: string; color: string; bg: string } | null {
+  if (safety !== null && current < safety) {
+    return { label: '안전재고 미달', color: 'var(--danger)', bg: 'var(--danger-wash)' };
+  }
+  if (reorder !== null && current < reorder) {
+    return { label: '발주 권장', color: 'var(--warning)', bg: 'var(--warning-wash)' };
+  }
+  return null;
 }
 
 function fmtQty(n: number): string {

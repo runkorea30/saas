@@ -72,6 +72,7 @@ export function TodaySection({ data, isLoading, error }: Props) {
           <LowStockCard
             items={data?.lowStock ?? []}
             ready={data?.inventoryReady ?? true}
+            safetyShortageCount={data?.safetyShortageCount ?? 0}
             loading={isLoading}
             borderR
           />
@@ -424,12 +425,14 @@ function OverdueReceivableCard({
 function LowStockCard({
   items,
   ready,
+  safetyShortageCount,
   loading,
   borderR,
   borderB,
 }: {
   items: LowStockItem[];
   ready: boolean;
+  safetyShortageCount: number;
   loading: boolean;
   borderR?: boolean;
   borderB?: boolean;
@@ -439,7 +442,13 @@ function LowStockCard({
       icon={Package}
       title="재고 부족"
       count={items.length}
-      meta={ready ? '권장 임계 이하' : '재고 데이터 준비 전'}
+      meta={
+        !ready
+          ? '재고 데이터 준비 전'
+          : safetyShortageCount > 0
+            ? `권장 임계 이하 · 안전재고 미달 ${safetyShortageCount}개`
+            : '권장 임계 이하'
+      }
       tone="warning"
       borderR={borderR}
       borderB={borderB}

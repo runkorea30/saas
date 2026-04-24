@@ -840,6 +840,8 @@ export type Database = {
           id: string
           is_active: boolean
           name: string
+          reorder_point: number | null
+          safety_stock: number | null
           sell_price: number
           supply_price: number
           unit: string
@@ -855,6 +857,8 @@ export type Database = {
           id?: string
           is_active?: boolean
           name: string
+          reorder_point?: number | null
+          safety_stock?: number | null
           sell_price: number
           supply_price: number
           unit?: string
@@ -870,6 +874,8 @@ export type Database = {
           id?: string
           is_active?: boolean
           name?: string
+          reorder_point?: number | null
+          safety_stock?: number | null
           sell_price?: number
           supply_price?: number
           unit?: string
