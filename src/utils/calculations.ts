@@ -8,7 +8,6 @@
  * / calcTotalReceivables / calcInventoryValue) + 재고용 2종 (calcCurrentStock
  * / calcOrderSuggestion) 실구현.
  */
-import type { PostgrestError } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import type { Period } from '@/types/common';
@@ -54,13 +53,6 @@ interface OrderWithItems extends OrderRow {
   items: OrderItemRow[];
 }
 
-type RangeableQuery<T> = {
-  range(
-    from: number,
-    to: number,
-  ): PromiseLike<{ data: T[] | null; error: PostgrestError | null }>;
-};
-
 /**
  * 기간 내 주문(+items) 조회. 반품 플래그 포함.
  * `is_return=true` 로우의 amount는 음수로 저장된다고 가정 (Orders 페이지 기존 로직과 일관).
@@ -81,7 +73,7 @@ async function fetchOrdersWithItems(
       .is('deleted_at', null)
       .gte('order_date', startIso)
       .lt('order_date', endIso)
-      .order('order_date', { ascending: true }) as unknown as RangeableQuery<OrderWithItems>,
+      .order('order_date', { ascending: true }),
   );
   return rows;
 }
@@ -162,7 +154,7 @@ async function fetchDepositsByCustomer(companyId: string): Promise<Map<string, n
       .eq('company_id', companyId)
       .eq('type', 'deposit')
       .eq('match_status', 'matched')
-      .is('deleted_at', null) as unknown as RangeableQuery<BankDepositRow>,
+      .is('deleted_at', null),
   );
   const map = new Map<string, number>();
   for (const r of rows) {
@@ -192,7 +184,7 @@ export async function calcReceivables(
       .select('customer_id, order_date, total_amount')
       .eq('company_id', companyId)
       .eq('customer_id', customerId)
-      .is('deleted_at', null) as unknown as RangeableQuery<OrderForReceivableRow>,
+      .is('deleted_at', null),
   );
   const sales = orders.reduce((s, o) => s + o.total_amount, 0);
 
@@ -204,7 +196,7 @@ export async function calcReceivables(
       .eq('customer_id', customerId)
       .eq('type', 'deposit')
       .eq('match_status', 'matched')
-      .is('deleted_at', null) as unknown as RangeableQuery<BankDepositRow>,
+      .is('deleted_at', null),
   );
   const paid = deposits.reduce((s, d) => s + d.amount, 0);
 
@@ -248,7 +240,7 @@ export async function calcCustomerAggregates(
       .from('orders')
       .select('customer_id, order_date, total_amount')
       .eq('company_id', companyId)
-      .is('deleted_at', null) as unknown as RangeableQuery<OrderForReceivableRow>,
+      .is('deleted_at', null),
   );
 
   const byCust = new Map<
@@ -330,7 +322,7 @@ export async function calcInventoryValue(companyId: string): Promise<number> {
       .from('inventory_lots')
       .select('product_id, lot_type, quantity, remaining_quantity, cost_krw')
       .eq('company_id', companyId)
-      .is('deleted_at', null) as unknown as RangeableQuery<InventoryLotRow>,
+      .is('deleted_at', null),
   );
   let sum = 0;
   for (const lot of lots) {
@@ -413,14 +405,14 @@ export async function calcCurrentStockByProduct(
         .from('inventory_lots')
         .select('product_id, lot_type, quantity, lot_date')
         .eq('company_id', companyId)
-        .is('deleted_at', null) as unknown as RangeableQuery<LotSliceRow>,
+        .is('deleted_at', null),
     ),
     fetchAllRows<TxSliceRow>(() =>
       supabase
         .from('inventory_transactions')
         .select('product_id, type, quantity, transaction_date')
         .eq('company_id', companyId)
-        .is('deleted_at', null) as unknown as RangeableQuery<TxSliceRow>,
+        .is('deleted_at', null),
     ),
     (async (): Promise<Array<{ product_id: string; quantity: number }>> => {
       interface SoldRow {
@@ -437,7 +429,7 @@ export async function calcCurrentStockByProduct(
           .eq('is_return', false)
           .is('deleted_at', null)
           .gte('order.order_date', yearStart)
-          .lt('order.order_date', yearEnd) as unknown as RangeableQuery<SoldRow>,
+          .lt('order.order_date', yearEnd),
       );
     })(),
   ]);
@@ -509,7 +501,7 @@ export async function calcOrderSuggestionByProduct(
       .eq('is_return', false)
       .is('deleted_at', null)
       .gte('order.order_date', lookbackStart.toISOString())
-      .lt('order.order_date', now.toISOString()) as unknown as RangeableQuery<SoldRow>,
+      .lt('order.order_date', now.toISOString()),
   );
 
   const sumByProduct = new Map<string, number>();
@@ -581,7 +573,7 @@ export async function calcApproxProfitMargin(
       .eq('company_id', companyId)
       .is('deleted_at', null)
       .gte('order.order_date', start)
-      .lt('order.order_date', end) as unknown as RangeableQuery<ItemWithProduct>,
+      .lt('order.order_date', end),
   );
 
   let sales = 0;

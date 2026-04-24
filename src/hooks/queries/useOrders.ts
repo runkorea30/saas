@@ -9,7 +9,6 @@
  * 호출부(Orders 페이지)에서 useMemo로 클라이언트 필터링. 주문 수 수천 건 이내 가정.
  */
 import { useQuery } from '@tanstack/react-query';
-import type { PostgrestError } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import type { DateRange, Order } from '@/types/orders';
@@ -41,8 +40,6 @@ export function useOrders({ companyId, range }: UseOrdersParams) {
     enabled: Boolean(companyId),
     queryFn: async () => {
       const rows = await fetchAllRows<Order>(() =>
-        // Supabase select 문자열로 nested join 사용 → 타입 추론 한계로 any 캐스팅.
-        // Phase 3 `supabase gen types`에서 제네릭이 생기면 제거.
         supabase
           .from('orders')
           .select(ORDER_SELECT)
@@ -50,12 +47,8 @@ export function useOrders({ companyId, range }: UseOrdersParams) {
           .is('deleted_at', null)
           .gte('order_date', range.start)
           .lt('order_date', range.end)
-          .order('order_date', { ascending: false }) as unknown as {
-          range(
-            from: number,
-            to: number,
-          ): PromiseLike<{ data: Order[] | null; error: PostgrestError | null }>;
-        },
+          .order('order_date', { ascending: false })
+          .returns<Order[]>(),
       );
       return rows;
     },

@@ -48,13 +48,6 @@ export interface ProductUpdateArgs {
   changes: Partial<ProductCreateInput>;
 }
 
-type RangeableQuery<T> = {
-  range(
-    from: number,
-    to: number,
-  ): PromiseLike<{ data: T[] | null; error: PostgrestError | null }>;
-};
-
 const PRODUCT_SELECT =
   'id, code, name, category, sell_price, supply_price, unit_price_usd, unit, is_active, created_at, updated_at';
 
@@ -85,7 +78,7 @@ export function useProducts(companyId: string | null) {
           .select(PRODUCT_SELECT)
           .eq('company_id', companyId!)
           .is('deleted_at', null)
-          .order('code', { ascending: true }) as unknown as RangeableQuery<Product>,
+          .order('code', { ascending: true }),
       );
       return rows;
     },
