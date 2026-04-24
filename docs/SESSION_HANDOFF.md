@@ -183,6 +183,9 @@ Modal 위에 빌드된 확인 다이얼로그.
   - `products_dev_anon_insert` 정책
   - `products_dev_anon_update` 정책
   - `GRANT INSERT, UPDATE ON mochicraft_demo.products TO anon`
+- **Phase B 추가** (`20260424100000_phase_b_inventory_lots_dev_anon_insert.sql`):
+  - `inventory_lots_dev_anon_insert` 정책
+  - `GRANT INSERT ON mochicraft_demo.inventory_lots TO anon` (UPDATE 제외)
 
 ### 원복 SQL
 ```sql
