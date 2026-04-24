@@ -180,7 +180,7 @@ export function ProductForm({
           disabled={isEdit || busy}
           onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
           placeholder={isEdit ? undefined : 'AGL-ACR-WHT-4oz'}
-          style={inputStyle(!!errors.code, isEdit || busy)}
+          style={inputStyle(!!errors.code, isEdit || !!busy)}
           autoFocus={!isEdit}
         />
       </Field>
