@@ -47,3 +47,19 @@ export const CATEGORY_OPTIONS: ReadonlyArray<{
 export function isStandardCategory(key: string): key is ProductCategoryKey {
   return (PRODUCT_CATEGORIES as ReadonlyArray<string>).includes(key);
 }
+
+/**
+ * Products 목록 페이지 진입 시 기본으로 선택되는 카테고리.
+ *
+ * DB 실측값 — `CATEGORY_LABELS` 표준 4종과 별개. 한국 도매 운영 중
+ * 실제 제품 분류 체계("1-1.레더페인트" 등)가 DB에 그대로 저장돼 있어
+ * UI 드롭다운은 DB distinct 값을 런타임에 수집해 표시한다.
+ * 값 자체는 변경 없이 유지하되 기본 선택만 이 상수로 고정.
+ */
+export const PRODUCT_CATEGORY_DEFAULT = '1-1.레더페인트';
+
+/** "전체" 옵션의 내부 sentinel 값. 실제 category 값과 충돌하지 않도록 이중언더. */
+export const PRODUCT_CATEGORY_ALL = '__ALL__';
+
+/** 빈 문자열 카테고리(DB에 38건)를 드롭다운에 표시할 때의 라벨. */
+export const PRODUCT_CATEGORY_EMPTY_LABEL = '(미분류)';

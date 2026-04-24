@@ -1,17 +1,17 @@
 /**
- * 제품리스트 페이지 — 재고매입 > 제품리스트.
+ * 제품리스트 페이지 — 재고매입 > 제품리스트 (Phase A).
  *
- * 구조: PageHeader · FilterBar · SplitLayout(List | divider | Detail)
+ * 구조: PageHeader(+제품 추가) · FilterBar · 전체 폭 Table
  *       + 생성/수정 모달 · 삭제 확인 다이얼로그 · Toast
  *
  * 🔴 CLAUDE.md §1: company_id는 useCompany() 훅에서만.
- * 🔴 CLAUDE.md §5: 서버 조회/변경은 useProducts/useCreate/useUpdate/useDelete 경유.
- * 🟠 재고 섹션 숨김 (inventory_lots 데이터 부재, Q6). calcCurrentStock 호출 금지.
+ * 🔴 CLAUDE.md §5: 서버 조회/변경은 useProducts / useInventoryStock 경유.
+ * 🟠 Phase A: 2분할 제거 → 전체 폭. 편집/삭제 진입점은 행 마지막 컬럼 아이콘 버튼.
+ *    상세 펼침(Phase B), 컬럼 커스터마이징(Phase C)은 별도 PR.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Download, Plus } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
-import { useResizableSplit } from '@/hooks/useResizableSplit';
 import {
   useProducts,
   useCreateProduct,
@@ -20,16 +20,20 @@ import {
   type Product,
   type ProductCreateInput,
 } from '@/hooks/queries/useProducts';
+import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 import {
   ProductFilterBar,
   type ProductActiveFilter,
 } from '@/components/feature/products/ProductFilterBar';
 import { ProductListTable } from '@/components/feature/products/ProductListTable';
-import { ProductDetailPane } from '@/components/feature/products/ProductDetailPane';
 import { ProductForm } from '@/components/feature/products/ProductForm';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
+import {
+  PRODUCT_CATEGORY_ALL,
+  PRODUCT_CATEGORY_DEFAULT,
+} from '@/constants/categories';
 
 /** 편집 대상: 'new' = 신규 생성 모달, Product = 수정 모달, null = 닫힘. */
 type EditTarget = 'new' | Product | null;
@@ -37,55 +41,67 @@ type EditTarget = 'new' | Product | null;
 export function ProductsPage() {
   const { companyId, isLoading: companyLoading } = useCompany();
   const productsQuery = useProducts(companyId);
+  const stockQuery = useInventoryStock(companyId);
   const createMut = useCreateProduct(companyId);
   const updateMut = useUpdateProduct(companyId);
   const deleteMut = useDeleteProduct(companyId);
 
   // ───── 필터 상태 ─────
   const [query, setQuery] = useState('');
-  const [categorySel, setCategorySel] = useState<string[]>([]);
+  const [category, setCategory] = useState<string>(PRODUCT_CATEGORY_DEFAULT);
+  const [stockLessThan, setStockLessThan] = useState<number | null>(null);
   const [activeFilter, setActiveFilter] = useState<ProductActiveFilter>('all');
-
-  // ───── 선택/체크 상태 ─────
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [checked, setChecked] = useState<Record<string, boolean>>({});
 
   // ───── CRUD 상태 ─────
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const { showToast } = useToast();
 
-  // ───── 스플릿 (공용 훅) ─────
-  const {
-    leftPercent,
-    onDragStart: startSplitDrag,
-    containerRef: splitRef,
-  } = useResizableSplit({ pageKey: 'products', defaultLeftPercent: 58 });
-
-  // ───── 필터링 ─────
+  // ───── 데이터 ─────
   const products = productsQuery.data ?? [];
+  const stockByProduct = stockQuery.data?.stockByProduct;
 
-  // 현재 로드된 제품에서 등장한 카테고리만 option 으로.
+  // 드롭다운 옵션: DB 에 등장한 distinct category. 빈 문자열도 보존(맨 뒤).
   const categoryOptions = useMemo(() => {
     const set = new Set<string>();
     for (const p of products) set.add(p.category);
-    return Array.from(set).sort();
+    const arr = Array.from(set);
+    arr.sort((a, b) => {
+      if (a === '' && b !== '') return 1; // 빈 문자열은 항상 맨 뒤
+      if (a !== '' && b === '') return -1;
+      return a.localeCompare(b, 'ko');
+    });
+    return arr;
   }, [products]);
 
+  // 편집 모달에서 카테고리 preset 확장용 (기존 ProductForm이 이 prop을 요구).
+  const knownCategories = useMemo(() => categoryOptions, [categoryOptions]);
+
+  // ───── 필터 ─────
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return products.filter((p) => {
-      if (activeFilter === 'active' && !p.is_active) return false;
-      if (activeFilter === 'inactive' && p.is_active) return false;
-      if (categorySel.length && !categorySel.includes(p.category)) return false;
+      // 검색
       if (q) {
         const inCode = p.code.toLowerCase().includes(q);
         const inName = p.name.toLowerCase().includes(q);
         if (!inCode && !inName) return false;
       }
+      // 카테고리 (sentinel "__ALL__" 이면 통과)
+      if (category !== PRODUCT_CATEGORY_ALL && p.category !== category) {
+        return false;
+      }
+      // 활성/비활성
+      if (activeFilter === 'active' && !p.is_active) return false;
+      if (activeFilter === 'inactive' && p.is_active) return false;
+      // 재고 N 미만
+      if (stockLessThan != null) {
+        const cur = stockByProduct?.get(p.id)?.current ?? 0;
+        if (cur >= stockLessThan) return false;
+      }
       return true;
     });
-  }, [products, activeFilter, categorySel, query]);
+  }, [products, query, category, activeFilter, stockLessThan, stockByProduct]);
 
   // ───── 요약 ─────
   const summary = useMemo(() => {
@@ -95,39 +111,10 @@ export function ProductsPage() {
     return { total, active, categories };
   }, [products]);
 
-  // ───── 선택 동기화 ─────
-  useEffect(() => {
-    if (!selectedId || !filtered.find((p) => p.id === selectedId)) {
-      setSelectedId(filtered[0]?.id ?? null);
-    }
-  }, [filtered, selectedId]);
-
-  const selectedProduct = filtered.find((p) => p.id === selectedId) ?? null;
-
-  // ───── 체크박스 전체 ─────
-  const allIds = filtered.map((p) => p.id);
-  const allChecked = allIds.length > 0 && allIds.every((id) => checked[id]);
-  const someChecked = allIds.some((id) => checked[id]);
-  const toggleAll = () => {
-    setChecked((c) => {
-      const next = { ...c };
-      if (allChecked) allIds.forEach((id) => delete next[id]);
-      else allIds.forEach((id) => (next[id] = true));
-      return next;
-    });
-  };
-  const toggleOne = (id: string) => {
-    setChecked((c) => {
-      const next = { ...c };
-      if (next[id]) delete next[id];
-      else next[id] = true;
-      return next;
-    });
-  };
-
   const resetFilters = () => {
     setQuery('');
-    setCategorySel([]);
+    setCategory(PRODUCT_CATEGORY_ALL);
+    setStockLessThan(null);
     setActiveFilter('all');
   };
 
@@ -146,7 +133,6 @@ export function ProductsPage() {
       createMut.mutate(values, {
         onSuccess: (created) => {
           setEditTarget(null);
-          setSelectedId(created.id);
           showToast({ kind: 'success', text: `「${created.name}」 제품을 추가했습니다` });
         },
         onError: (e) => {
@@ -159,7 +145,6 @@ export function ProductsPage() {
         {
           onSuccess: (updated) => {
             setEditTarget(null);
-            setSelectedId(updated.id);
             showToast({ kind: 'success', text: `「${updated.name}」 제품을 저장했습니다` });
           },
           onError: (e) => {
@@ -181,7 +166,6 @@ export function ProductsPage() {
     deleteMut.mutate(target.id, {
       onSuccess: () => {
         setDeleteTarget(null);
-        if (selectedId === target.id) setSelectedId(null);
         showToast({ kind: 'success', text: `「${target.name}」 제품을 삭제했습니다` });
       },
       onError: (e) => {
@@ -279,11 +263,13 @@ export function ProductsPage() {
         <ProductFilterBar
           query={query}
           onQueryChange={setQuery}
-          categorySel={categorySel}
-          onCategoryChange={setCategorySel}
+          category={category}
+          onCategoryChange={setCategory}
+          categoryOptions={categoryOptions}
+          stockLessThan={stockLessThan}
+          onStockLessThanChange={setStockLessThan}
           activeFilter={activeFilter}
           onActiveFilterChange={setActiveFilter}
-          categoryOptions={categoryOptions}
           totalFiltered={filtered.length}
           totalAll={products.length}
         />
@@ -304,78 +290,14 @@ export function ProductsPage() {
           </div>
         )}
 
-        <div
-          ref={splitRef}
-          style={{
-            display: 'grid',
-            gridTemplateColumns: `calc(${leftPercent}% - 3px) 6px calc(${100 - leftPercent}% - 3px)`,
-            alignItems: 'start',
-            gap: 0,
-          }}
-        >
-          <ProductListTable
-            products={filtered}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            checked={checked}
-            onToggleChecked={toggleOne}
-            onToggleAllChecked={toggleAll}
-            allChecked={allChecked}
-            someChecked={someChecked}
-            isLoading={isLoading}
-            onResetFilters={resetFilters}
-          />
-
-          {/* 스플릿 핸들 */}
-          <div
-            onMouseDown={startSplitDrag}
-            title="드래그해서 크기 조절"
-            style={{
-              alignSelf: 'stretch',
-              cursor: 'col-resize',
-              position: 'relative',
-              userSelect: 'none',
-              minHeight: 240,
-            }}
-          >
-            <div
-              style={{
-                position: 'absolute',
-                left: '50%',
-                top: 0,
-                bottom: 0,
-                width: 1,
-                background: 'var(--line)',
-                transform: 'translateX(-0.5px)',
-              }}
-            />
-            <div
-              style={{
-                position: 'absolute',
-                left: '50%',
-                top: '50%',
-                transform: 'translate(-50%, -50%)',
-                width: 4,
-                height: 32,
-                borderRadius: 3,
-                background: 'var(--line-strong)',
-                transition: 'background .15s',
-              }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.background = 'var(--brand)')
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.background = 'var(--line-strong)')
-              }
-            />
-          </div>
-
-          <ProductDetailPane
-            product={selectedProduct}
-            onEdit={openEdit}
-            onDelete={openDelete}
-          />
-        </div>
+        <ProductListTable
+          products={filtered}
+          isLoading={isLoading}
+          onResetFilters={resetFilters}
+          stockByProduct={stockByProduct}
+          onEditClick={openEdit}
+          onDeleteClick={openDelete}
+        />
       </main>
 
       {/* 생성/수정 모달 */}
@@ -388,7 +310,7 @@ export function ProductsPage() {
         {editTarget !== null && (
           <ProductForm
             initial={editTarget === 'new' ? null : editTarget}
-            knownCategories={categoryOptions}
+            knownCategories={knownCategories}
             onSubmit={handleSubmit}
             onCancel={closeEdit}
             busy={createMut.isPending || updateMut.isPending}

@@ -1,33 +1,30 @@
 /**
- * Products 목록 테이블 — 컬럼 폭 드래그 리사이즈 지원.
+ * Products 목록 테이블 (Phase A).
  *
- * - 체크박스 열은 40px 고정(리사이저 없음).
- * - 나머지 7개 컬럼은 `useResizableColumns` 로 개별 폭 관리 + 저장.
- * - 공용 `ResizeHandle` 사용 (hairline → hover 2px → drag 3px, 더블클릭 리셋).
- * - 컬럼 합계가 컨테이너보다 크면 가로 스크롤, 작으면 우측 여백.
- *
- * 🟠 재고/판매 통계 컬럼은 Round 1에서 숨김 (inventory_lots 데이터 부재).
+ * 컬럼: 분류 · 제품코드 · 제품명 · 단위 · 판매가 · 공급가 · 현재재고 · USD · 편집/삭제
+ * - 체크박스 · 상태(is_active) 컬럼 Phase A 에서 제거 (필터로 대체).
+ * - 현재재고: useInventoryStock 결과(`stockByProduct`)에서 조회. 미로드 시 "—".
+ * - 편집/삭제: 행 hover 관계없이 항상 Pencil / Trash2 아이콘 노출.
+ * - 재고현황 페이지(StockListTable) 행 높이/호버/숫자 정렬 규칙 계승.
  */
-import { Check, EmptyState } from '@/components/feature/orders/primitives';
+import { Pencil, Trash2 } from 'lucide-react';
+import { EmptyState } from '@/components/feature/orders/primitives';
 import { ResizeHandle } from '@/components/common/ResizeHandle';
 import {
   useResizableColumns,
   type ColumnDef,
 } from '@/hooks/useResizableColumns';
 import type { Product } from '@/hooks/queries/useProducts';
-import { getCategoryLabel } from '@/constants/categories';
+import type { ProductStockInfo } from '@/utils/calculations';
 
 interface Props {
   products: Product[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  checked: Record<string, boolean>;
-  onToggleChecked: (id: string) => void;
-  onToggleAllChecked: () => void;
-  allChecked: boolean;
-  someChecked: boolean;
   isLoading: boolean;
   onResetFilters?: () => void;
+  /** 제품별 현재 재고 스냅샷. 로드 전이면 undefined → "—" 표시. */
+  stockByProduct: Map<string, ProductStockInfo> | undefined;
+  onEditClick: (product: Product) => void;
+  onDeleteClick: (product: Product) => void;
 }
 
 type Align = 'left' | 'right' | 'center';
@@ -37,40 +34,35 @@ interface ProductColumnDef extends ColumnDef {
   align: Align;
 }
 
-const CHECKBOX_COL_PX = 40;
 const ROW_GAP_PX = 10;
 const ROW_PADDING_X_PX = 14;
 
 const COLUMN_DEFS: ReadonlyArray<ProductColumnDef> = [
-  { key: 'code',           defaultWidth: 140, minWidth: 100, label: '제품코드', align: 'left' },
-  { key: 'name',           defaultWidth: 280, minWidth: 160, label: '상품명',   align: 'left' },
-  { key: 'category',       defaultWidth: 90,  minWidth: 70,  label: '카테고리', align: 'left' },
+  { key: 'category',       defaultWidth: 140, minWidth: 100, label: '분류',     align: 'left' },
+  { key: 'code',           defaultWidth: 130, minWidth: 100, label: '제품코드', align: 'left' },
+  { key: 'name',           defaultWidth: 280, minWidth: 160, label: '제품명',   align: 'left' },
+  { key: 'unit',           defaultWidth: 60,  minWidth: 48,  label: '단위',     align: 'left' },
   { key: 'sell_price',     defaultWidth: 100, minWidth: 80,  label: '판매가',   align: 'right' },
   { key: 'supply_price',   defaultWidth: 100, minWidth: 80,  label: '공급가',   align: 'right' },
+  { key: 'current_stock',  defaultWidth: 90,  minWidth: 70,  label: '현재재고', align: 'right' },
   { key: 'unit_price_usd', defaultWidth: 90,  minWidth: 70,  label: 'USD',     align: 'right' },
-  { key: 'status',         defaultWidth: 80,  minWidth: 60,  label: '상태',     align: 'center' },
+  { key: 'actions',        defaultWidth: 90,  minWidth: 80,  label: '',         align: 'center' },
 ];
 
 export function ProductListTable({
   products,
-  selectedId,
-  onSelect,
-  checked,
-  onToggleChecked,
-  onToggleAllChecked,
-  allChecked,
-  someChecked,
   isLoading,
   onResetFilters,
+  stockByProduct,
+  onEditClick,
+  onDeleteClick,
 }: Props) {
   const { widths, draggingKey, onResizeStart, resetColumn } = useResizableColumns({
     pageKey: 'products',
     columns: COLUMN_DEFS,
   });
 
-  const gridTemplate = `${CHECKBOX_COL_PX}px ${COLUMN_DEFS.map(
-    (c) => `${widths[c.key]}px`,
-  ).join(' ')}`;
+  const gridTemplate = COLUMN_DEFS.map((c) => `${widths[c.key]}px`).join(' ');
 
   return (
     <div
@@ -99,11 +91,6 @@ export function ProductListTable({
             background: 'var(--surface-2)',
           }}
         >
-          <Check
-            on={allChecked}
-            indet={!allChecked && someChecked}
-            onChange={onToggleAllChecked}
-          />
           {COLUMN_DEFS.map((col) => (
             <HeaderCell
               key={col.key}
@@ -130,12 +117,10 @@ export function ProductListTable({
           />
         ) : (
           products.map((p) => {
-            const isSelected = selectedId === p.id;
-            const isChecked = Boolean(checked[p.id]);
+            const stockVal = stockByProduct?.get(p.id)?.current;
             return (
               <div
                 key={p.id}
-                onClick={() => onSelect(p.id)}
                 style={{
                   display: 'grid',
                   gridTemplateColumns: gridTemplate,
@@ -143,26 +128,25 @@ export function ProductListTable({
                   gap: ROW_GAP_PX,
                   padding: `11px ${ROW_PADDING_X_PX}px`,
                   borderBottom: '1px solid var(--line)',
-                  background: isSelected ? 'var(--brand-wash)' : 'var(--surface)',
-                  cursor: 'pointer',
+                  background: 'var(--surface)',
                   transition: 'background .1s',
                 }}
-                onMouseEnter={(e) => {
-                  if (!isSelected)
-                    (e.currentTarget as HTMLDivElement).style.background = 'var(--surface-2)';
-                }}
-                onMouseLeave={(e) => {
-                  if (!isSelected)
-                    (e.currentTarget as HTMLDivElement).style.background = 'var(--surface)';
-                }}
+                onMouseEnter={(e) =>
+                  ((e.currentTarget as HTMLDivElement).style.background =
+                    'var(--surface-2)')
+                }
+                onMouseLeave={(e) =>
+                  ((e.currentTarget as HTMLDivElement).style.background =
+                    'var(--surface)')
+                }
               >
-                <Check on={isChecked} onChange={() => onToggleChecked(p.id)} />
+                <CellText value={categoryDisplay(p.category)} small muted={!p.category} />
 
                 <CellText value={p.code} numeric muted />
 
                 <CellText value={p.name} bold ink="ink" />
 
-                <CellText value={getCategoryLabel(p.category)} small muted />
+                <CellText value={p.unit} small muted />
 
                 <CellText
                   value={fmtWon(p.sell_price)}
@@ -179,6 +163,14 @@ export function ProductListTable({
                 />
 
                 <CellText
+                  value={stockVal == null ? '—' : fmtQty(stockVal)}
+                  numeric
+                  align="right"
+                  weight={500}
+                  muted={stockVal == null}
+                />
+
+                <CellText
                   value={
                     p.unit_price_usd !== null
                       ? `$${Number(p.unit_price_usd).toFixed(2)}`
@@ -190,16 +182,29 @@ export function ProductListTable({
                   muted
                 />
 
-                <div style={{ display: 'flex', justifyContent: 'center' }}>
-                  <span
-                    title={p.is_active ? '활성' : '비활성'}
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: 999,
-                      background: p.is_active ? 'var(--success)' : 'var(--ink-4)',
-                    }}
-                  />
+                {/* 편집/삭제 */}
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <IconButton
+                    title="편집"
+                    onClick={() => onEditClick(p)}
+                    ariaLabel={`「${p.name}」 편집`}
+                  >
+                    <Pencil size={13} strokeWidth={1.6} />
+                  </IconButton>
+                  <IconButton
+                    title="삭제"
+                    onClick={() => onDeleteClick(p)}
+                    ariaLabel={`「${p.name}」 삭제`}
+                    danger
+                  >
+                    <Trash2 size={13} strokeWidth={1.6} />
+                  </IconButton>
                 </div>
               </div>
             );
@@ -292,7 +297,68 @@ function CellText({
   );
 }
 
+function IconButton({
+  children,
+  onClick,
+  title,
+  ariaLabel,
+  danger,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  title: string;
+  ariaLabel: string;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      title={title}
+      aria-label={ariaLabel}
+      style={{
+        width: 26,
+        height: 26,
+        borderRadius: 6,
+        border: '1px solid transparent',
+        background: 'transparent',
+        color: danger ? 'var(--danger)' : 'var(--ink-2)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: 'pointer',
+        transition: 'background .1s, border-color .1s',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = danger
+          ? 'var(--danger-wash)'
+          : 'var(--surface-2)';
+        e.currentTarget.style.borderColor = danger
+          ? 'var(--danger-wash)'
+          : 'var(--line)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent';
+        e.currentTarget.style.borderColor = 'transparent';
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 function fmtWon(n: number): string {
   if (n === 0) return '—';
   return n.toLocaleString('ko-KR');
+}
+
+function fmtQty(n: number): string {
+  return n.toLocaleString('ko-KR');
+}
+
+function categoryDisplay(c: string): string {
+  return c === '' ? '(미분류)' : c;
 }

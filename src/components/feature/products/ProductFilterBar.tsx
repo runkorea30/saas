@@ -1,21 +1,34 @@
 /**
- * Products 페이지 필터 바.
- * 검색 (코드·상품명) · 카테고리 MultiChip · 상태 Segmented.
+ * Products 페이지 필터 바 (Phase A).
+ *
+ * 구성: 검색(코드·상품명) · 카테고리 Select · 재고 미만 숫자 · 활성 Segmented
+ *
+ * 🟠 Phase A: 카테고리는 단일 선택(MultiChip 폐기). 기본값 PRODUCT_CATEGORY_DEFAULT.
+ * 🟠 "전체" 옵션은 PRODUCT_CATEGORY_ALL sentinel 사용 (빈 문자열 카테고리와 충돌 회피).
+ * 🟡 빈 문자열 카테고리(DB 38건)는 "(미분류)" 라벨로 드롭다운 맨 하단 표시.
  */
-import { Search, Tag } from 'lucide-react';
-import { MultiChip, Segmented } from '@/components/feature/orders/primitives';
-import { getCategoryLabel } from '@/constants/categories';
+import { Search } from 'lucide-react';
+import { Segmented } from '@/components/feature/orders/primitives';
+import {
+  PRODUCT_CATEGORY_ALL,
+  PRODUCT_CATEGORY_EMPTY_LABEL,
+} from '@/constants/categories';
 
 export type ProductActiveFilter = 'all' | 'active' | 'inactive';
 
 interface Props {
   query: string;
   onQueryChange: (v: string) => void;
-  categorySel: string[];
-  onCategoryChange: (v: string[]) => void;
+  /** 선택된 카테고리. PRODUCT_CATEGORY_ALL 이면 "전체". 빈 문자열이면 "(미분류)". */
+  category: string;
+  onCategoryChange: (v: string) => void;
+  /** DB distinct 카테고리 값 배열 (빈 문자열 포함 가능). 페이지에서 collect. */
+  categoryOptions: string[];
+  /** "재고 N 미만" 필터. null 이면 미적용. */
+  stockLessThan: number | null;
+  onStockLessThanChange: (v: number | null) => void;
   activeFilter: ProductActiveFilter;
   onActiveFilterChange: (v: ProductActiveFilter) => void;
-  categoryOptions: string[];
   totalFiltered: number;
   totalAll: number;
 }
@@ -23,14 +36,30 @@ interface Props {
 export function ProductFilterBar({
   query,
   onQueryChange,
-  categorySel,
+  category,
   onCategoryChange,
+  categoryOptions,
+  stockLessThan,
+  onStockLessThanChange,
   activeFilter,
   onActiveFilterChange,
-  categoryOptions,
   totalFiltered,
   totalAll,
 }: Props) {
+  const handleStockInput = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      onStockLessThanChange(null);
+      return;
+    }
+    const n = Number(trimmed);
+    if (!Number.isFinite(n) || n < 0) {
+      onStockLessThanChange(null);
+      return;
+    }
+    onStockLessThanChange(n);
+  };
+
   return (
     <div
       style={{
@@ -45,6 +74,7 @@ export function ProductFilterBar({
         flexWrap: 'wrap',
       }}
     >
+      {/* 검색 */}
       <div
         style={{
           display: 'inline-flex',
@@ -63,7 +93,7 @@ export function ProductFilterBar({
         <input
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="제품코드·상품명 검색"
+          placeholder="제품코드·제품명 검색"
           style={{
             border: 'none',
             outline: 'none',
@@ -76,17 +106,57 @@ export function ProductFilterBar({
         />
       </div>
 
-      <MultiChip
-        label="카테고리"
-        icon={<Tag size={12} color="var(--ink-3)" strokeWidth={1.6} />}
-        selected={categorySel}
-        onChange={onCategoryChange}
-        options={categoryOptions.map((c) => ({
-          id: c,
-          label: getCategoryLabel(c),
-        }))}
-      />
+      {/* 카테고리 드롭다운 */}
+      <select
+        value={category}
+        onChange={(e) => onCategoryChange(e.target.value)}
+        style={selectStyle}
+        title="카테고리"
+      >
+        <option value={PRODUCT_CATEGORY_ALL}>전체</option>
+        {categoryOptions.map((c) => (
+          <option key={c || '__EMPTY__'} value={c}>
+            {c === '' ? PRODUCT_CATEGORY_EMPTY_LABEL : c}
+          </option>
+        ))}
+      </select>
 
+      {/* 재고 N 미만 */}
+      <div
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '0 10px',
+          height: 30,
+          background: 'var(--surface-2)',
+          borderRadius: 8,
+          border: '1px solid var(--line)',
+        }}
+      >
+        <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>재고</span>
+        <input
+          type="number"
+          min={0}
+          step={1}
+          value={stockLessThan == null ? '' : String(stockLessThan)}
+          onChange={(e) => handleStockInput(e.target.value)}
+          placeholder="__"
+          style={{
+            border: 'none',
+            outline: 'none',
+            background: 'transparent',
+            color: 'var(--ink)',
+            fontSize: 12.5,
+            fontFamily: 'var(--font-num)',
+            width: 60,
+            textAlign: 'right',
+          }}
+        />
+        <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>미만</span>
+      </div>
+
+      {/* 활성/비활성 */}
       <Segmented<ProductActiveFilter>
         value={activeFilter}
         onChange={onActiveFilterChange}
@@ -98,6 +168,7 @@ export function ProductFilterBar({
         compact
       />
 
+      {/* 우측 카운트 */}
       <div style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--ink-3)' }}>
         <span className="num" style={{ color: 'var(--ink-2)', fontWeight: 500 }}>
           {totalFiltered}
@@ -107,3 +178,17 @@ export function ProductFilterBar({
     </div>
   );
 }
+
+const selectStyle: React.CSSProperties = {
+  height: 30,
+  padding: '0 10px',
+  borderRadius: 8,
+  border: '1px solid var(--line)',
+  background: 'var(--surface-2)',
+  color: 'var(--ink)',
+  fontSize: 12.5,
+  fontFamily: 'var(--font-kr)',
+  outline: 'none',
+  cursor: 'pointer',
+  minWidth: 160,
+};
