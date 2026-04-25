@@ -13,7 +13,7 @@
 | Phase 3 | 전역 Shell + 2단 Nav + 라우트 스텁 | ✅ 완료 |
 | Phase 3.5 | Home Dashboard 실구현 | ✅ 완료 (2026-04-24) |
 | Phase 3.6 | Customers 페이지 실구현 | ✅ 완료 (2026-04-24) |
-| Phase 3.7 | Products 페이지 — 조회 + CRUD | ✅ 완료 (2026-04-24) |
+| Phase 3.7 | Products 페이지 — 조회 + CRUD + 재고현황 스타일 + 사용자 검증 1차 반영 | ✅ 완료 (2026-04-25) |
 | Phase 3.8 | Inventory (재고현황) 페이지 — 기초재고 투입 | ✅ 완료 (2026-04-24) |
 | Phase 3.9 | Import/Purchase 페이지 Phase 1 — 수동 입력 입고확정 | ✅ 완료 (2026-04-24) |
 | Phase 4 | 나머지 7 페이지 + Auth 도입 | 대기 |
@@ -23,10 +23,20 @@
 - `/` — 홈 대시보드 (KPI + Today + Chart + Timeline)
 - `/sales/orders` — 주문내역 (필터/목록/상세 split)
 - `/settings/customers` — 거래처 (목록/필터/상세 split)
-- `/inventory/products` — 제품리스트 (CRUD + 모달)
+- `/inventory/products` — 제품리스트 (CRUD + 모달 + 체크박스 + 필터 초기화)
 - `/inventory/stock` — 재고현황 (기초재고 투입 + KPI)
 - `/inventory/purchase` — 수입/매입 Phase 1 (수동 입력 + 입고확정, PDF 파싱은 Phase 2)
 - 나머지 7 경로는 전부 `<PlaceholderPage />` 상태
+
+---
+
+## 후속 PR 로드맵 (2026-04-25 시점 기준)
+
+- **다음 작업 후보 — 재고현황 페이지** (런코리아 미정)
+- **PR 2 (예정)**: Products 엑셀 업로드 — XLSX 템플릿, 프리뷰, 일괄 추가
+- **PR 3 (예정)**: Products 일괄 수정 — 체크된 행의 판매가/공급가/USD 등 동시 변경. PR 1.5 (#4) 의 체크박스 컬럼이 이 PR을 위한 사전 준비
+- **Phase B (예정)**: Products 행 클릭 상세 펼침
+- **Phase C (예정)**: 컬럼 선택/드래그 + 사용자별 UI 설정 DB 저장
 
 ---
 
@@ -172,6 +182,9 @@ Modal 위에 빌드된 확인 다이얼로그.
 스텁 유지 (Phase 4/5):
 - `calcCostOfSales` — FIFO 로트 소비 로직 필요
 - `calcMRR` — Super Admin 페이지와 함께
+
+### 체크박스 컴포넌트 활용 확장 (2026-04-25, PR #4)
+ProductListTable에서 `Check` 컴포넌트(`orders/primitives.tsx`)를 신규 import하여 체크박스 컬럼 구현. CustomersListTable / 기타 ListTable에서도 동일 패턴 재사용 가능. ProductFilterBar에 `hasActiveFilter` / `RotateCcw` / `selectedCount` 미니 표시 패턴 도입 — 다른 FilterBar에 이식 가능.
 
 ---
 
@@ -360,6 +373,8 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 - 현재 split 회귀가 있으므로, 사용 중 좌우 패널 너비 조정은 최소화 권장
 - 컬럼 드래그는 정상 동작 (`useResizableColumns` 는 문제 없음)
 
+> ⚠️ PR #4 (2026-04-25) 머지로 ProductsPage / ProductListTable / ProductFilterBar 코드 변경됨. 위 회귀 이슈 재검증 필요.
+
 ---
 
 ### ✅ 카테고리 영/한 매핑 일원화 — 완료 (2026-04-24, `c48e53b`)
@@ -458,8 +473,8 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 - 타입체크: `npx tsc --noEmit` (커밋 전 필수)
 
 ### 최근 커밋
-- `95336f3` feat(import): 수입/매입 Phase 1 — 수동 입력 + 입고확정
-- `048fd8a` feat(inventory): 재고현황 페이지 + 기초재고 투입
-- `663e0bb` chore(rls): mochicraft_demo.inventory_lots anon INSERT 허용 (dev 전용)
-- `e17433e` docs: 주문/재고 도메인 규칙 7종 확정 기록 (2026-04-24)
-- `1fcf1cc` feat(customers): Customers 페이지 + disabled 스타일 공용화 + 회사명 정렬 규칙
+- `975584a` PR 1.5: Products 페이지 사용자 검증 후속 개선 (요약/초기화/체크박스) (#4) [2026-04-25]
+- `b61d6ef` feat(products): Phase A — 재고현황 스타일 레이아웃 + 재고수량 필터 (#3)
+- `695a562` feat(inventory): 안전재고/발주점 풀패키지 (마이그레이션 + UI + 홈 경고) (#2)
+- `34c4a13` feat(dogfooding): Supabase 연동 + N+1 리팩토링 + 타입 엄격화 (#1)
+- `810a6ea` docs: SESSION_HANDOFF 갱신 — 수입/매입 Phase 1 완료 반영
