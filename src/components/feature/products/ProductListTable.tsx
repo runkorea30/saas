@@ -1,14 +1,16 @@
 /**
- * Products 목록 테이블 (Phase A).
+ * Products 목록 테이블 (Phase A + PR 1.5).
  *
- * 컬럼: 분류 · 제품코드 · 제품명 · 단위 · 판매가 · 공급가 · 현재재고 · USD · 편집/삭제
- * - 체크박스 · 상태(is_active) 컬럼 Phase A 에서 제거 (필터로 대체).
+ * 컬럼: [체크] · 분류 · 제품코드 · 제품명 · 단위 · 판매가 · 공급가 · 현재재고 · USD · 편집/삭제
+ * - 체크박스 컬럼은 가장 왼쪽 40px 고정. useResizableColumns에는 등록하지 않음
+ *   (Orders 패턴 — localStorage 영향 회피, 리사이즈 불가).
+ * - 헤더 체크박스: filtered 전체 기준 (페이지네이션 없음). indeterminate 지원.
  * - 현재재고: useInventoryStock 결과(`stockByProduct`)에서 조회. 미로드 시 "—".
  * - 편집/삭제: 행 hover 관계없이 항상 Pencil / Trash2 아이콘 노출.
  * - 재고현황 페이지(StockListTable) 행 높이/호버/숫자 정렬 규칙 계승.
  */
 import { Pencil, Trash2 } from 'lucide-react';
-import { EmptyState } from '@/components/feature/orders/primitives';
+import { Check, EmptyState } from '@/components/feature/orders/primitives';
 import { ResizeHandle } from '@/components/common/ResizeHandle';
 import {
   useResizableColumns,
@@ -25,6 +27,12 @@ interface Props {
   stockByProduct: Map<string, ProductStockInfo> | undefined;
   onEditClick: (product: Product) => void;
   onDeleteClick: (product: Product) => void;
+  /** 체크박스 상태 — id별 boolean. 미체크 ID는 키가 없거나 false. */
+  checked: Record<string, boolean>;
+  /** 단일 행 토글. next는 다음 상태(true=체크). */
+  onToggleChecked: (id: string, next: boolean) => void;
+  /** 헤더 체크박스 토글. next=true면 filtered 전체 체크, false면 전체 해제. */
+  onTogglePageChecked: (next: boolean) => void;
 }
 
 type Align = 'left' | 'right' | 'center';
@@ -34,6 +42,7 @@ interface ProductColumnDef extends ColumnDef {
   align: Align;
 }
 
+const CHECKBOX_COL_PX = 40;
 const ROW_GAP_PX = 10;
 const ROW_PADDING_X_PX = 14;
 
@@ -56,13 +65,24 @@ export function ProductListTable({
   stockByProduct,
   onEditClick,
   onDeleteClick,
+  checked,
+  onToggleChecked,
+  onTogglePageChecked,
 }: Props) {
   const { widths, draggingKey, onResizeStart, resetColumn } = useResizableColumns({
     pageKey: 'products',
     columns: COLUMN_DEFS,
   });
 
-  const gridTemplate = COLUMN_DEFS.map((c) => `${widths[c.key]}px`).join(' ');
+  const gridTemplate = `${CHECKBOX_COL_PX}px ${COLUMN_DEFS.map(
+    (c) => `${widths[c.key]}px`,
+  ).join(' ')}`;
+
+  // 헤더 체크박스 상태 — filtered 전체 기준
+  const allChecked =
+    products.length > 0 && products.every((p) => !!checked[p.id]);
+  const someChecked = Object.keys(checked).some((id) => checked[id]);
+  const headerIndet = someChecked && !allChecked;
 
   return (
     <div
@@ -91,6 +111,21 @@ export function ProductListTable({
             background: 'var(--surface-2)',
           }}
         >
+          {/* 체크박스 헤더 */}
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Check
+              on={allChecked}
+              indet={headerIndet}
+              onChange={() => onTogglePageChecked(!allChecked)}
+            />
+          </div>
           {COLUMN_DEFS.map((col) => (
             <HeaderCell
               key={col.key}
@@ -118,6 +153,7 @@ export function ProductListTable({
         ) : (
           products.map((p) => {
             const stockVal = stockByProduct?.get(p.id)?.current;
+            const isRowChecked = !!checked[p.id];
             return (
               <div
                 key={p.id}
@@ -140,6 +176,21 @@ export function ProductListTable({
                     'var(--surface)')
                 }
               >
+                {/* 체크박스 셀 */}
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Check
+                    on={isRowChecked}
+                    onChange={() => onToggleChecked(p.id, !isRowChecked)}
+                  />
+                </div>
+
                 <CellText value={categoryDisplay(p.category)} small muted={!p.category} />
 
                 <CellText value={p.code} numeric muted />

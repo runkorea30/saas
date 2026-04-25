@@ -7,10 +7,11 @@
  * 🟠 "전체" 옵션은 PRODUCT_CATEGORY_ALL sentinel 사용 (빈 문자열 카테고리와 충돌 회피).
  * 🟡 빈 문자열 카테고리(DB 38건)는 "(미분류)" 라벨로 드롭다운 맨 하단 표시.
  */
-import { Search } from 'lucide-react';
+import { RotateCcw, Search } from 'lucide-react';
 import { Segmented } from '@/components/feature/orders/primitives';
 import {
   PRODUCT_CATEGORY_ALL,
+  PRODUCT_CATEGORY_DEFAULT,
   PRODUCT_CATEGORY_EMPTY_LABEL,
 } from '@/constants/categories';
 
@@ -31,6 +32,10 @@ interface Props {
   onActiveFilterChange: (v: ProductActiveFilter) => void;
   totalFiltered: number;
   totalAll: number;
+  /** 활성 필터가 있을 때만 노출되는 "필터 초기화" 버튼 핸들러. 미전달 시 버튼 숨김. */
+  onReset?: () => void;
+  /** 체크박스로 선택된 행 개수. 0보다 클 때만 카운트 영역에 미니 표시. */
+  selectedCount?: number;
 }
 
 export function ProductFilterBar({
@@ -45,7 +50,15 @@ export function ProductFilterBar({
   onActiveFilterChange,
   totalFiltered,
   totalAll,
+  onReset,
+  selectedCount,
 }: Props) {
+  const hasActiveFilter =
+    query !== '' ||
+    category !== PRODUCT_CATEGORY_DEFAULT ||
+    stockLessThan != null ||
+    activeFilter !== 'all';
+
   const handleStockInput = (raw: string) => {
     const trimmed = raw.trim();
     if (!trimmed) {
@@ -168,12 +181,72 @@ export function ProductFilterBar({
         compact
       />
 
+      {/* 필터 초기화 — 활성 필터가 있을 때만 노출 */}
+      {hasActiveFilter && onReset && (
+        <button
+          type="button"
+          onClick={onReset}
+          title="모든 필터 해제"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            height: 30,
+            padding: '0 10px',
+            fontSize: 12,
+            fontFamily: 'var(--font-kr)',
+            color: 'var(--ink-2)',
+            background: 'var(--surface-2)',
+            border: '1px solid var(--line)',
+            borderRadius: 8,
+            cursor: 'pointer',
+            transition: 'background .12s, color .12s',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--surface)';
+            e.currentTarget.style.color = 'var(--ink)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'var(--surface-2)';
+            e.currentTarget.style.color = 'var(--ink-2)';
+          }}
+        >
+          <RotateCcw size={13} strokeWidth={1.6} />
+          필터 초기화
+        </button>
+      )}
+
       {/* 우측 카운트 */}
-      <div style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--ink-3)' }}>
-        <span className="num" style={{ color: 'var(--ink-2)', fontWeight: 500 }}>
-          {totalFiltered}
+      <div
+        style={{
+          marginLeft: 'auto',
+          fontSize: 11.5,
+          color: 'var(--ink-3)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+        }}
+      >
+        {selectedCount != null && selectedCount > 0 && (
+          <>
+            <span
+              className="num"
+              style={{ color: 'var(--brand)', fontWeight: 500 }}
+            >
+              {selectedCount}개 선택
+            </span>
+            <span style={{ color: 'var(--ink-4)' }}>·</span>
+          </>
+        )}
+        <span>
+          <span
+            className="num"
+            style={{ color: 'var(--ink-2)', fontWeight: 500 }}
+          >
+            {totalFiltered}
+          </span>
+          <span> / {totalAll} 제품</span>
         </span>
-        <span> / {totalAll} 제품</span>
       </div>
     </div>
   );

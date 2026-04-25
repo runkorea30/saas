@@ -9,7 +9,7 @@
  * 🟠 Phase A: 2분할 제거 → 전체 폭. 편집/삭제 진입점은 행 마지막 컬럼 아이콘 버튼.
  *    상세 펼침(Phase B), 컬럼 커스터마이징(Phase C)은 별도 PR.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Download, Plus } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import {
@@ -51,6 +51,9 @@ export function ProductsPage() {
   const [category, setCategory] = useState<string>(PRODUCT_CATEGORY_DEFAULT);
   const [stockLessThan, setStockLessThan] = useState<number | null>(null);
   const [activeFilter, setActiveFilter] = useState<ProductActiveFilter>('all');
+
+  // ───── 체크박스 상태 ─────
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
 
   // ───── CRUD 상태 ─────
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
@@ -105,15 +108,57 @@ export function ProductsPage() {
 
   // ───── 요약 ─────
   const summary = useMemo(() => {
-    const total = products.length;
-    const active = products.filter((p) => p.is_active).length;
-    const categories = new Set(products.map((p) => p.category)).size;
+    const total = filtered.length;
+    const active = filtered.filter((p) => p.is_active).length;
+    const categories = new Set(filtered.map((p) => p.category)).size;
     return { total, active, categories };
-  }, [products]);
+  }, [filtered]);
+
+  // ───── 체크박스 자동 정리 ─────
+  // 필터로 가려진 ID는 checked에서 제거. 변화 없으면 prev 그대로 반환해 추가 렌더 방지.
+  useEffect(() => {
+    setChecked((prev) => {
+      const visibleIds = new Set(filtered.map((p) => p.id));
+      const next: Record<string, boolean> = {};
+      let mutated = false;
+      for (const id of Object.keys(prev)) {
+        if (visibleIds.has(id)) {
+          next[id] = prev[id];
+        } else {
+          mutated = true;
+        }
+      }
+      return mutated ? next : prev;
+    });
+  }, [filtered]);
+
+  const toggleOneChecked = (id: string, next: boolean) => {
+    setChecked((prev) => {
+      const out = { ...prev };
+      if (next) out[id] = true;
+      else delete out[id];
+      return out;
+    });
+  };
+
+  const togglePageChecked = (next: boolean) => {
+    setChecked((prev) => {
+      if (next) {
+        const out = { ...prev };
+        for (const p of filtered) out[p.id] = true;
+        return out;
+      }
+      const out = { ...prev };
+      for (const p of filtered) delete out[p.id];
+      return out;
+    });
+  };
+
+  const selectedCount = Object.keys(checked).length;
 
   const resetFilters = () => {
     setQuery('');
-    setCategory(PRODUCT_CATEGORY_ALL);
+    setCategory(PRODUCT_CATEGORY_DEFAULT);
     setStockLessThan(null);
     setActiveFilter('all');
   };
@@ -272,6 +317,8 @@ export function ProductsPage() {
           onActiveFilterChange={setActiveFilter}
           totalFiltered={filtered.length}
           totalAll={products.length}
+          onReset={resetFilters}
+          selectedCount={selectedCount}
         />
 
         {/* 에러 배너 */}
@@ -297,6 +344,9 @@ export function ProductsPage() {
           stockByProduct={stockByProduct}
           onEditClick={openEdit}
           onDeleteClick={openDelete}
+          checked={checked}
+          onToggleChecked={toggleOneChecked}
+          onTogglePageChecked={togglePageChecked}
         />
       </main>
 
