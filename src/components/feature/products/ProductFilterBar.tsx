@@ -11,6 +11,7 @@ import { RotateCcw, Search } from 'lucide-react';
 import { Segmented } from '@/components/feature/orders/primitives';
 import {
   PRODUCT_CATEGORY_ALL,
+  PRODUCT_CATEGORY_DEFAULT,
   PRODUCT_CATEGORY_EMPTY_LABEL,
 } from '@/constants/categories';
 
@@ -54,7 +55,7 @@ export function ProductFilterBar({
 }: Props) {
   const hasActiveFilter =
     query !== '' ||
-    category !== PRODUCT_CATEGORY_ALL ||
+    category !== PRODUCT_CATEGORY_DEFAULT ||
     stockLessThan != null ||
     activeFilter !== 'all';
 

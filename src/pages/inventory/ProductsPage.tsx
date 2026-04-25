@@ -158,7 +158,7 @@ export function ProductsPage() {
 
   const resetFilters = () => {
     setQuery('');
-    setCategory(PRODUCT_CATEGORY_ALL);
+    setCategory(PRODUCT_CATEGORY_DEFAULT);
     setStockLessThan(null);
     setActiveFilter('all');
   };
