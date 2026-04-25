@@ -105,11 +105,11 @@ export function ProductsPage() {
 
   // ───── 요약 ─────
   const summary = useMemo(() => {
-    const total = products.length;
-    const active = products.filter((p) => p.is_active).length;
-    const categories = new Set(products.map((p) => p.category)).size;
+    const total = filtered.length;
+    const active = filtered.filter((p) => p.is_active).length;
+    const categories = new Set(filtered.map((p) => p.category)).size;
     return { total, active, categories };
-  }, [products]);
+  }, [filtered]);
 
   const resetFilters = () => {
     setQuery('');
