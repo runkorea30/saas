@@ -272,6 +272,7 @@ export function ProductsPage() {
           onActiveFilterChange={setActiveFilter}
           totalFiltered={filtered.length}
           totalAll={products.length}
+          onReset={resetFilters}
         />
 
         {/* 에러 배너 */}
