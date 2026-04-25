@@ -33,6 +33,8 @@ interface Props {
   totalAll: number;
   /** 활성 필터가 있을 때만 노출되는 "필터 초기화" 버튼 핸들러. 미전달 시 버튼 숨김. */
   onReset?: () => void;
+  /** 체크박스로 선택된 행 개수. 0보다 클 때만 카운트 영역에 미니 표시. */
+  selectedCount?: number;
 }
 
 export function ProductFilterBar({
@@ -48,6 +50,7 @@ export function ProductFilterBar({
   totalFiltered,
   totalAll,
   onReset,
+  selectedCount,
 }: Props) {
   const hasActiveFilter =
     query !== '' ||
@@ -213,11 +216,36 @@ export function ProductFilterBar({
       )}
 
       {/* 우측 카운트 */}
-      <div style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--ink-3)' }}>
-        <span className="num" style={{ color: 'var(--ink-2)', fontWeight: 500 }}>
-          {totalFiltered}
+      <div
+        style={{
+          marginLeft: 'auto',
+          fontSize: 11.5,
+          color: 'var(--ink-3)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+        }}
+      >
+        {selectedCount != null && selectedCount > 0 && (
+          <>
+            <span
+              className="num"
+              style={{ color: 'var(--brand)', fontWeight: 500 }}
+            >
+              {selectedCount}개 선택
+            </span>
+            <span style={{ color: 'var(--ink-4)' }}>·</span>
+          </>
+        )}
+        <span>
+          <span
+            className="num"
+            style={{ color: 'var(--ink-2)', fontWeight: 500 }}
+          >
+            {totalFiltered}
+          </span>
+          <span> / {totalAll} 제품</span>
         </span>
-        <span> / {totalAll} 제품</span>
       </div>
     </div>
   );
