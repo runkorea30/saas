@@ -28,6 +28,7 @@ export interface OrderItem {
   unit_price: number;
   amount: number;
   is_return: boolean;
+  supply_price?: number;
   product: OrderProductRef | null;
 }
 
@@ -54,3 +55,24 @@ export interface DateRange {
 }
 
 export type SourceFilter = 'all' | OrderSource;
+
+/**
+ * 상세 패널 편집 모드의 임시 행 모델.
+ * useOrderItems 결과를 평탄화한 형태 + `_dirty`/`_isNew` 트래킹 필드 추가.
+ */
+export interface OrderItemDraft {
+  id: string;
+  company_id: string;
+  order_id: string;
+  product_id: string | null;
+  quantity: number;
+  unit_price: number;
+  amount: number;
+  is_return: boolean;
+  deleted_at: string | null;
+  product_code: string;
+  product_name: string;
+  supply_price: number;
+  _dirty: boolean;
+  _isNew: boolean;
+}

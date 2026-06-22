@@ -1,7 +1,13 @@
 /**
  * Orders 우측 상세 패널. 선택된 주문이 없으면 placeholder.
- * VAT 역산은 calcSupplyAmount(utils/calculations) 사용 — 부가세 포함 금액 ÷ 1.1.
+ * VAT 역산 + 공급가는 calcSupplyAmount(utils/calculations) 사용 — 부가세 포함 금액 ÷ 1.1.
+ *
+ * 🔴 CLAUDE.md §1: company_id는 useCompany()에서만 조달.
+ * 🔴 CLAUDE.md §2: 공급가/VAT 계산은 calcSupplyAmount 단일 진입점.
+ * 🟠 편집 모드: useOrderItems 별도 fetch + draft 임시 모델. 저장 후 ['order-items', orderId] / ['orders'] 양쪽 invalidate.
  */
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { FileText, MoreHorizontal, Printer, Tag, Truck } from 'lucide-react';
 import {
   GradeBadge,
@@ -10,9 +16,26 @@ import {
   fmtDateTime,
 } from './primitives';
 import { calcSupplyAmount } from '@/utils/calculations';
-import type { Order } from '@/types/orders';
+import { supabase } from '@/lib/supabase';
+import { useCompany } from '@/hooks/useCompany';
+import { useOrderItems, type OrderItemRow } from '@/hooks/queries/useOrderItems';
+import { useProducts } from '@/hooks/queries/useProducts';
+import type { Order, OrderItemDraft } from '@/types/orders';
 
 export function OrderDetailPane({ order }: { order: Order | null }) {
+  const { companyId } = useCompany();
+  const queryClient = useQueryClient();
+
+  const [editMode, setEditMode] = useState(false);
+  const [draftItems, setDraftItems] = useState<OrderItemDraft[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const { data: orderItems = [], isLoading: itemsLoading } = useOrderItems(
+    order?.id ?? null,
+    companyId,
+  );
+  const { data: products = [] } = useProducts(companyId);
+
   if (!order) return <DetailEmpty />;
 
   const d = new Date(order.order_date);
@@ -27,6 +50,134 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
   const total = saleSubtotal + returnTotal;
   // 🔴 CLAUDE.md §4: 매출금액은 이미 부가세 포함. 공급가액은 ÷ 1.1로 역산.
   const { vat } = calcSupplyAmount(saleSubtotal);
+
+  // ───── 편집 핸들러 ─────
+  const handleEditClick = () => {
+    setDraftItems(
+      orderItems.map((it) => toDraft(it)),
+    );
+    setEditMode(true);
+  };
+
+  const handleCancel = () => {
+    setDraftItems([]);
+    setEditMode(false);
+  };
+
+  const handleQtyChange = (id: string, qty: number) => {
+    setDraftItems((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              quantity: qty,
+              amount: qty * item.unit_price,
+              _dirty: true,
+            }
+          : item,
+      ),
+    );
+  };
+
+  const handleProductSelect = (draftId: string, productId: string) => {
+    const p = products.find((x) => x.id === productId);
+    if (!p) return;
+    setDraftItems((prev) =>
+      prev.map((item) =>
+        item.id === draftId
+          ? {
+              ...item,
+              product_id: p.id,
+              product_code: p.code,
+              product_name: p.name,
+              unit_price: p.sell_price,
+              supply_price: p.supply_price,
+              amount: item.quantity * p.sell_price,
+              _dirty: true,
+            }
+          : item,
+      ),
+    );
+  };
+
+  const handleAddReturn = () => {
+    if (!companyId || !order) return;
+    setDraftItems((prev) => [
+      ...prev,
+      createNewDraft({ orderId: order.id, companyId, isReturn: true }),
+    ]);
+  };
+
+  const handleAddOrderItem = () => {
+    if (!companyId || !order) return;
+    setDraftItems((prev) => [
+      ...prev,
+      createNewDraft({ orderId: order.id, companyId, isReturn: false }),
+    ]);
+  };
+
+  const handleSave = async () => {
+    if (!order || !companyId) return;
+
+    const unselected = draftItems.filter((item) => item._isNew && !item.product_id);
+    if (unselected.length > 0) {
+      alert(`제품이 선택되지 않은 행이 ${unselected.length}개 있습니다.`);
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const dirtyItems = draftItems.filter((item) => item._dirty);
+
+      for (const item of dirtyItems) {
+        if (item._isNew) {
+          const { error } = await supabase.from('order_items').insert({
+            id: item.id,
+            company_id: companyId,
+            order_id: item.order_id,
+            product_id: item.product_id!,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            amount: item.quantity * item.unit_price,
+            is_return: item.is_return,
+          });
+          if (error) throw error;
+        } else {
+          const { error } = await supabase
+            .from('order_items')
+            .update({
+              quantity: item.quantity,
+              amount: item.quantity * item.unit_price,
+            })
+            .eq('id', item.id)
+            .eq('company_id', companyId);
+          if (error) throw error;
+        }
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ['order-items', order.id] });
+      await queryClient.invalidateQueries({ queryKey: ['orders'] });
+      setEditMode(false);
+      setDraftItems([]);
+    } catch (err) {
+      console.error('저장 실패:', err);
+      alert('저장 중 오류가 발생했습니다.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const displayRows: Array<OrderItemRow | OrderItemDraft> = editMode
+    ? draftItems
+    : orderItems;
+  const tableTotal = displayRows.reduce(
+    (sum, it) =>
+      sum +
+      (editMode
+        ? (it as OrderItemDraft).quantity * it.unit_price
+        : (it as OrderItemRow).amount),
+    0,
+  );
 
   return (
     <div
@@ -178,7 +329,7 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
         ))}
       </div>
 
-      {/* Line items */}
+      {/* Items: 편집 가능한 6컬럼 테이블 */}
       <div style={{ padding: '14px 20px 8px' }}>
         <div
           style={{
@@ -193,161 +344,204 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
           }}
         >
           <span>주문 품목</span>
-          <span>{order.items.length}개 라인</span>
+          <span>{displayRows.length}개 라인</span>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {order.items.map((it, i) => (
+
+        {/* 버튼 행 */}
+        <div className="flex gap-2 mb-3">
+          {!editMode ? (
+            <button
+              type="button"
+              onClick={handleEditClick}
+              className="px-3 py-1.5 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] transition-colors"
+            >
+              수정하기
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={handleAddReturn}
+                className="px-3 py-1.5 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] transition-colors"
+              >
+                반품추가
+              </button>
+              <button
+                type="button"
+                onClick={handleAddOrderItem}
+                className="px-3 py-1.5 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] transition-colors"
+              >
+                주문추가
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={isSaving}
+                className="px-3 py-1.5 text-xs font-medium rounded bg-[var(--brand)] text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+              >
+                {isSaving ? '저장 중...' : '저장하기'}
+              </button>
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="px-3 py-1.5 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-3)] hover:bg-[var(--surface-2)] transition-colors ml-auto"
+              >
+                취소
+              </button>
+            </>
+          )}
+        </div>
+
+        {itemsLoading ? (
+          <div className="text-xs text-[var(--ink-3)] py-4 text-center">불러오는 중...</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-[var(--line-default)]">
+                  <th className="text-left py-2 px-2 font-medium text-[var(--ink-3)] w-20">코드</th>
+                  <th className="text-left py-2 px-2 font-medium text-[var(--ink-3)]">제품명</th>
+                  <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-14">수량</th>
+                  <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">판매가</th>
+                  <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">공급가</th>
+                  <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">합계</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayRows.map((item) => {
+                  const isNewRow = editMode && (item as OrderItemDraft)._isNew === true;
+                  const qty = editMode
+                    ? (item as OrderItemDraft).quantity
+                    : item.quantity;
+                  const rowAmount = editMode
+                    ? (item as OrderItemDraft).quantity * item.unit_price
+                    : (item as OrderItemRow).amount;
+
+                  return (
+                    <tr
+                      key={item.id}
+                      className={`border-b border-[var(--line-subtle)] hover:bg-[var(--surface-2)] transition-colors ${
+                        item.is_return ? 'text-red-500' : ''
+                      }`}
+                    >
+                      <td className="py-1.5 px-2 font-mono">
+                        {(item as OrderItemDraft).product_code ??
+                          (item as OrderItemRow).product_code}
+                      </td>
+                      <td className="py-1.5 px-2">
+                        {isNewRow ? (
+                          <select
+                            value={(item as OrderItemDraft).product_id ?? ''}
+                            onChange={(e) => handleProductSelect(item.id, e.target.value)}
+                            className="w-full border border-[var(--line-strong)] rounded px-1 py-0.5 bg-[var(--surface)] text-[var(--ink)] text-xs focus:outline-none focus:border-[var(--brand)]"
+                          >
+                            <option value="">제품 선택</option>
+                            {products.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name} ({p.code})
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          (item as OrderItemDraft).product_name ??
+                          (item as OrderItemRow).product_name
+                        )}
+                      </td>
+                      <td className="py-1.5 px-2 text-right">
+                        {editMode ? (
+                          <input
+                            type="number"
+                            min={0}
+                            value={qty}
+                            onChange={(e) =>
+                              handleQtyChange(item.id, Number(e.target.value))
+                            }
+                            className="w-14 text-right border border-[var(--line-strong)] rounded px-1 py-0.5 bg-[var(--surface)] text-[var(--ink)] text-xs focus:outline-none focus:border-[var(--brand)]"
+                          />
+                        ) : (
+                          qty.toLocaleString()
+                        )}
+                      </td>
+                      <td className="py-1.5 px-2 text-right font-num">
+                        {item.unit_price.toLocaleString()}
+                      </td>
+                      <td className="py-1.5 px-2 text-right font-num">
+                        {calcSupplyAmount(item.unit_price).supply.toLocaleString()}
+                      </td>
+                      <td className="py-1.5 px-2 text-right font-num font-medium">
+                        {rowAmount.toLocaleString()}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-[var(--line-strong)]">
+                  <td
+                    colSpan={5}
+                    className="py-2 px-2 text-right text-xs font-medium text-[var(--ink-2)]"
+                  >
+                    합계
+                  </td>
+                  <td className="py-2 px-2 text-right text-xs font-medium font-num">
+                    {tableTotal.toLocaleString()}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Totals (뷰 모드 전용) */}
+      {!editMode && (
+        <div
+          style={{
+            padding: '12px 20px 16px',
+            borderTop: '1px solid var(--line)',
+            background: 'var(--surface-2)',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <TotalRow label="판매 소계" value={saleSubtotal} />
+            {returnTotal < 0 && (
+              <TotalRow label="반품" value={returnTotal} tone="danger" />
+            )}
+            <TotalRow label="VAT 포함분 (10%)" value={vat} faded />
+            <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
             <div
-              key={it.id}
               style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(0, 1fr) 70px 100px 110px',
-                gap: 10,
-                alignItems: 'center',
-                padding: '10px 0',
-                borderBottom:
-                  i === order.items.length - 1 ? 'none' : '1px solid var(--line)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'baseline',
               }}
             >
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    color: it.is_return ? 'var(--danger)' : 'var(--ink)',
-                    fontWeight: 500,
-                    textDecoration: it.is_return ? 'line-through' : 'none',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {it.product?.name ?? '알 수 없는 상품'}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                  <span
-                    style={{
-                      fontSize: 10.5,
-                      color: 'var(--ink-4)',
-                      fontFamily: 'var(--font-num)',
-                      letterSpacing: '0.04em',
-                    }}
-                  >
-                    {it.product?.code ?? '—'}
-                  </span>
-                  {it.is_return && (
-                    <span
-                      style={{
-                        fontSize: 9.5,
-                        color: 'var(--danger)',
-                        fontWeight: 500,
-                        background: 'var(--danger-wash)',
-                        padding: '1px 5px',
-                        borderRadius: 4,
-                        letterSpacing: '0.04em',
-                      }}
-                    >
-                      반품
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div
+              <span style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 500 }}>합계</span>
+              <span
                 style={{
-                  textAlign: 'right',
                   fontFamily: 'var(--font-num)',
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: it.is_return ? 'var(--danger)' : 'var(--ink-2)',
-                }}
-              >
-                {it.quantity > 0 ? '+' : ''}
-                {it.quantity}
-                <span style={{ color: 'var(--ink-4)', fontSize: 10.5, marginLeft: 2 }}>ea</span>
-              </div>
-              <div
-                style={{
-                  textAlign: 'right',
-                  fontFamily: 'var(--font-num)',
-                  fontSize: 12,
-                  color: 'var(--ink-3)',
-                }}
-              >
-                {it.unit_price.toLocaleString('ko-KR')}원
-              </div>
-              <div
-                style={{
-                  textAlign: 'right',
-                  fontFamily: 'var(--font-num)',
-                  fontSize: 13,
+                  fontSize: 18,
                   fontWeight: 600,
-                  color: it.is_return ? 'var(--danger)' : 'var(--ink)',
+                  color: 'var(--ink)',
                   fontVariantNumeric: 'tabular-nums',
                 }}
               >
-                {it.amount.toLocaleString('ko-KR')}
+                {total.toLocaleString('ko-KR')}
                 <span
                   style={{
-                    color: 'var(--ink-4)',
-                    fontSize: 10,
+                    fontSize: 11,
+                    color: 'var(--ink-3)',
                     fontWeight: 500,
-                    marginLeft: 2,
+                    marginLeft: 3,
                   }}
                 >
                   KRW
                 </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Totals */}
-      <div
-        style={{
-          padding: '12px 20px 16px',
-          borderTop: '1px solid var(--line)',
-          background: 'var(--surface-2)',
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          <TotalRow label="판매 소계" value={saleSubtotal} />
-          {returnTotal < 0 && (
-            <TotalRow label="반품" value={returnTotal} tone="danger" />
-          )}
-          <TotalRow label="VAT 포함분 (10%)" value={vat} faded />
-          <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'baseline',
-            }}
-          >
-            <span style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 500 }}>합계</span>
-            <span
-              style={{
-                fontFamily: 'var(--font-num)',
-                fontSize: 18,
-                fontWeight: 600,
-                color: 'var(--ink)',
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            >
-              {total.toLocaleString('ko-KR')}
-              <span
-                style={{
-                  fontSize: 11,
-                  color: 'var(--ink-3)',
-                  fontWeight: 500,
-                  marginLeft: 3,
-                }}
-              >
-                KRW
               </span>
-            </span>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Actions */}
       <div
@@ -383,6 +577,48 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
       </div>
     </div>
   );
+}
+
+function toDraft(it: OrderItemRow): OrderItemDraft {
+  return {
+    id: it.id,
+    company_id: it.company_id,
+    order_id: it.order_id,
+    product_id: it.product_id,
+    quantity: it.quantity,
+    unit_price: it.unit_price,
+    amount: it.amount,
+    is_return: it.is_return,
+    deleted_at: it.deleted_at,
+    product_code: it.product_code,
+    product_name: it.product_name,
+    supply_price: it.supply_price,
+    _dirty: false,
+    _isNew: false,
+  };
+}
+
+function createNewDraft(args: {
+  orderId: string;
+  companyId: string;
+  isReturn: boolean;
+}): OrderItemDraft {
+  return {
+    id: crypto.randomUUID(),
+    company_id: args.companyId,
+    order_id: args.orderId,
+    product_id: null,
+    quantity: 1,
+    unit_price: 0,
+    amount: 0,
+    is_return: args.isReturn,
+    deleted_at: null,
+    product_code: '',
+    product_name: '',
+    supply_price: 0,
+    _dirty: true,
+    _isNew: true,
+  };
 }
 
 function DetailEmpty() {
