@@ -607,6 +607,20 @@ export function calcSupplyAmount(totalAmount: number): {
   return { supply, vat };
 }
 
+/**
+ * 거래처 등급(A~E)에 따른 제품별 공급율로 공급가 계산.
+ * 공식: unitPrice × gradeRate (반올림).
+ * @param unitPrice 판매가 (VAT 포함, 정수 원화)
+ * @param gradeRate 제품별 등급 공급율 (예: 0.6, 0.5). 0/null/undefined 면 0 반환.
+ */
+export function calcSupplyPriceByGrade(
+  unitPrice: number,
+  gradeRate: number | null | undefined,
+): number {
+  if (!gradeRate) return 0;
+  return Math.round(unitPrice * gradeRate);
+}
+
 // ───────────────────────────────────────────────────────────
 // Phase 4 이후 과제 (스텁 유지)
 // ───────────────────────────────────────────────────────────

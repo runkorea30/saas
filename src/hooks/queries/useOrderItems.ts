@@ -21,7 +21,14 @@ export interface OrderItemRow {
   deleted_at: string | null;
   product_code: string;
   product_name: string;
+  /** products.supply_price (참고용. 등급별 공급가는 grade_X × unit_price 로 계산). */
   supply_price: number;
+  /** 거래처 등급(A~E)별 제품 공급율. unit_price × grade_X = 공급가(원). */
+  grade_a: number;
+  grade_b: number;
+  grade_c: number;
+  grade_d: number;
+  grade_e: number;
 }
 
 interface OrderItemJoinRow {
@@ -34,7 +41,16 @@ interface OrderItemJoinRow {
   amount: number;
   is_return: boolean;
   deleted_at: string | null;
-  products: { code: string; name: string; supply_price: number } | null;
+  products: {
+    code: string;
+    name: string;
+    supply_price: number;
+    grade_a: number | null;
+    grade_b: number | null;
+    grade_c: number | null;
+    grade_d: number | null;
+    grade_e: number | null;
+  } | null;
 }
 
 const ORDER_ITEM_SELECT = `
@@ -50,7 +66,12 @@ const ORDER_ITEM_SELECT = `
   products (
     code,
     name,
-    supply_price
+    supply_price,
+    grade_a,
+    grade_b,
+    grade_c,
+    grade_d,
+    grade_e
   )
 `;
 
@@ -82,6 +103,11 @@ export function useOrderItems(orderId: string | null, companyId: string | null) 
         product_code: r.products?.code ?? '',
         product_name: r.products?.name ?? '',
         supply_price: r.products?.supply_price ?? 0,
+        grade_a: r.products?.grade_a ?? 0,
+        grade_b: r.products?.grade_b ?? 0,
+        grade_c: r.products?.grade_c ?? 0,
+        grade_d: r.products?.grade_d ?? 0,
+        grade_e: r.products?.grade_e ?? 0,
       }));
     },
   });

@@ -32,6 +32,12 @@ export interface Product {
   reorder_point: number | null;
   created_at: string;
   updated_at: string;
+  // 거래처 등급(A~E)별 공급율. unit_price × grade_X → 공급가(원). 0 이면 미설정.
+  grade_a?: number;
+  grade_b?: number;
+  grade_c?: number;
+  grade_d?: number;
+  grade_e?: number;
 }
 
 export interface ProductCreateInput {

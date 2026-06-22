@@ -28,6 +28,7 @@ export interface OrderItem {
   unit_price: number;
   amount: number;
   is_return: boolean;
+  /** 계산된 공급가(원). 거래처 등급 × 제품 공급율 × unit_price 결과. 0 이면 미설정. */
   supply_price?: number;
   product: OrderProductRef | null;
 }
@@ -72,7 +73,14 @@ export interface OrderItemDraft {
   deleted_at: string | null;
   product_code: string;
   product_name: string;
+  /** 계산된 공급가(원). 거래처 등급 × 제품 공급율 × unit_price 결과. */
   supply_price: number;
+  /** 제품의 등급별 공급율 (A~E). useOrderItems JOIN에서 채워짐. */
+  grade_a: number;
+  grade_b: number;
+  grade_c: number;
+  grade_d: number;
+  grade_e: number;
   _dirty: boolean;
   _isNew: boolean;
 }

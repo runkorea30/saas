@@ -15,7 +15,7 @@ import {
   StatusBadge,
   fmtDateTime,
 } from './primitives';
-import { calcSupplyAmount } from '@/utils/calculations';
+import { calcSupplyAmount, calcSupplyPriceByGrade } from '@/utils/calculations';
 import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
 import { useOrderItems, type OrderItemRow } from '@/hooks/queries/useOrderItems';
@@ -92,6 +92,11 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
               product_name: p.name,
               unit_price: p.sell_price,
               supply_price: p.supply_price,
+              grade_a: p.grade_a ?? 0,
+              grade_b: p.grade_b ?? 0,
+              grade_c: p.grade_c ?? 0,
+              grade_d: p.grade_d ?? 0,
+              grade_e: p.grade_e ?? 0,
               amount: item.quantity * p.sell_price,
               _dirty: true,
             }
@@ -416,6 +421,20 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                   const rowAmount = editMode
                     ? (item as OrderItemDraft).quantity * item.unit_price
                     : (item as OrderItemRow).amount;
+                  // 거래처 등급(A~E)별 제품 공급율로 공급가 계산.
+                  const gradeKey = (
+                    `grade_${(order.customer?.grade ?? '').toLowerCase()}` as
+                      | 'grade_a'
+                      | 'grade_b'
+                      | 'grade_c'
+                      | 'grade_d'
+                      | 'grade_e'
+                  );
+                  const gradeRate =
+                    gradeKey in item
+                      ? ((item as OrderItemRow | OrderItemDraft)[gradeKey] ?? 0)
+                      : 0;
+                  const supplyPrice = calcSupplyPriceByGrade(item.unit_price, gradeRate);
 
                   return (
                     <tr
@@ -466,7 +485,7 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                         {item.unit_price.toLocaleString()}
                       </td>
                       <td className="py-1.5 px-2 text-right font-num">
-                        {calcSupplyAmount(item.unit_price).supply.toLocaleString()}
+                        {supplyPrice.toLocaleString()}
                       </td>
                       <td className="py-1.5 px-2 text-right font-num font-medium">
                         {rowAmount.toLocaleString()}
@@ -593,6 +612,11 @@ function toDraft(it: OrderItemRow): OrderItemDraft {
     product_code: it.product_code,
     product_name: it.product_name,
     supply_price: it.supply_price,
+    grade_a: it.grade_a,
+    grade_b: it.grade_b,
+    grade_c: it.grade_c,
+    grade_d: it.grade_d,
+    grade_e: it.grade_e,
     _dirty: false,
     _isNew: false,
   };
@@ -616,6 +640,11 @@ function createNewDraft(args: {
     product_code: '',
     product_name: '',
     supply_price: 0,
+    grade_a: 0,
+    grade_b: 0,
+    grade_c: 0,
+    grade_d: 0,
+    grade_e: 0,
     _dirty: true,
     _isNew: true,
   };
