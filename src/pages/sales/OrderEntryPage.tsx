@@ -54,7 +54,7 @@ function makeEmptyRow(isReturn = false): EntryRow {
     product_id: '',
     product_code: '',
     product_name: '',
-    quantity: 1,
+    quantity: 0,
     unit_price: 0,
     supply_price: 0,
     amount: 0,
@@ -703,16 +703,20 @@ export function OrderEntryPage() {
           </button>
         </div>
 
-        <div ref={tableRef} className="relative">
+        <div
+          ref={tableRef}
+          className="relative border border-[var(--line-default)] rounded-lg overflow-hidden"
+        >
+          {/* thead — 고정 */}
           <table className="w-full border-collapse text-sm table-fixed">
             <colgroup>
               <col style={{ width: '36px' }} />
               <col style={{ width: fixedCols ? '130px' : '15%' }} />
               <col />
               <col style={{ width: fixedCols ? '80px' : '10%' }} />
-              <col style={{ width: fixedCols ? '90px' : '10%' }} />
-              <col style={{ width: fixedCols ? '90px' : '10%' }} />
-              <col style={{ width: fixedCols ? '100px' : '11%' }} />
+              <col style={{ width: fixedCols ? '90px' : '11%' }} />
+              <col style={{ width: fixedCols ? '90px' : '11%' }} />
+              <col style={{ width: fixedCols ? '100px' : '12%' }} />
               <col style={{ width: '32px' }} />
             </colgroup>
             <thead>
@@ -729,190 +733,199 @@ export function OrderEntryPage() {
                 ))}
               </tr>
             </thead>
-            <tbody>
-              {rows.map((row, idx) => {
-                const isFocused = focusCell?.rowId === row.id;
-                return (
-                  <tr
-                    key={row.id}
-                    className={`border-b border-[var(--line-subtle)] ${
-                      isFocused
-                        ? 'bg-[var(--brand-wash)]'
-                        : 'hover:bg-[var(--surface-2)]'
-                    } ${row.is_return && row.product_id ? 'text-red-500' : ''}`}
-                  >
-                    <td className="py-0 px-2 text-center text-xs text-[var(--ink-3)] border-r border-[var(--line-subtle)]">
-                      {idx + 1}
-                    </td>
-                    {/* 코드 */}
-                    <td className="py-0 px-0 border-r border-[var(--line-subtle)]">
-                      <input
-                        ref={(el) => {
-                          inputRefs.current[`${row.id}-code`] = el;
-                        }}
-                        value={row.product_code}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setRows((prev) =>
-                            prev.map((r) =>
-                              r.id === row.id
-                                ? {
-                                    ...r,
-                                    product_code: v,
-                                    product_id: '',
-                                    codeError: false,
-                                  }
-                                : r,
-                            ),
-                          );
-                          setCodeQuery(v);
-                          setNameQuery('');
-                          setFocusCell({ rowId: row.id, col: 'code' });
-                          setShowSuggestions(v.length > 0);
-                          updateDropdownPos(e.target);
-                        }}
-                        onFocus={(e) => {
-                          setFocusCell({ rowId: row.id, col: 'code' });
-                          if (row.product_code) {
-                            setCodeQuery(row.product_code);
-                            setShowSuggestions(true);
-                            updateDropdownPos(e.target);
-                          }
-                        }}
-                        onKeyDown={(e) => handleCodeKeyDown(row.id, e)}
-                        placeholder="코드"
-                        className={`w-full h-8 px-2 text-xs bg-transparent outline-none ${
-                          row.codeError ? 'text-red-500' : 'text-[var(--ink)]'
-                        } focus:bg-[var(--surface)] focus:ring-1 focus:ring-inset focus:ring-[var(--brand)] ${
-                          row.codeError ? 'ring-1 ring-inset ring-red-400' : ''
-                        }`}
-                      />
-                    </td>
-                    {/* 제품명 */}
-                    <td className="py-0 px-0 border-r border-[var(--line-subtle)]">
-                      <input
-                        ref={(el) => {
-                          inputRefs.current[`${row.id}-name`] = el;
-                        }}
-                        value={row.product_name}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setRows((prev) =>
-                            prev.map((r) =>
-                              r.id === row.id
-                                ? {
-                                    ...r,
-                                    product_name: v,
-                                    product_id: '',
-                                    nameError: false,
-                                  }
-                                : r,
-                            ),
-                          );
-                          setNameQuery(v);
-                          setCodeQuery('');
-                          setFocusCell({ rowId: row.id, col: 'name' });
-                          setShowSuggestions(v.length > 0);
-                          updateDropdownPos(e.target);
-                        }}
-                        onFocus={(e) => {
-                          setFocusCell({ rowId: row.id, col: 'name' });
-                          if (row.product_name) {
-                            setNameQuery(row.product_name);
-                            setShowSuggestions(true);
-                            updateDropdownPos(e.target);
-                          }
-                        }}
-                        onKeyDown={(e) => handleNameKeyDown(row.id, e)}
-                        placeholder="제품명 검색"
-                        className="w-full h-8 px-2 text-xs bg-transparent outline-none text-[var(--ink)] focus:bg-[var(--surface)] focus:ring-1 focus:ring-inset focus:ring-[var(--brand)]"
-                      />
-                    </td>
-                    {/* 수량 */}
-                    <td className="py-0 px-0 border-r border-[var(--line-subtle)]">
-                      <input
-                        ref={(el) => {
-                          inputRefs.current[`${row.id}-qty`] = el;
-                        }}
-                        type="number"
-                        min={0}
-                        value={row.quantity || ''}
-                        onChange={(e) => {
-                          const qty = Number(e.target.value);
-                          const safe = Number.isFinite(qty) && qty >= 0 ? qty : 0;
-                          setRows((prev) =>
-                            prev.map((r) =>
-                              r.id === row.id
-                                ? {
-                                    ...r,
-                                    quantity: safe,
-                                    amount: safe * r.unit_price,
-                                  }
-                                : r,
-                            ),
-                          );
-                        }}
-                        onFocus={() =>
-                          setFocusCell({ rowId: row.id, col: 'qty' })
-                        }
-                        onKeyDown={(e) => handleQtyKeyDown(row.id, e)}
-                        className="w-full h-8 px-2 text-xs text-right bg-transparent outline-none text-[var(--ink)] focus:bg-[var(--surface)] focus:ring-1 focus:ring-inset focus:ring-[var(--brand)]"
-                      />
-                    </td>
-                    {/* 판매가 */}
-                    <td className="py-0 px-2 text-right text-xs font-num text-[var(--ink-2)] border-r border-[var(--line-subtle)]">
-                      {row.unit_price ? (
-                        row.unit_price.toLocaleString()
-                      ) : (
-                        <span className="text-[var(--ink-3)]">—</span>
-                      )}
-                    </td>
-                    {/* 공급가 */}
-                    <td className="py-0 px-2 text-right text-xs font-num text-[var(--ink-2)] border-r border-[var(--line-subtle)]">
-                      {row.supply_price ? (
-                        row.supply_price.toLocaleString()
-                      ) : (
-                        <span className="text-[var(--ink-3)]">—</span>
-                      )}
-                    </td>
-                    {/* 합계 */}
-                    <td className="py-0 px-2 text-right text-xs font-num font-medium border-r border-[var(--line-subtle)]">
-                      {row.amount ? (
-                        row.amount.toLocaleString()
-                      ) : (
-                        <span className="text-[var(--ink-3)]">—</span>
-                      )}
-                    </td>
-                    {/* 삭제 */}
-                    <td className="py-0 px-1 text-center">
-                      {row.product_id && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveRow(row.id)}
-                          className="text-[var(--ink-3)] hover:text-red-500 text-xs leading-none"
-                          title="행 삭제"
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-              <tr className="border-t-2 border-[var(--line-strong)] bg-[var(--surface-2)]">
-                <td
-                  colSpan={6}
-                  className="py-2 px-2 text-right text-xs text-[var(--ink-3)] border-r border-[var(--line-subtle)]"
-                >
-                  합계
-                </td>
-                <td className="py-2 px-2 text-right text-xs font-num font-medium">
-                  {totalAmount.toLocaleString()}
-                </td>
-                <td />
-              </tr>
-            </tbody>
           </table>
+
+          {/* tbody — 10행 고정 높이 스크롤 */}
+          <div
+            style={{ height: '360px' }}
+            className="overflow-y-auto overflow-x-hidden"
+          >
+            <table className="w-full border-collapse text-sm table-fixed">
+              <colgroup>
+                <col style={{ width: '36px' }} />
+                <col style={{ width: fixedCols ? '130px' : '15%' }} />
+                <col />
+                <col style={{ width: fixedCols ? '80px' : '10%' }} />
+                <col style={{ width: fixedCols ? '90px' : '11%' }} />
+                <col style={{ width: fixedCols ? '90px' : '11%' }} />
+                <col style={{ width: fixedCols ? '100px' : '12%' }} />
+                <col style={{ width: '32px' }} />
+              </colgroup>
+              <tbody>
+                {rows.map((row, idx) => {
+                  const isFocused = focusCell?.rowId === row.id;
+                  return (
+                    <tr
+                      key={row.id}
+                      style={{ height: '36px' }}
+                      className={`border-b border-[var(--line-subtle)] ${
+                        isFocused
+                          ? 'bg-[var(--brand-wash)]'
+                          : 'hover:bg-[var(--surface-2)]'
+                      } ${row.is_return && row.product_id ? 'text-red-500' : ''}`}
+                    >
+                      <td className="px-2 text-center text-xs text-[var(--ink-3)] border-r border-[var(--line-subtle)]">
+                        {idx + 1}
+                      </td>
+                      {/* 코드 */}
+                      <td className="px-0 border-r border-[var(--line-subtle)]">
+                        <input
+                          ref={(el) => {
+                            inputRefs.current[`${row.id}-code`] = el;
+                          }}
+                          value={row.product_code}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setRows((prev) =>
+                              prev.map((r) =>
+                                r.id === row.id
+                                  ? {
+                                      ...r,
+                                      product_code: v,
+                                      product_id: '',
+                                      codeError: false,
+                                    }
+                                  : r,
+                              ),
+                            );
+                            setCodeQuery(v);
+                            setNameQuery('');
+                            setFocusCell({ rowId: row.id, col: 'code' });
+                            setShowSuggestions(v.length > 0);
+                            updateDropdownPos(e.target);
+                          }}
+                          onFocus={(e) => {
+                            setFocusCell({ rowId: row.id, col: 'code' });
+                            if (row.product_code) {
+                              setCodeQuery(row.product_code);
+                              setShowSuggestions(true);
+                              updateDropdownPos(e.target);
+                            }
+                          }}
+                          onKeyDown={(e) => handleCodeKeyDown(row.id, e)}
+                          placeholder="코드"
+                          className={`w-full h-9 px-2 text-xs bg-transparent outline-none ${
+                            row.codeError ? 'text-red-500' : 'text-[var(--ink)]'
+                          } focus:bg-[var(--brand-wash)]`}
+                        />
+                      </td>
+                      {/* 제품명 */}
+                      <td className="px-0 border-r border-[var(--line-subtle)]">
+                        <input
+                          ref={(el) => {
+                            inputRefs.current[`${row.id}-name`] = el;
+                          }}
+                          value={row.product_name}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setRows((prev) =>
+                              prev.map((r) =>
+                                r.id === row.id
+                                  ? {
+                                      ...r,
+                                      product_name: v,
+                                      product_id: '',
+                                      nameError: false,
+                                    }
+                                  : r,
+                              ),
+                            );
+                            setNameQuery(v);
+                            setCodeQuery('');
+                            setFocusCell({ rowId: row.id, col: 'name' });
+                            setShowSuggestions(v.length > 0);
+                            updateDropdownPos(e.target);
+                          }}
+                          onFocus={(e) => {
+                            setFocusCell({ rowId: row.id, col: 'name' });
+                            if (row.product_name) {
+                              setNameQuery(row.product_name);
+                              setShowSuggestions(true);
+                              updateDropdownPos(e.target);
+                            }
+                          }}
+                          onKeyDown={(e) => handleNameKeyDown(row.id, e)}
+                          placeholder="제품명 검색"
+                          className="w-full h-9 px-2 text-xs bg-transparent outline-none text-[var(--ink)] focus:bg-[var(--brand-wash)]"
+                        />
+                      </td>
+                      {/* 수량 */}
+                      <td className="px-0 border-r border-[var(--line-subtle)]">
+                        <input
+                          ref={(el) => {
+                            inputRefs.current[`${row.id}-qty`] = el;
+                          }}
+                          type="number"
+                          min={0}
+                          value={row.quantity === 0 ? '' : row.quantity}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            const qty = raw === '' ? 0 : Number(raw);
+                            const safe =
+                              Number.isFinite(qty) && qty >= 0 ? qty : 0;
+                            setRows((prev) =>
+                              prev.map((r) =>
+                                r.id === row.id
+                                  ? {
+                                      ...r,
+                                      quantity: safe,
+                                      amount: safe * r.unit_price,
+                                    }
+                                  : r,
+                              ),
+                            );
+                          }}
+                          onFocus={() =>
+                            setFocusCell({ rowId: row.id, col: 'qty' })
+                          }
+                          onKeyDown={(e) => handleQtyKeyDown(row.id, e)}
+                          className="w-full h-9 px-2 text-xs text-right bg-transparent outline-none text-[var(--ink)] focus:bg-[var(--brand-wash)]"
+                          placeholder=""
+                        />
+                      </td>
+                      {/* 판매가 */}
+                      <td className="px-2 text-right text-xs font-num text-[var(--ink-2)] border-r border-[var(--line-subtle)]">
+                        {row.unit_price ? (
+                          row.unit_price.toLocaleString()
+                        ) : (
+                          <span className="text-[var(--ink-3)]">—</span>
+                        )}
+                      </td>
+                      {/* 공급가 */}
+                      <td className="px-2 text-right text-xs font-num text-[var(--ink-2)] border-r border-[var(--line-subtle)]">
+                        {row.supply_price ? (
+                          row.supply_price.toLocaleString()
+                        ) : (
+                          <span className="text-[var(--ink-3)]">—</span>
+                        )}
+                      </td>
+                      {/* 합계 */}
+                      <td className="px-2 text-right text-xs font-num font-medium border-r border-[var(--line-subtle)]">
+                        {row.amount ? (
+                          row.amount.toLocaleString()
+                        ) : (
+                          <span className="text-[var(--ink-3)]">—</span>
+                        )}
+                      </td>
+                      {/* 삭제 */}
+                      <td className="px-1 text-center">
+                        {row.product_id && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveRow(row.id)}
+                            className="text-[var(--ink-3)] hover:text-red-500 text-xs leading-none"
+                            title="행 삭제"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
 
           {/* 자동완성 드롭다운 */}
           {showSuggestions && suggestions.length > 0 && focusCell && (
