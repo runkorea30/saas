@@ -46,7 +46,7 @@ interface FocusCell {
 
 const RECENT_KEY = 'order_entry_recent_customers';
 const RECENT_LIMIT = 7;
-const INITIAL_ROW_COUNT = 10;
+const INITIAL_ROW_COUNT = 50;
 
 function makeEmptyRow(isReturn = false): EntryRow {
   return {
