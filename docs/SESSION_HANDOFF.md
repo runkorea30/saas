@@ -19,6 +19,7 @@
 | Phase 3.10 | 주문 상세 패널 — 6컬럼 테이블 + 인라인 편집 + 등급별 공급가 | ✅ 완료 (2026-06-23) |
 | Phase 3.11 | 수동주문입력 페이지 — 스프레드시트 UX + 엑셀 파싱 + RPC 저장 | ✅ 완료 (2026-06-23) |
 | Phase 3.12 | 재고현황 — 최근 움직임 robust 표기 + 재고조정 기능 (RPC) | ✅ 완료 (2026-06-23) |
+| Phase 3.13 | 수입/매입 Phase 2 — 주문서(XLSX) + 인보이스(PDF) 자동 파싱·비교 (Claude API) | ✅ 완료 (2026-06-23) |
 | Phase 4 | 나머지 6 페이지 + Auth 도입 | 대기 |
 
 **페이지 진도: 7 / 13 구현 완료**
@@ -53,6 +54,19 @@
 ---
 
 ## 오늘 추가된 작업 요약 (2026-06-23)
+
+### 수입/매입 Phase 2 (Phase 3.13) — 인보이스 자동 파싱·비교
+- **신규** `src/utils/orderSheetParser.ts` — SheetJS 로 주문서 XLSX 파싱. `CODE` 헤더 행 자동 감지, 하이픈 제거, TOTAL 행 스킵.
+- **신규** `src/utils/invoiceParser.ts` — PDF → base64 → Claude API (`claude-sonnet-4-6`) 호출 → JSON 응답 파싱. 환경변수 `VITE_ANTHROPIC_API_KEY` 사용, `anthropic-dangerous-direct-browser-access: true` 헤더로 브라우저 직접 호출.
+- **신규** `src/components/feature/import/InvoiceUploadCard.tsx` — 페이지 상단 카드.
+  - 2개 drop zone (XLSX + PDF) + [비교 시작] + [초기화]
+  - 비교 결과 4상태 분류: 일치(green) / 수량차이(amber) / 인보이스에만(blue) / 백오더(red)
+  - 필터 탭 3종 (전체 / 차이있음 / 백오더) + 결과 테이블
+  - [기존 입력 폼에 채우기] → 부모 `rowInputs` 교체 + 헤더(`invoiceNumber`, `invoiceDate`) 자동 패치
+  - BO 행은 채우기 시 제외 (실입고 0 행 방지)
+- **수정** `src/pages/inventory/ImportReceivingPage.tsx` — 헤더 폼 위에 `<InvoiceUploadCard onFill={...} />` 마운트. 기존 14컬럼 테이블/입고확정 플로우 100% 재사용.
+- **수정** `.env.example` — `VITE_ANTHROPIC_API_KEY` 항목 추가.
+- **주의 (보안)**: 현재 Claude API 키가 클라이언트 번들에 노출됨. 내부 도구 단계에서만 사용. 외부 사용자 노출 전 Supabase Edge Function (`parse-invoice-pdf`) 으로 이전 필요.
 
 ### 재고현황 후속 (Phase 3.12) — 최근 움직임 표기 + 재고조정
 - **최근 움직임 표기 robust 수정** (StockDetailPane)

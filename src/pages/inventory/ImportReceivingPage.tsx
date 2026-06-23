@@ -36,6 +36,7 @@ import {
 import { ImportHeaderForm } from '@/components/feature/import/ImportHeaderForm';
 import { ImportSummaryBar } from '@/components/feature/import/ImportSummaryBar';
 import { ImportRowsTable } from '@/components/feature/import/ImportRowsTable';
+import { InvoiceUploadCard } from '@/components/feature/import/InvoiceUploadCard';
 
 // ───────────────────────────────────────────────────────────
 
@@ -336,6 +337,18 @@ export function ImportReceivingPage() {
             제품 목록 로딩 실패: {productsQuery.error.message}
           </div>
         )}
+
+        <InvoiceUploadCard
+          disabled={busy}
+          onFill={(rows, headerPatch) => {
+            setRowInputs(rows.length > 0 ? rows : [createEmptyRow()]);
+            setHeader((h) => ({ ...h, ...headerPatch }));
+            showToast({
+              kind: 'success',
+              text: `${rows.length}개 행이 입력 폼에 채워졌습니다. 검수 후 [입고확정] 을 눌러 주세요.`,
+            });
+          }}
+        />
 
         <ImportHeaderForm value={header} onChange={setHeader} disabled={busy} />
 
