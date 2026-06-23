@@ -21,6 +21,7 @@ import type { Product } from '@/hooks/queries/useProducts';
 export interface StockRow extends Product {
   current_stock: number;
   opening_qty: number;
+  sold_this_year: number;
   last_movement_at: string | null;
   status: StockStatus;
 }

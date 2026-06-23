@@ -20,6 +20,7 @@ interface Props {
   stock: {
     current: number;
     opening: number;
+    soldThisYear: number;
     status: StockStatus;
   } | null;
   detail: InventoryDetailResult | undefined;
@@ -155,7 +156,7 @@ export function StockDetailPane({
         style={{
           padding: '14px 20px',
           display: 'grid',
-          gridTemplateColumns: 'repeat(2, 1fr)',
+          gridTemplateColumns: 'repeat(3, 1fr)',
           gap: 12,
           borderBottom: '1px solid var(--line)',
         }}
@@ -175,6 +176,12 @@ export function StockDetailPane({
         <KpiBlock
           label="기초재고"
           value={fmtQty(stock?.opening ?? 0)}
+          suffix={product.unit}
+          muted
+        />
+        <KpiBlock
+          label="올해 판매수량"
+          value={fmtQty(stock?.soldThisYear ?? 0)}
           suffix={product.unit}
           muted
         />
