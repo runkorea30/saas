@@ -570,67 +570,13 @@ export function OrderEntryPage() {
 
   // ───── 렌더 ─────
   return (
-    <div className="flex flex-col h-full min-h-0">
-      {/* 페이지 헤더 */}
-      <div className="px-4 pt-3 pb-2">
-        <div className="text-[11px] text-[var(--ink-3)] uppercase tracking-wider mb-1">
-          판매 › 수동주문입력
+    <div className="flex h-full min-h-0 overflow-hidden">
+      {/* ===== 좌측: 입력 영역 ===== */}
+      <div className="flex flex-col flex-1 min-w-0 border-r border-[var(--line-default)] overflow-hidden">
+        {/* 상단 안내바 */}
+        <div className="px-4 py-2 border-b border-[var(--line-default)] text-xs text-[var(--ink-3)] bg-[var(--surface-2)] shrink-0">
+          Tab/Enter로 이동 · Ctrl+S 저장
         </div>
-        <h1
-          className="disp text-[22px] font-medium text-[var(--ink)]"
-          style={{ margin: 0 }}
-        >
-          수동주문입력
-        </h1>
-      </div>
-
-      {/* 상단 안내바 */}
-      <div className="flex items-center justify-between px-4 py-2 border-y border-[var(--line-default)] text-xs text-[var(--ink-3)] bg-[var(--surface-2)]">
-        <span>Tab/Enter로 이동 · Ctrl+S 저장</span>
-      </div>
-
-      {/* 파일 업로드 + 미리보기 */}
-      <div className="flex gap-4 p-4 border-b border-[var(--line-default)]">
-        <div
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            const f = e.dataTransfer.files?.[0];
-            if (f) void handleFileChange(f);
-          }}
-          onClick={() => fileInputRef.current?.click()}
-          className="flex-1 border-2 border-dashed border-[var(--line-strong)] rounded-lg flex flex-col items-center justify-center gap-2 py-6 cursor-pointer hover:border-[var(--brand)] hover:bg-[var(--brand-wash)] transition-colors"
-        >
-          <span className="text-xl">📎</span>
-          <span className="text-xs text-[var(--ink-3)]">
-            {uploadedFile?.name ?? '클릭 또는 드래그 (사진/PDF/엑셀)'}
-          </span>
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            accept=".xlsx,.xls,.jpg,.jpeg,.png,.pdf"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void handleFileChange(f);
-              e.target.value = '';
-            }}
-          />
-        </div>
-        <div className="flex-[2] border border-[var(--line-default)] rounded-lg flex items-center justify-center bg-[var(--surface-2)] min-h-28">
-          {previewUrl ? (
-            <img
-              src={previewUrl}
-              alt="미리보기"
-              className="max-h-40 max-w-full object-contain rounded"
-            />
-          ) : (
-            <span className="text-xs text-[var(--ink-3)]">
-              이미지를 업로드하면 여기에 미리보기가 표시됩니다
-            </span>
-          )}
-        </div>
-      </div>
 
       {/* 헤더 폼 */}
       <div className="px-4 py-3 border-b border-[var(--line-default)] space-y-2">
@@ -1037,7 +983,7 @@ export function OrderEntryPage() {
       </div>
 
       {/* 하단 바 */}
-      <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--line-default)] bg-[var(--surface)]">
+      <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--line-default)] bg-[var(--surface)] shrink-0">
         <div className="text-sm text-[var(--ink-3)]">
           총{' '}
           <span className="font-medium text-[var(--ink)] font-num">
@@ -1057,6 +1003,61 @@ export function OrderEntryPage() {
         >
           {isSaving ? '저장 중...' : `저장 (${validRows.length}건)`}
         </button>
+      </div>
+      </div>
+
+      {/* ===== 우측: 미리보기 영역 ===== */}
+      <div className="w-[420px] shrink-0 flex flex-col bg-[var(--surface-2)]">
+        {previewUrl ? (
+          <div className="flex-1 relative overflow-hidden">
+            <img
+              src={previewUrl}
+              alt="주문서 미리보기"
+              className="absolute inset-0 w-full h-full object-contain p-2"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setUploadedFile(null);
+                fileInputRef.current?.click();
+              }}
+              className="absolute top-3 right-3 px-2 py-1 text-xs bg-black/50 text-white rounded hover:bg-black/70 transition-colors"
+            >
+              파일 교체
+            </button>
+          </div>
+        ) : (
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const f = e.dataTransfer.files?.[0];
+              if (f) void handleFileChange(f);
+            }}
+            onClick={() => fileInputRef.current?.click()}
+            className="flex-1 flex flex-col items-center justify-center gap-3 cursor-pointer border-2 border-dashed border-[var(--line-strong)] m-4 rounded-xl hover:border-[var(--brand)] hover:bg-[var(--brand-wash)] transition-colors"
+          >
+            <span className="text-4xl">📎</span>
+            <div className="text-center">
+              <div className="text-sm font-medium text-[var(--ink-2)]">클릭 또는 드래그</div>
+              <div className="text-xs text-[var(--ink-3)] mt-1">사진 / PDF / 엑셀</div>
+            </div>
+            <div className="text-xs text-[var(--ink-3)] text-center px-6">
+              엑셀 업로드 시 주문 항목 자동 파싱
+            </div>
+          </div>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          accept=".xlsx,.xls,.jpg,.jpeg,.png,.pdf"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void handleFileChange(f);
+            e.target.value = '';
+          }}
+        />
       </div>
     </div>
   );
