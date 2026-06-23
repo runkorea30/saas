@@ -36,15 +36,35 @@ const STATUS_META: Record<StockStatus, { label: string; color: string; bg: strin
 
 const SUBTYPE_META: Record<
   MovementSubtype,
-  { label: string; color: string; bg: string; sign: '+' | '−' }
+  { label: string; color: string; bg: string; sign: '+' | '−' | 'auto' }
 > = {
-  opening:  { label: '기초',   color: 'var(--ink-2)', bg: 'var(--surface-2)',    sign: '+' },
-  purchase: { label: '매입',   color: 'var(--info)',  bg: 'var(--info-wash)',    sign: '+' },
-  import:   { label: '수입',   color: '#7A5BB5',       bg: 'rgba(122, 91, 181, 0.12)', sign: '+' },
-  out:      { label: '출고',   color: 'var(--warning)', bg: 'var(--warning-wash)', sign: '−' },
-  return:   { label: '반품',   color: 'var(--success)', bg: 'var(--success-wash)', sign: '+' },
-  damage:   { label: '파손',   color: 'var(--danger)',  bg: 'var(--danger-wash)',  sign: '−' },
+  opening:    { label: '기초',  color: 'var(--ink-2)',   bg: 'var(--surface-2)',           sign: '+' },
+  purchase:   { label: '매입',  color: 'var(--info)',    bg: 'var(--info-wash)',           sign: '+' },
+  import:     { label: '수입',  color: '#7A5BB5',         bg: 'rgba(122, 91, 181, 0.12)',   sign: '+' },
+  out:        { label: '출고',  color: 'var(--warning)', bg: 'var(--warning-wash)',        sign: '−' },
+  return:     { label: '반품',  color: 'var(--success)', bg: 'var(--success-wash)',        sign: '+' },
+  damage:     { label: '파손',  color: 'var(--danger)',  bg: 'var(--danger-wash)',         sign: '−' },
+  adjustment: { label: '조정',  color: 'var(--warning)', bg: 'var(--warning-wash)',        sign: 'auto' },
 };
+
+/** 메타가 정의되지 않은 unknown subtype 폴백 — 부호는 값으로 결정. */
+const UNKNOWN_META = {
+  label: '기타',
+  color: 'var(--ink-3)',
+  bg: 'var(--surface-2)',
+  sign: 'auto' as const,
+};
+
+/** 표시용 (부호, 절대값). sign='auto' 면 quantity 부호로 결정. */
+function resolveSign(
+  metaSign: '+' | '−' | 'auto',
+  quantity: number,
+): { sign: '+' | '−'; absQty: number } {
+  if (metaSign === 'auto') {
+    return { sign: quantity < 0 ? '−' : '+', absQty: Math.abs(quantity) };
+  }
+  return { sign: metaSign, absQty: Math.abs(quantity) };
+}
 
 export function StockDetailPane({
   product,
@@ -223,7 +243,8 @@ export function StockDetailPane({
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {detail.movements.map((m) => {
-              const meta = SUBTYPE_META[m.subtype];
+              const meta = SUBTYPE_META[m.subtype] ?? UNKNOWN_META;
+              const { sign, absQty } = resolveSign(meta.sign, m.quantity);
               return (
                 <div
                   key={`${m.kind}-${m.id}`}
@@ -266,8 +287,8 @@ export function StockDetailPane({
                         fontWeight: 500,
                       }}
                     >
-                      {meta.sign}
-                      {fmtQty(m.quantity)} {product.unit}
+                      {sign}
+                      {fmtQty(absQty)} {product.unit}
                       {m.cost_krw != null && (
                         <span
                           style={{

@@ -10,7 +10,7 @@ import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 
 export type LotType = 'opening' | 'purchase' | 'import';
-export type TxType = 'out' | 'return' | 'damage';
+export type TxType = 'out' | 'return' | 'damage' | 'adjustment';
 export type MovementSubtype = LotType | TxType;
 
 export interface InventoryLotRow {
