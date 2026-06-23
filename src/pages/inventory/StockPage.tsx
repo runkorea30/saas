@@ -17,6 +17,7 @@ import { useProducts, type Product } from '@/hooks/queries/useProducts';
 import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 import { useInventoryDetail } from '@/hooks/queries/useInventoryDetail';
 import { useCreateOpeningLot } from '@/hooks/queries/useCreateOpeningLot';
+import { useCreateAdjustment } from '@/hooks/queries/useCreateAdjustment';
 import { classifyStockStatus } from '@/utils/calculations';
 import {
   StockFilterBar,
@@ -31,6 +32,10 @@ import {
   OpeningStockForm,
   type OpeningStockFormValues,
 } from '@/components/feature/inventory/OpeningStockForm';
+import {
+  AdjustmentForm,
+  type AdjustmentFormValues,
+} from '@/components/feature/inventory/AdjustmentForm';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
@@ -53,9 +58,12 @@ export function StockPage() {
   const [pendingValues, setPendingValues] =
     useState<OpeningStockFormValues | null>(null);
   const [duplicateConfirm, setDuplicateConfirm] = useState<Product | null>(null);
+  /** 재고조정 모달 대상 — null 이면 닫힘. */
+  const [adjustmentTarget, setAdjustmentTarget] = useState<Product | null>(null);
 
   const { showToast } = useToast();
   const createMut = useCreateOpeningLot(companyId);
+  const adjustMut = useCreateAdjustment(companyId);
 
   // 스플릿 (공용 훅)
   const {
@@ -194,6 +202,40 @@ export function StockPage() {
     if (createMut.isPending) return;
     setDuplicateConfirm(null);
     setPendingValues(null);
+  };
+
+  // ───── 재고조정 플로우 ─────
+  const openAdjustment = (p: Product) => setAdjustmentTarget(p);
+  const closeAdjustment = () => {
+    if (adjustMut.isPending) return;
+    setAdjustmentTarget(null);
+  };
+
+  const handleAdjustmentSubmit = (values: AdjustmentFormValues) => {
+    if (!adjustmentTarget) return;
+    const signed =
+      values.direction === 'decrease' ? -values.quantity : values.quantity;
+    adjustMut.mutate(
+      {
+        product_id: adjustmentTarget.id,
+        quantity: signed,
+        memo: values.memo,
+        transaction_date: values.transaction_date,
+      },
+      {
+        onSuccess: () => {
+          const dirSign = values.direction === 'decrease' ? '-' : '+';
+          showToast({
+            kind: 'success',
+            text: `「${adjustmentTarget.name}」 재고 ${dirSign}${values.quantity.toLocaleString('ko-KR')}${adjustmentTarget.unit} 조정 완료`,
+          });
+          setAdjustmentTarget(null);
+        },
+        onError: (e) => {
+          showToast({ kind: 'error', text: e.message });
+        },
+      },
+    );
   };
 
   const anyError = productsQuery.error || stockQuery.error;
@@ -405,6 +447,7 @@ export function StockPage() {
             detail={detailQuery.data}
             isDetailLoading={detailQuery.isLoading}
             onOpenAdjust={openAdjust}
+            onOpenAdjustment={openAdjustment}
           />
         </div>
       </main>
@@ -422,6 +465,26 @@ export function StockPage() {
             onSubmit={handleFormSubmit}
             onCancel={closeAdjust}
             busy={createMut.isPending}
+          />
+        )}
+      </Modal>
+
+      {/* 재고조정 모달 */}
+      <Modal
+        open={adjustmentTarget !== null}
+        onClose={closeAdjustment}
+        title="재고조정"
+        width={480}
+      >
+        {adjustmentTarget && (
+          <AdjustmentForm
+            product={adjustmentTarget}
+            currentOpeningQty={
+              stockByProduct?.get(adjustmentTarget.id)?.opening ?? 0
+            }
+            onSubmit={handleAdjustmentSubmit}
+            onCancel={closeAdjustment}
+            busy={adjustMut.isPending}
           />
         )}
       </Modal>

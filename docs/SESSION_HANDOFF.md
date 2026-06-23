@@ -18,6 +18,7 @@
 | Phase 3.9 | Import/Purchase 페이지 Phase 1 — 수동 입력 입고확정 | ✅ 완료 (2026-04-24) |
 | Phase 3.10 | 주문 상세 패널 — 6컬럼 테이블 + 인라인 편집 + 등급별 공급가 | ✅ 완료 (2026-06-23) |
 | Phase 3.11 | 수동주문입력 페이지 — 스프레드시트 UX + 엑셀 파싱 + RPC 저장 | ✅ 완료 (2026-06-23) |
+| Phase 3.12 | 재고현황 — 최근 움직임 robust 표기 + 재고조정 기능 (RPC) | ✅ 완료 (2026-06-23) |
 | Phase 4 | 나머지 6 페이지 + Auth 도입 | 대기 |
 
 **페이지 진도: 7 / 13 구현 완료**
@@ -27,7 +28,7 @@
 - `/sales/order-entry` — 수동주문입력 (좌입력/우미리보기, 자동완성, 엑셀파싱, Ctrl+S)
 - `/settings/customers` — 거래처 (목록/필터/상세 split)
 - `/inventory/products` — 제품리스트 (CRUD + 모달 + 체크박스 + 필터 초기화)
-- `/inventory/stock` — 재고현황 (기초재고 투입 + KPI)
+- `/inventory/stock` — 재고현황 (기초재고 투입 + 재고조정 + KPI)
 - `/inventory/purchase` — 수입/매입 Phase 1 (수동 입력 + 입고확정, PDF 파싱은 Phase 2)
 - 나머지 6 경로는 전부 `<PlaceholderPage />` 상태
 
@@ -52,6 +53,24 @@
 ---
 
 ## 오늘 추가된 작업 요약 (2026-06-23)
+
+### 재고현황 후속 (Phase 3.12) — 최근 움직임 표기 + 재고조정
+- **최근 움직임 표기 robust 수정** (StockDetailPane)
+  - `SUBTYPE_META` 에 `adjustment` (label '조정', amber 칩, sign='auto') 추가
+  - `UNKNOWN_META` 폴백 + `resolveSign(metaSign, qty)` 헬퍼로 unknown subtype / 음수 quantity 대응
+  - quantity 가 0/undefined 가 아닌 한 항상 `{sign}{absQty} {unit}` 형식 표시
+  - `useInventoryDetail.TxType` 에 `'adjustment'` 추가
+- **재고조정 기능**
+  - DB: `inventory_transactions_type_check` 에 `'adjustment'` 허용 (마이그레이션 `add_adjustment_type_to_inventory_transactions`)
+  - RPC: `mochicraft_demo.create_stock_adjustment(p_company_id, p_product_id, p_quantity, p_memo, p_date)` (SECURITY DEFINER, anon/authenticated EXECUTE)
+    - 0 금지, opening lot 없으면 예외, `opening.quantity + p_quantity < 0` 면 예외 (음수 방지)
+    - `inventory_transactions` INSERT (type='adjustment', signed quantity) + `inventory_lots` opening row의 `quantity` 가감
+  - 신규 훅 `useCreateAdjustment` — RPC 호출, 성공 시 `inventory-stock`/`inventory-detail` invalidate
+  - 신규 폼 `AdjustmentForm` — 방향(증가/감소) 토글 · 수량 · 메모(선택) · 발생일, 음수 방지 UI 검증 + 저장 버튼 비활성
+  - StockDetailPane 헤더에 `[재고조정]` 보조 버튼 추가 (기초재고 미등록이면 disabled)
+  - StockPage 에 `adjustmentTarget` 상태 + `<Modal>` + `useCreateAdjustment` 와이어업, 성공 토스트 `「{제품}」 재고 ±{수량}{단위} 조정 완료`
+- **types/database.ts**: `Functions.create_stock_adjustment` 시그니처 등록 (`insert_order` 는 그대로, 사전 존재 TS 에러)
+- **주의 (향후 작업)**: 현재 RPC 는 `opening.quantity` 만 가감. 추후 `current_stock = SUM(remaining_quantity)` 로 재정의 시 `opening.remaining_quantity` 도 함께 가감하도록 RPC 갱신 필요.
 
 ### 주문 상세 패널 (Phase 3.10) — `94927df`, `8c6d731`
 - 6컬럼 테이블(코드/제품명/수량/판매가/공급가/합계) + 인라인 편집 모드

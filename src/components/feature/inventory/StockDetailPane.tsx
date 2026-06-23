@@ -6,7 +6,7 @@
  * 🟠 "최근 움직임"은 useInventoryDetail 에서 이미 병합·정렬된 movements[] 를 받아
  *    유형별 칩 색상으로 렌더링만 담당.
  */
-import { Package, Plus } from 'lucide-react';
+import { Package, Plus, SlidersHorizontal } from 'lucide-react';
 import { getCategoryLabel } from '@/constants/categories';
 import type { Product } from '@/hooks/queries/useProducts';
 import type { StockStatus } from '@/utils/calculations';
@@ -26,6 +26,7 @@ interface Props {
   detail: InventoryDetailResult | undefined;
   isDetailLoading: boolean;
   onOpenAdjust: (product: Product) => void;
+  onOpenAdjustment: (product: Product) => void;
 }
 
 const STATUS_META: Record<StockStatus, { label: string; color: string; bg: string }> = {
@@ -72,6 +73,7 @@ export function StockDetailPane({
   detail,
   isDetailLoading,
   onOpenAdjust,
+  onOpenAdjustment,
 }: Props) {
   if (!product) {
     return (
@@ -160,14 +162,30 @@ export function StockDetailPane({
           <div className="num" style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>
             {product.code} · 단위 {product.unit}
           </div>
-          <button
-            type="button"
-            className="btn-base primary"
-            onClick={() => onOpenAdjust(product)}
-            style={{ height: 28, fontSize: 12 }}
-          >
-            <Plus size={12} /> 기초재고 투입
-          </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              type="button"
+              className="btn-base"
+              onClick={() => onOpenAdjustment(product)}
+              disabled={!stock || stock.opening <= 0}
+              title={
+                !stock || stock.opening <= 0
+                  ? '기초재고가 등록되어야 조정할 수 있습니다'
+                  : '재고조정'
+              }
+              style={{ height: 28, fontSize: 12 }}
+            >
+              <SlidersHorizontal size={12} /> 재고조정
+            </button>
+            <button
+              type="button"
+              className="btn-base primary"
+              onClick={() => onOpenAdjust(product)}
+              style={{ height: 28, fontSize: 12 }}
+            >
+              <Plus size={12} /> 기초재고 투입
+            </button>
+          </div>
         </div>
       </div>
 

@@ -1172,6 +1172,16 @@ export type Database = {
     Functions: {
       current_company_ids: { Args: never; Returns: string[] }
       my_role: { Args: { p_company_id: string }; Returns: string }
+      create_stock_adjustment: {
+        Args: {
+          p_company_id: string
+          p_product_id: string
+          p_quantity: number
+          p_memo: string | null
+          p_date: string
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
