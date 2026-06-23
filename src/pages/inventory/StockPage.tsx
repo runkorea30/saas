@@ -7,7 +7,7 @@
  * 🔴 CLAUDE.md §1: company_id 는 useCompany() 에서만.
  * 🔴 CLAUDE.md §2: 현재재고/상태 분류는 calculations.ts 단일 진입점.
  * 🟠 CTA "기초재고 투입": 헤더·Detail Pane 두 곳. 헤더는 선택된 행 없으면 disabled.
- * 🟡 기본 정렬: 재고상태 (품절→부족→정상), 동순위 내 koreanSort(상품명).
+ * 🟡 기본 정렬: 제품코드(code) 오름차순 — 필터/리패치 후에도 동일 순서 유지.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Package, Plus } from 'lucide-react';
@@ -17,11 +17,7 @@ import { useProducts, type Product } from '@/hooks/queries/useProducts';
 import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 import { useInventoryDetail } from '@/hooks/queries/useInventoryDetail';
 import { useCreateOpeningLot } from '@/hooks/queries/useCreateOpeningLot';
-import {
-  classifyStockStatus,
-  type StockStatus,
-} from '@/utils/calculations';
-import { compareCompanyName } from '@/utils/koreanSort';
+import { classifyStockStatus } from '@/utils/calculations';
 import {
   StockFilterBar,
   type StockFilterValue,
@@ -38,8 +34,6 @@ import {
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
-
-const STATUS_ORDER: Record<StockStatus, number> = { out: 0, low: 1, normal: 2 };
 
 export function StockPage() {
   const { companyId, isLoading: companyLoading } = useCompany();
@@ -108,12 +102,8 @@ export function StockPage() {
       }
       return true;
     });
-    // 품절 → 부족 → 정상, 동순위 내 상품명 한글 정렬.
-    list.sort((a, b) => {
-      const so = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
-      if (so !== 0) return so;
-      return compareCompanyName(a.name, b.name);
-    });
+    // 제품코드(code) 오름차순 고정 — 한/영/숫자 혼재 대응 localeCompare(ko).
+    list.sort((a, b) => a.code.localeCompare(b.code, 'ko'));
     return list;
   }, [rows, stockFilter, categorySel, query]);
 
