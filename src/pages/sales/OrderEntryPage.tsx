@@ -328,16 +328,120 @@ export function OrderEntryPage() {
   };
 
   // ───── 파일 업로드 ─────
+  // 엑셀 파일에서 { code, name, quantity } 행을 추출.
+  // 헤더 행에 '코드'/'수량'/'제품명' 포함된 행을 찾아 컬럼 인덱스를 자동 매핑하고,
+  // 그 다음 행부터 수량(숫자, >0) 이 있는 행을 모두 수집.
+  const parseExcel = async (
+    file: File,
+  ): Promise<Array<{ code: string; name: string; quantity: number }>> => {
+    const XLSX = await import('xlsx');
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+
+    const results: Array<{ code: string; name: string; quantity: number }> = [];
+
+    for (const sheetName of wb.SheetNames) {
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, {
+        header: 1,
+        defval: null,
+      });
+
+      let dataStartRow = -1;
+      let codeCol = 1; // 기본: B열
+      let qtyCol = 2; // 기본: C열
+      let nameCol = 0; // 기본: A열
+
+      for (let i = 0; i < Math.min(10, rows.length); i++) {
+        const row = rows[i];
+        if (!row) continue;
+        const hasHeader = row.some((cell) => String(cell ?? '').includes('코드'));
+        if (hasHeader) {
+          dataStartRow = i + 1;
+          row.forEach((cell, idx) => {
+            const s = String(cell ?? '');
+            if (s.includes('코드')) codeCol = idx;
+            if (s.includes('수량')) qtyCol = idx;
+            if (s.includes('제품명') || s.includes('품명')) nameCol = idx;
+          });
+          break;
+        }
+      }
+
+      if (dataStartRow === -1) dataStartRow = 4; // 사양: 5행부터
+
+      for (let i = dataStartRow; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row) continue;
+        const qtyRaw = row[qtyCol];
+        const code = row[codeCol];
+        const qty = typeof qtyRaw === 'number' ? qtyRaw : Number(qtyRaw);
+        if (Number.isFinite(qty) && qty > 0 && code) {
+          results.push({
+            code: String(code).trim(),
+            name: String(row[nameCol] ?? '').trim(),
+            quantity: qty,
+          });
+        }
+      }
+    }
+
+    return results;
+  };
+
+  const handleExcelParse = async (file: File) => {
+    try {
+      const parsed = await parseExcel(file);
+      if (parsed.length === 0) {
+        alert('엑셀에서 주문 항목을 찾지 못했습니다. (수량 > 0 인 행이 없습니다)');
+        return;
+      }
+
+      const newRows: EntryRow[] = parsed.map((item) => {
+        const product =
+          products.find((p) => p.code.toUpperCase() === item.code.toUpperCase()) ??
+          null;
+        const rate = product ? gradeRateOf(product, selectedCustomer?.grade) : 0;
+
+        return {
+          id: crypto.randomUUID(),
+          product_id: product?.id ?? '',
+          product_code: product?.code ?? item.code,
+          product_name: product?.name ?? item.name,
+          quantity: item.quantity,
+          unit_price: product?.sell_price ?? 0,
+          supply_price: product
+            ? calcSupplyPriceByGrade(product.sell_price, rate)
+            : 0,
+          amount: product ? item.quantity * product.sell_price : 0,
+          is_return: isReturnMode,
+          codeError: !product,
+        };
+      });
+
+      setRows([...newRows, createEmptyRow(isReturnMode)]);
+
+      const matched = newRows.filter((r) => r.product_id).length;
+      const unmatched = newRows.length - matched;
+      if (unmatched > 0) {
+        alert(
+          `엑셀 파싱 완료: 총 ${newRows.length}건 중 ${matched}건 매칭, ${unmatched}건 미매칭(빨간 테두리). 코드를 확인하세요.`,
+        );
+      }
+    } catch (err) {
+      console.error('엑셀 파싱 실패:', err);
+      alert('엑셀 파일을 읽는 중 오류가 발생했습니다.');
+    }
+  };
+
   const handleFileSelect = (file: File) => {
     setUploadedFile(file);
-    // 엑셀 파싱은 별도 PR — 패키지(xlsx) 추가 후 활성화 예정.
     if (
-      file.name.match(/\.(xlsx|xls|csv)$/i) ||
-      file.type.includes('spreadsheet')
+      file.name.match(/\.(xlsx|xls)$/i) ||
+      file.type.includes('spreadsheetml') ||
+      file.type === 'application/vnd.ms-excel'
     ) {
-      alert(
-        '엑셀 파싱 기능은 준비 중입니다. 파일은 업로드되지만 자동 입력은 다음 업데이트에서 지원됩니다.',
-      );
+      void handleExcelParse(file);
     }
   };
 
