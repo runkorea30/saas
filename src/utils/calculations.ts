@@ -335,11 +335,7 @@ export async function calcInventoryValue(companyId: string): Promise<number> {
 
 /**
  * 제품별 현재 재고 수량 (단일 제품 조회용 얇은 래퍼).
- * 공식: 기초 + 수입/매입 + 반품트랜잭션 − 파손트랜잭션 − 판매수량(올해 1/1 ~ 현재).
- *
- * 🔴 **루프에서 호출 금지**. 내부가 전 회사 범위 배치 fetch 3회이므로, N개 제품을
- *    Promise.all 로 돌리면 동일한 전체 fetch 가 N회 반복된다. 여러 제품 수량이
- *    필요하면 `calcCurrentStockByProduct(companyId)` 로 Map 을 한 번에 받아 쓸 것.
+ * 공식: SUM(inventory_lots.remaining_quantity).
  */
 export async function calcCurrentStock(
   companyId: string,
@@ -352,19 +348,17 @@ export async function calcCurrentStock(
 /**
  * 제품별 재고 스냅샷 맵 — 재고현황 페이지 단일 호출용.
  *
- * 🟠 N+1 해결: `calcCurrentStock` 을 제품마다 호출하지 않고, 전 회사 범위로
- *    lots/transactions/order_items 를 **각 1회** 조회하여 Map<product_id, …> 로 집계.
- * 🟠 `out` 트랜잭션은 order_items 와 중복될 수 있어 집계에서 제외 (단일-제품 계산식과 일관).
- *    Phase 4 에서 FIFO 실원가로 교체 예정.
+ * 🔴 현재재고는 `inventory_lots.remaining_quantity` 합산만으로 결정한다.
+ *    remaining_quantity 가 이미 매출/조정을 반영한 실재고이므로, order_items 차감
+ *    또는 inventory_transactions(반품/파손) 가감을 추가하면 이중계산이 발생한다.
+ * 🟠 단일 쿼리(inventory_lots)로 처리 — order_items JOIN / transactions 조회 없음.
  */
 export interface ProductStockInfo {
-  /** 기초재고 + 매입/수입 lots + 반품 tx − 파손 tx − 올해 판매수량. */
+  /** SUM(inventory_lots.remaining_quantity) — lot_type 무관, deleted_at IS NULL. */
   current: number;
-  /** lot_type='opening' 합계 — "기초재고" KPI. */
+  /** lot_type='opening' 의 quantity 합 — "기초재고" KPI. */
   opening: number;
-  /** 올해 1/1 ~ 현재 order_items.quantity 합 (is_return=false). */
-  soldThisYear: number;
-  /** 이 제품의 마지막 재고 움직임 ISO — lots.lot_date 또는 tx.transaction_date 중 최대값. */
+  /** 가장 최근 lot.lot_date. */
   lastMovementAt: string | null;
 }
 
@@ -383,62 +377,26 @@ interface LotSliceRow {
   product_id: string;
   lot_type: string;
   quantity: number;
+  remaining_quantity: number;
   lot_date: string;
-}
-interface TxSliceRow {
-  product_id: string;
-  type: string;
-  quantity: number;
-  transaction_date: string;
 }
 
 export async function calcCurrentStockByProduct(
   companyId: string,
 ): Promise<Map<string, ProductStockInfo>> {
-  const now = new Date();
-  const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1)).toISOString();
-  const yearEnd = new Date(Date.UTC(now.getUTCFullYear() + 1, 0, 1)).toISOString();
-
-  const [lots, txs, sold] = await Promise.all([
-    fetchAllRows<LotSliceRow>(() =>
-      supabase
-        .from('inventory_lots')
-        .select('product_id, lot_type, quantity, lot_date')
-        .eq('company_id', companyId)
-        .is('deleted_at', null),
-    ),
-    fetchAllRows<TxSliceRow>(() =>
-      supabase
-        .from('inventory_transactions')
-        .select('product_id, type, quantity, transaction_date')
-        .eq('company_id', companyId)
-        .is('deleted_at', null),
-    ),
-    (async (): Promise<Array<{ product_id: string; quantity: number }>> => {
-      interface SoldRow {
-        product_id: string;
-        quantity: number;
-      }
-      return fetchAllRows<SoldRow>(() =>
-        supabase
-          .from('order_items')
-          .select(
-            'product_id, quantity, order:orders!inner(order_date, company_id, deleted_at)',
-          )
-          .eq('company_id', companyId)
-          .eq('is_return', false)
-          .is('deleted_at', null)
-          .gte('order.order_date', yearStart)
-          .lt('order.order_date', yearEnd),
-      );
-    })(),
-  ]);
+  const lots = await fetchAllRows<LotSliceRow>(() =>
+    supabase
+      .from('inventory_lots')
+      .select('product_id, lot_type, quantity, remaining_quantity, lot_date')
+      .eq('company_id', companyId)
+      .is('deleted_at', null),
+  );
 
   const map = new Map<string, ProductStockInfo>();
   const ensure = (id: string): ProductStockInfo => {
     let row = map.get(id);
     if (!row) {
-      row = { current: 0, opening: 0, soldThisYear: 0, lastMovementAt: null };
+      row = { current: 0, opening: 0, lastMovementAt: null };
       map.set(id, row);
     }
     return row;
@@ -446,25 +404,11 @@ export async function calcCurrentStockByProduct(
 
   for (const l of lots) {
     const row = ensure(l.product_id);
-    row.current += l.quantity;
+    row.current += l.remaining_quantity;
     if (l.lot_type === 'opening') row.opening += l.quantity;
     if (!row.lastMovementAt || l.lot_date > row.lastMovementAt) {
       row.lastMovementAt = l.lot_date;
     }
-  }
-  for (const t of txs) {
-    const row = ensure(t.product_id);
-    // 'out' 은 order_items 와 중복 → 제외 (단일-제품 calcCurrentStock 과 일관).
-    if (t.type === 'return') row.current += t.quantity;
-    else if (t.type === 'damage') row.current -= t.quantity;
-    if (!row.lastMovementAt || t.transaction_date > row.lastMovementAt) {
-      row.lastMovementAt = t.transaction_date;
-    }
-  }
-  for (const s of sold) {
-    const row = ensure(s.product_id);
-    row.current -= s.quantity;
-    row.soldThisYear += s.quantity;
   }
 
   return map;

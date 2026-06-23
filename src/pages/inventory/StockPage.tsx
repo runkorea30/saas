@@ -76,7 +76,6 @@ export function StockPage() {
         ...p,
         current_stock: current,
         opening_qty: s?.opening ?? 0,
-        sold_this_year: s?.soldThisYear ?? 0,
         last_movement_at: s?.lastMovementAt ?? null,
         status: classifyStockStatus(current),
       };
@@ -397,7 +396,6 @@ export function StockPage() {
                 ? {
                     current: selectedRow.current_stock,
                     opening: selectedRow.opening_qty,
-                    soldThisYear: selectedRow.sold_this_year,
                     status: selectedRow.status,
                   }
                 : null

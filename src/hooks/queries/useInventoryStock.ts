@@ -3,7 +3,7 @@
  *
  * 🔴 CLAUDE.md §1: company_id 필터 필수.
  * 🔴 CLAUDE.md §2: 계산식은 calculations.ts 경유. 페이지 직접 집계 금지.
- * 🟠 N+1 방지: `calcCurrentStockByProduct` 단일 호출(쿼리 3회)로 전 제품 스냅샷 획득.
+ * 🟠 N+1 방지: `calcCurrentStockByProduct` 단일 호출(inventory_lots 1회 쿼리)로 전 제품 스냅샷 획득.
  * 🟡 lots 총 건수는 "재고 데이터 없음" 배너 노출 판단용 (lots 0건일 때 안내).
  */
 import { useQuery } from '@tanstack/react-query';
