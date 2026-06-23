@@ -16,27 +16,101 @@
 | Phase 3.7 | Products 페이지 — 조회 + CRUD + 재고현황 스타일 + 사용자 검증 1차 반영 | ✅ 완료 (2026-04-25) |
 | Phase 3.8 | Inventory (재고현황) 페이지 — 기초재고 투입 | ✅ 완료 (2026-04-24) |
 | Phase 3.9 | Import/Purchase 페이지 Phase 1 — 수동 입력 입고확정 | ✅ 완료 (2026-04-24) |
-| Phase 4 | 나머지 7 페이지 + Auth 도입 | 대기 |
+| Phase 3.10 | 주문 상세 패널 — 6컬럼 테이블 + 인라인 편집 + 등급별 공급가 | ✅ 완료 (2026-06-23) |
+| Phase 3.11 | 수동주문입력 페이지 — 스프레드시트 UX + 엑셀 파싱 + RPC 저장 | ✅ 완료 (2026-06-23) |
+| Phase 4 | 나머지 6 페이지 + Auth 도입 | 대기 |
 
-**페이지 진도: 6 / 13 구현 완료**
+**페이지 진도: 7 / 13 구현 완료**
 
 - `/` — 홈 대시보드 (KPI + Today + Chart + Timeline)
-- `/sales/orders` — 주문내역 (필터/목록/상세 split)
+- `/sales/orders` — 주문내역 (필터/목록/상세 split, 상세에서 수정/저장/반품추가/주문추가)
+- `/sales/order-entry` — 수동주문입력 (좌입력/우미리보기, 자동완성, 엑셀파싱, Ctrl+S)
 - `/settings/customers` — 거래처 (목록/필터/상세 split)
 - `/inventory/products` — 제품리스트 (CRUD + 모달 + 체크박스 + 필터 초기화)
 - `/inventory/stock` — 재고현황 (기초재고 투입 + KPI)
 - `/inventory/purchase` — 수입/매입 Phase 1 (수동 입력 + 입고확정, PDF 파싱은 Phase 2)
-- 나머지 7 경로는 전부 `<PlaceholderPage />` 상태
+- 나머지 6 경로는 전부 `<PlaceholderPage />` 상태
 
 ---
 
-## 후속 PR 로드맵 (2026-04-25 시점 기준)
+## 후속 PR 로드맵 (2026-06-23 갱신)
 
-- **다음 작업 후보 — 재고현황 페이지** (런코리아 미정)
+- **다음 후보 (택1)**:
+  - **수입/매입 Phase 2** — PDF 업로드 + Angelus 인보이스 자동 파싱
+  - **발주서 페이지** (`/inventory/purchase-orders`) — `calcOrderSuggestion` 이미 구현됨
+  - **송장대장** (`/sales/invoices`)
+  - **미수금** (`/finance/receivables`)
 - **PR 2 (예정)**: Products 엑셀 업로드 — XLSX 템플릿, 프리뷰, 일괄 추가
 - **PR 3 (예정)**: Products 일괄 수정 — 체크된 행의 판매가/공급가/USD 등 동시 변경. PR 1.5 (#4) 의 체크박스 컬럼이 이 PR을 위한 사전 준비
 - **Phase B (예정)**: Products 행 클릭 상세 펼침
 - **Phase C (예정)**: 컬럼 선택/드래그 + 사용자별 UI 설정 DB 저장
+- **수동주문입력 후속**:
+  - 컬럼간격 드래그 리사이저 (현재는 fixed/flex 토글만)
+  - 우상단 "자동수집 OFF" + "수집/팩스" 영역 (의미 미정의)
+  - 파일 자체를 서버 업로드 (현재는 클라이언트 미리보기만)
+
+---
+
+## 오늘 추가된 작업 요약 (2026-06-23)
+
+### 주문 상세 패널 (Phase 3.10) — `94927df`, `8c6d731`
+- 6컬럼 테이블(코드/제품명/수량/판매가/공급가/합계) + 인라인 편집 모드
+- 버튼: 수정하기 / 반품추가 / 주문추가 / 저장하기 / 취소
+- `useOrderItems` 신규 훅 (order_id + company_id 필터, products JOIN)
+- `OrderItemDraft` 타입 (`_dirty` / `_isNew` 트래킹)
+- 신규 행 product 미선택 시 저장 차단
+- 저장 시 `['order-items', orderId]` + `['orders']` 양쪽 invalidate
+- 주문 변경 시 useEffect로 order.id 감지 → draft 재초기화
+
+### 등급별 공급가 — DB 확장
+- 마이그레이션 `add_grade_supply_rates_to_products`: `products.grade_a~e numeric(5,4)` 추가
+- v1 공급율 데이터 **748건 백필 완료** (`dashboard-v2/data-migration/migrate-grade-rates.mjs` — saas repo 외부)
+- `calcSupplyPriceByGrade(unitPrice, gradeRate)` 신규 (`src/utils/calculations.ts`)
+- 공급가 = `unit_price × 거래처등급(A~E)의 제품별 공급율` (소수점 반올림)
+- `useOrderItems` JOIN에 grade_a~e 포함, OrderDetailPane 공급가 셀에서 사용
+
+### 수동주문입력 페이지 (Phase 3.11) — `27c1d1e` ~ `98ed073` (8커밋)
+- 라우트: `/sales/order-entry` (App.tsx 교체)
+- 레이아웃: **좌(입력) / 우(420px 미리보기)** 분할
+- 헤더 폼: 주문구분(일반주문/반품(정상)/반품(파손)) · 거래처 select · 날짜 · 메모 · 초기화
+- 최근 거래처 칩 (localStorage `order_entry_recent_customers`, 7개)
+- 스프레드시트 테이블:
+  - thead 고정 + tbody 360px 스크롤 (10행 × 36px)
+  - 초기 50행 미리 생성, 마지막 행 채워지면 빈 행 자동 추가
+  - 컬럼: # / 코드 / 제품명 / 수량 / 판매가 / 공급가 / 합계 / 삭제
+  - **셀이 input** (`h-9` + 패딩 제거 + focus 시 brand-wash 배경)
+  - 컬럼간격고정 / 컬럼간격초기화 토글
+- 자동완성:
+  - 코드: prefix 매칭 8건
+  - 제품명: 부분 매칭 8건
+  - 드롭다운 ↓/↑/Enter/Escape 키보드 탐색
+  - 외부 클릭 시 자동 닫힘 (document mousedown)
+- 키 동작:
+  - 코드 Enter/Tab → 정확/유일 매칭 적용 → 수량 셀로 포커스
+  - 제품명 Enter/Tab → 매칭 적용 → 수량으로
+  - 수량 Enter/Tab → 다음 행 코드로 (없으면 빈 행 추가)
+  - Ctrl+S / Cmd+S → 전역 저장 (ref 패턴으로 stale closure 방지)
+- 수량 0 → 빈 문자열 표시 (placeholder)
+- 거래처 변경 시 입력된 행들의 공급가 일괄 재계산
+- **엑셀 파싱** (`xlsx` 패키지 추가, 동적 import):
+  - 모든 시트 순회, 첫 10행 내 '코드' 헤더 자동 인식
+  - 컬럼 매핑: 코드/수량/제품명 (없으면 기본 A/B/C)
+  - 수량 > 0 행만 추출 → products 코드 매칭 → 미매칭은 codeError 빨간 테두리
+- **저장**: RPC `mochicraft_demo.insert_order(...)` 호출
+  - SECURITY DEFINER, anon/authenticated EXECUTE 권한
+  - orders + order_items 트랜잭션 일괄 INSERT
+  - 반품 모드: quantity / amount 음수로 INSERT
+  - 성공 시 `['orders']` invalidate → `/sales/orders` 이동 + `state.selectedOrderId` 전달
+- **OrdersPage 연동**: `location.state.selectedOrderId` 수신 → 해당 주문 자동 선택
+
+### 신규 DB 객체 (모두 §5 rollback 목록에 기록)
+- 함수: `mochicraft_demo.insert_order(uuid, uuid, date, text, text, text, jsonb) → uuid`
+- 정책: `orders_dev_anon_insert` (anon WITH CHECK true)
+- 정책: `order_items_dev_anon_insert` (anon WITH CHECK true)
+- 컬럼: `products.grade_a~e numeric(5,4) DEFAULT 0`
+
+### 신규 의존성
+- `xlsx` (SheetJS) — 엑셀 파싱. `npm audit` 경고 있으나 신뢰된 사용자 입력만 처리하므로 위험도 낮음. 추후 `exceljs` 교체 검토 여지.
 
 ---
 
@@ -178,6 +252,8 @@ Modal 위에 빌드된 확인 다이얼로그.
 - `calcCurrentStock(companyId, productId)` — 올해 판매수량 반영
 - `calcOrderSuggestion(companyId, productId)` — 6개월 판매 기준 DZ
 - `calcApproxProfitMargin(companyId, year, month)` — supply_price 근사치
+- `calcSupplyPriceByGrade(unitPrice, gradeRate)` — 거래처 등급(A~E)별 공급율로 공급가 계산. `products.grade_a~e` 컬럼 + `customers.grade` 조합으로 사용.
+- `calcSupplyAmount(totalAmount)` — VAT 역산 (÷ 1.1 → supply/vat)
 
 스텁 유지 (Phase 4/5):
 - `calcCostOfSales` — FIFO 로트 소비 로직 필요
@@ -441,10 +517,9 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 - 독립적이며 `purchase_orders` 테이블 이미 존재. 수입/매입 의존성 없음.
 - `calcOrderSuggestion(companyId, productId)` 이미 구현됨 (과거 6개월 판매 기반 DZ 추천).
 
-### (대안) 수동주문입력 페이지
-- 경로: `/sales/order-entry`
-- **선결 필요**: `order_items.requested_quantity` 컬럼 추가 마이그레이션 + RPC 함수 `create_order_with_stock_check`
-- 주문/재고 도메인 규칙 A~G 전부 적용 대상
+### ~~(대안) 수동주문입력 페이지~~ ✅ 완료 (Phase 3.11)
+- 구현됨: `/sales/order-entry`
+- 단, 도메인 규칙 D(`requested_quantity` 이중 수량 모델)과 B/C(주문 상태별 재고 차감, `inventory_transactions` out)는 **미적용**. 현재는 단순 INSERT (재고 검증/차감 없이) → 본격 운영 전 RPC를 `create_order_with_stock_check` 로 보강 필요.
 
 ### 후속 페이지 (우선순위 무관)
 - `/sales/invoices` — 송장대장
@@ -478,7 +553,18 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 - DB 수정 시 MochiCraft 브라우저 탭 닫아둘 것 (열려 있으면 프론트가 덮어쓸 가능성)
 - 타입체크: `npx tsc --noEmit` (커밋 전 필수)
 
-### 최근 커밋
+### 최근 커밋 (2026-06-23 세션)
+- `98ed073` fix(order-entry): 10행 고정 스크롤 + 수량 초기값 제거
+- `d10a195` fix(order-entry): 초기 입력 행 수 10 → 50
+- `ff868dd` fix(order-entry): 레이아웃 좌우 분할 — 우측 미리보기 패널 확대
+- `ca6d7a2` feat(order-entry): 스프레드시트 UX 전면 재구현
+- `8c9aace` feat(order-entry): 엑셀 파싱 활성화 (xlsx 패키지 추가)
+- `f3487c6` feat(order-entry): 좌입력/우미리보기 분할 + 파일업로드 + 거래처검색 + 단축키
+- `27c1d1e` feat(sales): 수동주문입력 페이지 구현 (Phase 3.11 시작)
+- `8c6d731` feat(orders): 등급별 공급율 컬럼 추가 및 공급가 계산 로직 수정
+- `94927df` feat(orders): 상세 패널 아이템 테이블 개선 — 공급가 컬럼, 수량 수정, 반품추가/주문추가/저장
+
+### 이전 세션 커밋
 - `975584a` PR 1.5: Products 페이지 사용자 검증 후속 개선 (요약/초기화/체크박스) (#4) [2026-04-25]
 - `b61d6ef` feat(products): Phase A — 재고현황 스타일 레이아웃 + 재고수량 필터 (#3)
 - `695a562` feat(inventory): 안전재고/발주점 풀패키지 (마이그레이션 + UI + 홈 경고) (#2)
