@@ -298,15 +298,14 @@ export function StockPage() {
           warnings.push(`${rowNo}행 (${code}): 현재재고가 숫자가 아님`);
           return;
         }
-        if (newNum < 0) {
-          warnings.push(`${rowNo}행 (${code}): 음수 재고 불가 (${newNum})`);
-          return;
-        }
-        const intNew = Math.round(newNum);
+        // 음수 입력은 0 으로 clamp (skip 하지 않고 행 표시 — 사용자가 의도 확인 후 적용).
+        const rounded = Math.round(newNum);
+        const clamped = rounded < 0;
+        const intNew = Math.max(0, rounded);
         const oldStock = stockByProduct?.get(product.id)?.current ?? 0;
         const delta = intNew - oldStock;
         if (delta === 0) return;
-        diffs.push({ product, oldStock, newStock: intNew, delta });
+        diffs.push({ product, oldStock, newStock: intNew, delta, clamped });
       });
 
       setExcelDiffs(diffs);
@@ -663,8 +662,8 @@ export function StockPage() {
         {adjustmentTarget && (
           <AdjustmentForm
             product={adjustmentTarget}
-            currentOpeningQty={
-              stockByProduct?.get(adjustmentTarget.id)?.opening ?? 0
+            currentStock={
+              stockByProduct?.get(adjustmentTarget.id)?.current ?? 0
             }
             onSubmit={handleAdjustmentSubmit}
             onCancel={closeAdjustment}

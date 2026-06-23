@@ -16,6 +16,8 @@ export interface StockDiffRow {
   newStock: number;
   /** newStock - oldStock. 양수=증가, 음수=감소. 0 인 행은 props 에 포함하지 않음. */
   delta: number;
+  /** 업로드 값이 음수여서 0 으로 강제 처리됐는지. true 면 행에 안내 칩 표시. */
+  clamped?: boolean;
 }
 
 interface Props {
@@ -199,6 +201,7 @@ export function StockExcelUploadModal({
                       borderBottom: '1px solid var(--line)',
                       fontSize: 12.5,
                       alignItems: 'center',
+                      background: d.clamped ? 'var(--warning-wash)' : undefined,
                     }}
                   >
                     <span className="num" style={{ color: 'var(--ink-3)' }}>
@@ -206,14 +209,42 @@ export function StockExcelUploadModal({
                     </span>
                     <span
                       style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
                         color: 'var(--ink)',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
+                        minWidth: 0,
                       }}
                       title={d.product.name}
                     >
-                      {d.product.name}
+                      <span
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {d.product.name}
+                      </span>
+                      {d.clamped && (
+                        <span
+                          className="chip"
+                          style={{
+                            flexShrink: 0,
+                            color: 'var(--warning)',
+                            background: 'var(--surface)',
+                            border: '1px solid var(--warning)',
+                            fontSize: 10.5,
+                            fontWeight: 500,
+                            whiteSpace: 'nowrap',
+                          }}
+                          title="업로드 값이 음수 → 0으로 처리됨"
+                        >
+                          음수 입력값 → 0으로 처리됨
+                        </span>
+                      )}
                     </span>
                     <span
                       className="num"

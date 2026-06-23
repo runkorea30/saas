@@ -4,7 +4,9 @@
  * 필드: 조정 방향(+/-) · 수량(양의 정수) · 사유 메모(옵션) · 발생일(기본 오늘 KST 자정).
  * 저장: 호출부에서 `useCreateAdjustment` 뮤테이션 실행.
  *
- * 🟠 음수 방지: 감소(-) 방향 + (현재 opening qty - 수량) < 0 이면 저장 버튼 비활성 + 경고.
+ * 🟠 음수 방지: 감소(-) 방향 + (현재재고 - 수량) < 0 이면 저장 버튼 비활성 + 경고.
+ *    검증 기준은 **현재재고(currentStock)** — RPC 가 opening lot 만 수정하더라도
+ *    사용자 멘탈모델은 "전체 현재재고" 기준이라 이쪽으로 통일.
  * 🟡 RPC 에 전달되는 quantity 부호는 호출부에서 (감소면 음수) 변환해 전달.
  *    이 폼은 표시용 절대값과 방향(direction)만 다룬다.
  * 🟡 발생일 저장: KST 자정 → UTC ISO (`new Date(localMidnight).toISOString()`) 변환.
@@ -25,8 +27,8 @@ export interface AdjustmentFormValues {
 
 interface Props {
   product: Product;
-  /** 현재 opening lot 의 quantity. 감소 한도 검증용. */
-  currentOpeningQty: number;
+  /** 현재재고 (전체 lot remaining 합산값) — 표시 + 감소 한도 검증의 기준. */
+  currentStock: number;
   onSubmit: (values: AdjustmentFormValues) => void;
   onCancel: () => void;
   busy?: boolean;
@@ -48,7 +50,7 @@ function localDateToIso(localDate: string): string {
 
 export function AdjustmentForm({
   product,
-  currentOpeningQty,
+  currentStock,
   onSubmit,
   onCancel,
   busy,
@@ -59,17 +61,19 @@ export function AdjustmentForm({
   const [date, setDate] = useState<string>(todayLocalDateStr());
   const [error, setError] = useState<string | null>(null);
 
+  const unitLabel = product.unit ? ` ${product.unit}` : '';
+
   const quantityNum = useMemo(() => {
     const n = parseInt(quantityStr, 10);
     return Number.isFinite(n) ? n : NaN;
   }, [quantityStr]);
 
-  /** 감소 방향에서 조정 후 opening 이 음수가 되는지. */
+  /** 감소 방향에서 조정 후 현재재고가 음수가 되는지. */
   const negativeAfter = useMemo(() => {
     if (direction !== 'decrease') return false;
     if (!Number.isInteger(quantityNum) || quantityNum <= 0) return false;
-    return currentOpeningQty - quantityNum < 0;
-  }, [direction, quantityNum, currentOpeningQty]);
+    return currentStock - quantityNum < 0;
+  }, [direction, quantityNum, currentStock]);
 
   const submitDisabled =
     busy ||
@@ -90,7 +94,9 @@ export function AdjustmentForm({
       return;
     }
     if (negativeAfter) {
-      setError('조정 후 기초재고가 음수가 됩니다.');
+      setError(
+        `현재재고(${currentStock.toLocaleString('ko-KR')}${unitLabel})보다 많이 감소할 수 없습니다.`,
+      );
       return;
     }
     onSubmit({
@@ -132,8 +138,9 @@ export function AdjustmentForm({
           {product.name}
         </span>
         <span className="num" style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>
-          {product.code} · 현재 기초재고{' '}
-          {currentOpeningQty.toLocaleString('ko-KR')} {product.unit}
+          {product.code} · 현재재고{' '}
+          {currentStock.toLocaleString('ko-KR')}
+          {unitLabel}
         </span>
       </div>
 
@@ -181,16 +188,18 @@ export function AdjustmentForm({
               disabled={busy}
               style={inputStyle}
             />
-            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
-              {product.unit}
-            </span>
+            {product.unit && (
+              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                {product.unit}
+              </span>
+            )}
           </div>
         }
         hint={
           direction === 'decrease' && Number.isInteger(quantityNum) && quantityNum > 0
-            ? `조정 후 기초재고: ${(currentOpeningQty - quantityNum).toLocaleString('ko-KR')} ${product.unit}`
+            ? `조정 후 현재재고: ${(currentStock - quantityNum).toLocaleString('ko-KR')}${unitLabel}`
             : direction === 'increase' && Number.isInteger(quantityNum) && quantityNum > 0
-              ? `조정 후 기초재고: ${(currentOpeningQty + quantityNum).toLocaleString('ko-KR')} ${product.unit}`
+              ? `조정 후 현재재고: ${(currentStock + quantityNum).toLocaleString('ko-KR')}${unitLabel}`
               : undefined
         }
       />
@@ -236,7 +245,8 @@ export function AdjustmentForm({
             fontSize: 12,
           }}
         >
-          조정 후 기초재고가 음수가 됩니다. 감소 수량을 줄여 주세요.
+          현재재고({currentStock.toLocaleString('ko-KR')}
+          {unitLabel})보다 많이 감소할 수 없습니다.
         </div>
       )}
       {error && !negativeAfter && (

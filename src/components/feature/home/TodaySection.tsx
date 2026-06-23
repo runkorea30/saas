@@ -468,8 +468,8 @@ function LowStockCard({
             row={{
               main: s.name,
               sub: s.code,
-              right: `${s.onhand} ${s.unit}`,
-              rightSub: `권장 ${s.suggest} DZ`,
+              right: `${s.onhand}${s.unit ? ` ${s.unit}` : ''}`,
+              rightSub: `권장 ${s.suggest}${s.unit ? ` ${s.unit}` : ''}`,
               status: s.onhand <= 3 ? 'danger' : 'warning',
               bar: { cur: s.onhand, max: Math.max(s.suggest, 1) },
             }}
