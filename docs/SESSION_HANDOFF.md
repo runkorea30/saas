@@ -204,6 +204,12 @@ ProductListTable에서 `Check` 컴포넌트(`orders/primitives.tsx`)를 신규 i
 - **Phase B 추가** (`20260424100000_phase_b_inventory_lots_dev_anon_insert.sql`):
   - `inventory_lots_dev_anon_insert` 정책
   - `GRANT INSERT ON mochicraft_demo.inventory_lots TO anon` (UPDATE 제외)
+- **수동주문입력 추가** (`add_anon_insert_orders` 마이그레이션):
+  - `orders_dev_anon_insert` 정책 (anon WITH CHECK true)
+  - `order_items_dev_anon_insert` 정책 (anon WITH CHECK true)
+- **수동주문입력 추가** (`create_insert_order_rpc` 마이그레이션):
+  - `mochicraft_demo.insert_order(uuid, uuid, date, text, text, text, jsonb)` 함수 (SECURITY DEFINER)
+  - `GRANT EXECUTE ... TO anon` — Phase 2 Auth 도입 후 회수 또는 authenticated 전용으로 변경
 
 ### 원복 SQL
 ```sql

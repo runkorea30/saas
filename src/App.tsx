@@ -14,6 +14,7 @@ import { Shell } from '@/components/Shell';
 import { PlaceholderPage } from '@/components/common/PlaceholderPage';
 import { HomePage } from '@/pages/HomePage';
 import { OrdersPage } from '@/pages/sales/OrdersPage';
+import { OrderEntryPage } from '@/pages/sales/OrderEntryPage';
 import { CustomersPage } from '@/pages/settings/CustomersPage';
 import { ProductsPage } from '@/pages/inventory/ProductsPage';
 import { StockPage } from '@/pages/inventory/StockPage';
@@ -28,7 +29,7 @@ function App() {
         <Route path="sales">
           <Route index element={<Navigate to="/sales/orders" replace />} />
           <Route path="orders" element={<OrdersPage />} />
-          <Route path="order-entry" element={<PlaceholderPage />} />
+          <Route path="order-entry" element={<OrderEntryPage />} />
           <Route path="invoices" element={<PlaceholderPage />} />
         </Route>
 
