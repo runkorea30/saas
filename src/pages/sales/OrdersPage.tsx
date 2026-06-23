@@ -8,6 +8,7 @@
  * 🔴 CLAUDE.md §5: 서버 조회는 useOrders(TanStack + fetchAllRows). 기간만 서버, 나머지는 useMemo.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Download, Plus } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useResizableSplit } from '@/hooks/useResizableSplit';
@@ -29,6 +30,9 @@ function toIso(d: Date): string {
 
 export function OrdersPage() {
   const { companyId, isLoading: companyLoading } = useCompany();
+  const location = useLocation();
+  const incomingOrderId = (location.state as { selectedOrderId?: string } | null)
+    ?.selectedOrderId;
 
   // ───── 필터 상태 ─────
   const [period, setPeriod] = useState<PeriodKey>('month');
@@ -129,6 +133,13 @@ export function OrdersPage() {
       setSelectedId(filtered[0]?.id ?? null);
     }
   }, [filtered, selectedId]);
+
+  // OrderEntryPage 저장 후 라우터 state 로 전달된 신규 주문을 우선 선택.
+  useEffect(() => {
+    if (incomingOrderId && orders.find((o) => o.id === incomingOrderId)) {
+      setSelectedId(incomingOrderId);
+    }
+  }, [incomingOrderId, orders]);
 
   const selectedOrder: Order | null = filtered.find((o) => o.id === selectedId) ?? null;
 
