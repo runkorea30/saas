@@ -9,8 +9,9 @@
  * 🟠 CTA "기초재고 투입": 헤더·Detail Pane 두 곳. 헤더는 선택된 행 없으면 disabled.
  * 🟡 기본 정렬: 제품코드(code) 오름차순 — 필터/리패치 후에도 동일 순서 유지.
  */
-import { useEffect, useMemo, useState } from 'react';
-import { Package, Plus } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Download, Package, Plus, Upload } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { useCompany } from '@/hooks/useCompany';
 import { useResizableSplit } from '@/hooks/useResizableSplit';
 import { useProducts, type Product } from '@/hooks/queries/useProducts';
@@ -36,6 +37,11 @@ import {
   AdjustmentForm,
   type AdjustmentFormValues,
 } from '@/components/feature/inventory/AdjustmentForm';
+import {
+  StockExcelUploadModal,
+  type StockDiffRow,
+} from '@/components/feature/inventory/StockExcelUploadModal';
+import { getCategoryLabel } from '@/constants/categories';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
@@ -60,6 +66,14 @@ export function StockPage() {
   const [duplicateConfirm, setDuplicateConfirm] = useState<Product | null>(null);
   /** 재고조정 모달 대상 — null 이면 닫힘. */
   const [adjustmentTarget, setAdjustmentTarget] = useState<Product | null>(null);
+
+  // 엑셀 업로드 상태
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [excelOpen, setExcelOpen] = useState(false);
+  const [excelDiffs, setExcelDiffs] = useState<StockDiffRow[]>([]);
+  const [excelWarnings, setExcelWarnings] = useState<string[]>([]);
+  const [excelApplying, setExcelApplying] = useState(false);
+  const [excelAppliedCount, setExcelAppliedCount] = useState(0);
 
   const { showToast } = useToast();
   const createMut = useCreateOpeningLot(companyId);
@@ -211,6 +225,144 @@ export function StockPage() {
     setAdjustmentTarget(null);
   };
 
+  // ───── 엑셀 다운로드/업로드 ─────
+  /** 화면과 동일한 정렬(코드 오름차순)로 xlsx 다운로드. */
+  const handleDownloadExcel = () => {
+    const sorted = [...products].sort((a, b) =>
+      a.code.localeCompare(b.code, 'ko'),
+    );
+    const header = ['제품코드', '제품명', '분류', '단위', '현재재고'];
+    const body = sorted.map((p) => [
+      p.code,
+      p.name,
+      getCategoryLabel(p.category),
+      p.unit,
+      stockByProduct?.get(p.id)?.current ?? 0,
+    ]);
+    const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
+    // 컬럼 너비 (xlsx CE 지원).
+    ws['!cols'] = [
+      { wch: 14 },
+      { wch: 36 },
+      { wch: 12 },
+      { wch: 8 },
+      { wch: 12 },
+    ];
+    // freeze panes (CE 에서 미지원 가능 — 지원 시 1행 고정).
+    ws['!freeze'] = { xSplit: '0', ySplit: '1' } as never;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '재고현황');
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    XLSX.writeFile(wb, `재고현황_${y}${m}${d}.xlsx`);
+  };
+
+  /** 파일 선택 → 파싱 → diff 계산 → 모달 오픈. */
+  const handleFileSelected = async (file: File) => {
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      if (!ws) throw new Error('워크시트가 비어 있습니다.');
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
+        defval: '',
+        raw: false,
+      });
+
+      const byCode = new Map<string, Product>();
+      for (const p of products) byCode.set(String(p.code).trim(), p);
+
+      const diffs: StockDiffRow[] = [];
+      const warnings: string[] = [];
+
+      rows.forEach((r, idx) => {
+        const rowNo = idx + 2; // 헤더가 1행 → 데이터는 2행부터
+        const codeRaw = r['제품코드'];
+        const code = codeRaw == null ? '' : String(codeRaw).trim();
+        if (!code) {
+          warnings.push(`${rowNo}행: 제품코드 비어 있음`);
+          return;
+        }
+        const product = byCode.get(code);
+        if (!product) {
+          warnings.push(`${rowNo}행: 제품코드 "${code}" 매칭 안 됨`);
+          return;
+        }
+        const newRaw = r['현재재고'];
+        const newNum = Number(
+          typeof newRaw === 'string' ? newRaw.replace(/,/g, '') : newRaw,
+        );
+        if (!Number.isFinite(newNum)) {
+          warnings.push(`${rowNo}행 (${code}): 현재재고가 숫자가 아님`);
+          return;
+        }
+        if (newNum < 0) {
+          warnings.push(`${rowNo}행 (${code}): 음수 재고 불가 (${newNum})`);
+          return;
+        }
+        const intNew = Math.round(newNum);
+        const oldStock = stockByProduct?.get(product.id)?.current ?? 0;
+        const delta = intNew - oldStock;
+        if (delta === 0) return;
+        diffs.push({ product, oldStock, newStock: intNew, delta });
+      });
+
+      setExcelDiffs(diffs);
+      setExcelWarnings(warnings);
+      setExcelAppliedCount(0);
+      setExcelOpen(true);
+    } catch (err) {
+      showToast({
+        kind: 'error',
+        text: `엑셀 파싱 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+      });
+    }
+  };
+
+  /** diff 를 순차 RPC 로 적용. opening lot 경합 회피. */
+  const handleApplyExcel = async () => {
+    if (excelApplying || excelDiffs.length === 0) return;
+    setExcelApplying(true);
+    setExcelAppliedCount(0);
+    const memoDate = new Date().toISOString().slice(0, 10);
+    const memo = `엑셀 재고조정 (${memoDate})`;
+    const nowIso = new Date().toISOString();
+    const failures: string[] = [];
+
+    for (let i = 0; i < excelDiffs.length; i++) {
+      const d = excelDiffs[i];
+      try {
+        await adjustMut.mutateAsync({
+          product_id: d.product.id,
+          quantity: d.delta,
+          memo,
+          transaction_date: nowIso,
+        });
+        setExcelAppliedCount(i + 1);
+      } catch (err) {
+        failures.push(
+          `${d.product.code}: ${err instanceof Error ? err.message : '오류'}`,
+        );
+      }
+    }
+
+    setExcelApplying(false);
+    setExcelOpen(false);
+    if (failures.length === 0) {
+      showToast({
+        kind: 'success',
+        text: `엑셀 재고조정 ${excelDiffs.length}건 완료`,
+      });
+    } else {
+      showToast({
+        kind: 'error',
+        text: `${excelDiffs.length - failures.length}건 성공, ${failures.length}건 실패: ${failures.slice(0, 3).join(' / ')}${failures.length > 3 ? ' …' : ''}`,
+      });
+    }
+  };
+
   const handleAdjustmentSubmit = (values: AdjustmentFormValues) => {
     if (!adjustmentTarget) return;
     const signed =
@@ -305,6 +457,38 @@ export function StockPage() {
               <SummaryItem label="품절" value={`${summary.out}`} tone="danger" />
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                type="button"
+                onClick={handleDownloadExcel}
+                disabled={products.length === 0 || !stockByProduct}
+                title="현재 재고를 엑셀로 다운로드"
+                className="btn-base"
+                style={{ height: 32, fontSize: 12.5 }}
+              >
+                <Download size={13} /> 엑셀 다운로드
+              </button>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!stockByProduct}
+                title="엑셀로 일괄 재고조정"
+                className="btn-base"
+                style={{ height: 32, fontSize: 12.5 }}
+              >
+                <Upload size={13} /> 엑셀 업로드
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleFileSelected(f);
+                  // 같은 파일 재선택 가능하도록 리셋
+                  e.target.value = '';
+                }}
+              />
               <button
                 type="button"
                 onClick={() => selectedRow && openAdjust(selectedRow)}
@@ -488,6 +672,20 @@ export function StockPage() {
           />
         )}
       </Modal>
+
+      {/* 엑셀 업로드 미리보기 */}
+      <StockExcelUploadModal
+        open={excelOpen}
+        diffs={excelDiffs}
+        warnings={excelWarnings}
+        applying={excelApplying}
+        appliedCount={excelAppliedCount}
+        onApply={handleApplyExcel}
+        onClose={() => {
+          if (excelApplying) return;
+          setExcelOpen(false);
+        }}
+      />
 
       {/* 중복 투입 확인 */}
       <ConfirmDialog
