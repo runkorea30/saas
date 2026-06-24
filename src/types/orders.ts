@@ -8,12 +8,18 @@ export interface OrderCustomerRef {
   id: string;
   name: string;
   grade: string | null;
+  /** 배송지 — 거래명세서 출력용. orders SELECT join에 포함. */
+  delivery_address?: string | null;
+  /** 대표 연락처 — 거래명세서 출력용. */
+  contact1?: string | null;
 }
 
 export interface OrderProductRef {
   id: string;
   code: string;
   name: string;
+  /** 카탈로그 판매가 — 거래명세서 "판매가" 컬럼 출력용. */
+  sell_price?: number;
 }
 
 export interface OrderCreatorRef {

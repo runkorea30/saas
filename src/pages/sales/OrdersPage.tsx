@@ -8,14 +8,19 @@
  * 🔴 CLAUDE.md §5: 서버 조회는 useOrders(TanStack + fetchAllRows). 기간만 서버, 나머지는 useMemo.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation } from 'react-router-dom';
-import { Calendar, Download, Flag, Plus, Users } from 'lucide-react';
+import { Calendar, Download, FileText, Flag, Plus, Users } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useResizableSplit } from '@/hooks/useResizableSplit';
 import { useOrders } from '@/hooks/queries/useOrders';
 import { OrderListTable } from '@/components/feature/orders/OrderListTable';
 import { OrderDetailPane } from '@/components/feature/orders/OrderDetailPane';
 import { OrderBulkBar } from '@/components/feature/orders/OrderBulkBar';
+import {
+  InvoicePrintView,
+  type InvoiceCustomerGroup,
+} from '@/components/feature/orders/InvoicePrintView';
 import {
   GradeBadge,
   MultiChip,
@@ -188,6 +193,68 @@ export function OrdersPage() {
     setPeriod('90d');
   };
 
+  // ───── 거래명세서 인쇄 ─────
+  const [printGroups, setPrintGroups] = useState<InvoiceCustomerGroup[] | null>(null);
+
+  const handlePrintInvoice = () => {
+    // 체크된 주문만 추출 — filtered 전체에서 가져와야 페이지네이션을 넘어선 선택도 포함.
+    const selected = filtered.filter((o) => checked[o.id]);
+    if (selected.length === 0) return;
+
+    // customer_id 기준 그룹핑.
+    const map = new Map<string, InvoiceCustomerGroup>();
+    for (const o of selected) {
+      if (!o.customer) continue;
+      const key = o.customer.id;
+      let group = map.get(key);
+      if (!group) {
+        group = {
+          customer: {
+            id: o.customer.id,
+            name: o.customer.name,
+            address: o.customer.delivery_address ?? null,
+            phone: o.customer.contact1 ?? null,
+          },
+          orders: [],
+        };
+        map.set(key, group);
+      }
+      group.orders.push({
+        id: o.id,
+        order_date: o.order_date,
+        memo: o.memo,
+        items: o.items.map((it) => ({
+          id: it.id,
+          product: {
+            code: it.product?.code ?? '',
+            name: it.product?.name ?? '',
+            sell_price: it.product?.sell_price,
+          },
+          quantity: it.quantity,
+          unit_price: it.unit_price,
+          amount: it.amount,
+          is_return: it.is_return,
+        })),
+      });
+    }
+    // 각 그룹의 주문을 날짜 오름차순 정렬 → index 0 이 "주문서", 이후 "추가주문".
+    const groups = Array.from(map.values());
+    for (const g of groups) {
+      g.orders.sort(
+        (a, b) => new Date(a.order_date).getTime() - new Date(b.order_date).getTime(),
+      );
+    }
+    // 거래처도 이름순 정렬.
+    groups.sort((a, b) => a.customer.name.localeCompare(b.customer.name, 'ko'));
+
+    setPrintGroups(groups);
+    // 다음 페인트 사이클에 인쇄 → afterprint 시점에 state 초기화.
+    setTimeout(() => {
+      window.print();
+      setPrintGroups(null);
+    }, 300);
+  };
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <main
@@ -314,6 +381,30 @@ export function OrdersPage() {
             </button>
             <button
               type="button"
+              onClick={handlePrintInvoice}
+              disabled={selectedCount === 0}
+              className="btn-base"
+              style={{
+                height: 30,
+                fontSize: 12,
+                opacity: selectedCount === 0 ? 0.5 : 1,
+                cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
+              }}
+              title={
+                selectedCount === 0
+                  ? '왼쪽 목록에서 주문을 체크하세요'
+                  : `${selectedCount}건 거래명세서 출력`
+              }
+            >
+              <FileText size={13} /> 거래명세서
+              {selectedCount > 0 && (
+                <span style={{ marginLeft: 4, color: 'var(--ink-3)' }}>
+                  ({selectedCount})
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
               className="btn-base primary"
               style={{ height: 30, fontSize: 12 }}
             >
@@ -418,6 +509,15 @@ export function OrdersPage() {
       </main>
 
       <OrderBulkBar count={selectedCount} onClear={clearAll} />
+
+      {/* 거래명세서 인쇄 — body 직속 포털. @media print 에서만 표시. */}
+      {printGroups &&
+        createPortal(
+          <div className="invoice-print-portal">
+            <InvoicePrintView groups={printGroups} />
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
