@@ -23,6 +23,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useCustomerAuth, type CustomerSession } from '@/hooks/useCustomerAuth';
 import { CustomerOrderLogin } from './CustomerOrderLogin';
 import { CustomerOrderInput } from './CustomerOrderInput';
+import { calcSupplyPriceByCustomerGrade } from '@/utils/calculations';
 import type { Json } from '@/types/database';
 
 // ───────────────────────────────────────────────────────────
@@ -598,35 +599,72 @@ function LeftPanel({
         }
       }
 
-      // 2) products 코드 매핑 (회사 범위)
-      const codeToProductId = new Map<string, string>();
+      // 2) products 코드 매핑 — sell_price 와 grade_a~e 까지 가져온다.
+      //    (엑셀의 supply_price 가 0 인 행에서 등급 기반 폴백 계산 시 사용)
+      interface ProductLookup {
+        id: string;
+        code: string;
+        sell_price: number;
+        grade_a: number | null;
+        grade_b: number | null;
+        grade_c: number | null;
+        grade_d: number | null;
+        grade_e: number | null;
+      }
+      const codeToProduct = new Map<string, ProductLookup>();
       let unmatchedCount = 0;
       if (parsed.length > 0) {
         const codes = Array.from(new Set(parsed.map((p) => p.code)));
         const { data: productRows, error: prodErr } = await supabase
           .from('products')
-          .select('id, code')
+          .select(
+            'id, code, sell_price, grade_a, grade_b, grade_c, grade_d, grade_e',
+          )
           .eq('company_id', customer.companyId)
           .in('code', codes);
         if (prodErr) throw prodErr;
-        for (const p of productRows ?? []) codeToProductId.set(p.code, p.id);
+        for (const p of (productRows ?? []) as ProductLookup[]) {
+          codeToProduct.set(p.code, p);
+        }
         unmatchedCount = parsed.filter(
-          (it) => !codeToProductId.has(it.code),
+          (it) => !codeToProduct.has(it.code),
         ).length;
         // eslint-disable-next-line no-console
         console.log('[customer-file.codeMap]', {
           requested: codes.length,
-          matched: codeToProductId.size,
+          matched: codeToProduct.size,
           unmatched: unmatchedCount,
         });
       }
 
-      // 3) orders + order_items INSERT (매칭된 품목이 있을 때만)
-      const matched = parsed.filter((it) => codeToProductId.has(it.code));
+      // 3) orders + order_items INSERT — 공급가 기준
+      //    엑셀에 supply_price 가 있으면 그대로 사용, 0/누락이면 등급 기반 계산으로 폴백.
+      interface MatchedItem extends ParsedExcelItem {
+        product_id: string;
+        unit_price_resolved: number;
+      }
+      const matched: MatchedItem[] = parsed
+        .filter((it) => codeToProduct.has(it.code))
+        .map((it) => {
+          const product = codeToProduct.get(it.code)!;
+          const unitPrice =
+            it.supply_price > 0
+              ? it.supply_price
+              : calcSupplyPriceByCustomerGrade(
+                  product.sell_price,
+                  customer.grade,
+                  product,
+                );
+          return {
+            ...it,
+            product_id: product.id,
+            unit_price_resolved: unitPrice,
+          };
+        });
       let createdOrderId: string | null = null;
       if (matched.length > 0) {
         const totalAmount = matched.reduce(
-          (s, it) => s + it.qty * it.sell_price,
+          (s, it) => s + it.qty * it.unit_price_resolved,
           0,
         );
         const { data: order, error: orderErr } = await supabase
@@ -643,17 +681,17 @@ function LeftPanel({
           .select('id')
           .single();
         // eslint-disable-next-line no-console
-        console.log('[customer-file.order]', { order, orderErr });
+        console.log('[customer-file.order]', { order, orderErr, totalAmount });
         if (orderErr || !order) throw orderErr ?? new Error('주문 생성 실패');
         createdOrderId = order.id;
 
         const orderItemsPayload = matched.map((it) => ({
           order_id: order.id,
           company_id: customer.companyId,
-          product_id: codeToProductId.get(it.code)!,
+          product_id: it.product_id,
           quantity: it.qty,
-          unit_price: it.sell_price,
-          amount: it.qty * it.sell_price,
+          unit_price: it.unit_price_resolved,
+          amount: it.qty * it.unit_price_resolved,
           is_return: false,
         }));
         const { error: itemsErr } = await supabase

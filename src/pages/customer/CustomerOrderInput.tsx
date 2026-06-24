@@ -158,8 +158,10 @@ export function CustomerOrderInput({
             supply_price: supply,
           };
         });
+      // 🔴 거래처 주문은 공급가 기준 (sell_price 아님).
+      //    sell_price 는 카탈로그용 표시값. 실 거래 금액 = qty × supply_price.
       const totalAmount = items.reduce(
-        (s, it) => s + it.qty * it.sell_price,
+        (s, it) => s + it.qty * it.supply_price,
         0,
       );
 
@@ -206,14 +208,15 @@ export function CustomerOrderInput({
       console.log('[customer-order.order]', { order, orderErr });
       if (orderErr || !order) throw orderErr ?? new Error('주문 생성 실패');
 
-      // 3) order_items — 실제 컬럼명은 unit_price/amount (sell_price/supply_price 아님)
+      // 3) order_items — unit_price 에는 공급가, amount 에는 qty × 공급가 저장.
+      //    실 컬럼명은 unit_price/amount (sell_price/supply_price 아님).
       const orderItemsPayload = items.map((it) => ({
         order_id: order.id,
         company_id: customer.companyId,
         product_id: it.product_id,
         quantity: it.qty,
-        unit_price: it.sell_price,
-        amount: it.qty * it.sell_price,
+        unit_price: it.supply_price,
+        amount: it.qty * it.supply_price,
         is_return: false,
       }));
       const { error: itemsErr } = await supabase
