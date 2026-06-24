@@ -8,7 +8,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { FileText, MoreHorizontal, Tag } from 'lucide-react';
+import { AlertTriangle, FileText, MoreHorizontal, Tag } from 'lucide-react';
 import {
   GradeBadge,
   SourceIcon,
@@ -19,6 +19,7 @@ import { calcSupplyPriceByCustomerGrade } from '@/utils/calculations';
 import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
 import { useOrderItems, type OrderItemRow } from '@/hooks/queries/useOrderItems';
+import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 import { useProducts, type Product } from '@/hooks/queries/useProducts';
 import type { Order, OrderItemDraft } from '@/types/orders';
 
@@ -43,6 +44,20 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
     companyId,
   );
   const { data: products = [] } = useProducts(companyId);
+  // 🟠 재고부족 표시 + 재고확인 일괄조정용 — Map<product_id, ProductStockInfo>.
+  const { data: stockSummary } = useInventoryStock(companyId);
+  const stockByProduct = stockSummary?.stockByProduct;
+
+  /**
+   * 제품의 현재 가용 재고. lots+tx+올해 판매수량 기준 (calcCurrentStockByProduct).
+   * 미존재 시 0 으로 폴백.
+   */
+  const stockOf = (productId: string | null): number => {
+    if (!productId) return 0;
+    return stockByProduct?.get(productId)?.current ?? 0;
+  };
+
+  const [isAdjusting, setIsAdjusting] = useState(false);
 
   // 자동완성 후보 — 코드/이름 모두 대소문자 무시 부분일치 (includes).
   const suggestions: Product[] = useMemo(() => {
@@ -231,6 +246,92 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
     if (target) {
       e.preventDefault();
       applyProductToDraft(draftId, target);
+    }
+  };
+
+  /**
+   * 재고 확인 → 재고부족 품목을 일괄 강제조정.
+   *
+   * 정책:
+   *  - 반품 행은 제외 (재고 차감 대상 아님).
+   *  - quantity > 현재재고 인 행을 newQty = max(0, 현재재고) 로 축소.
+   *  - original_quantity 가 NULL 인 경우에만 quantity 를 백업 (재조정 멱등성).
+   *  - 모든 품목 갱신 후 orders.total_amount 재계산.
+   */
+  const handleStockCheck = async () => {
+    if (!order || !companyId) return;
+
+    const itemsToFix = orderItems.filter((it) => {
+      if (it.is_return) return false;
+      if (!it.product_id) return false;
+      const stock = stockOf(it.product_id);
+      return it.quantity > stock;
+    });
+
+    if (itemsToFix.length === 0) {
+      alert('재고부족 품목이 없습니다.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `재고부족 품목 ${itemsToFix.length}개를 재고수량으로 조정하시겠습니까?`,
+    );
+    if (!confirmed) return;
+
+    setIsAdjusting(true);
+    try {
+      // 1) 각 품목 강제조정.
+      for (const it of itemsToFix) {
+        const stock = stockOf(it.product_id);
+        const newQty = Math.max(0, stock);
+        const newAmount = newQty * it.unit_price;
+        // 🟠 original_quantity 는 DB 신규 컬럼이지만 Supabase 자동생성 타입(database.ts)이
+        //    아직 반영되지 않아 컴파일러가 거부함 → payload 타입 단언으로 우회.
+        //    Phase 후속 `supabase gen types` 재실행 시 단언 제거 예정.
+        const updatePayload = {
+          original_quantity: it.original_quantity ?? it.quantity,
+          quantity: newQty,
+          amount: newAmount,
+        } as unknown as { quantity: number; amount: number };
+        const { error } = await supabase
+          .from('order_items')
+          .update(updatePayload)
+          .eq('id', it.id)
+          .eq('company_id', companyId);
+        if (error) {
+          console.error('재고조정 실패:', error);
+          alert('재고조정 중 오류가 발생했습니다: ' + error.message);
+          return;
+        }
+      }
+
+      // 2) orders.total_amount 재계산.
+      const fixedIds = new Set(itemsToFix.map((it) => it.id));
+      const newTotal = orderItems.reduce((sum, it) => {
+        if (fixedIds.has(it.id)) {
+          const stock = stockOf(it.product_id);
+          return sum + Math.max(0, stock) * it.unit_price;
+        }
+        return sum + it.amount;
+      }, 0);
+      const { error: totalErr } = await supabase
+        .from('orders')
+        .update({ total_amount: newTotal })
+        .eq('id', order.id)
+        .eq('company_id', companyId);
+      if (totalErr) {
+        console.error('총액 갱신 실패:', totalErr);
+        alert('총액 갱신 중 오류가 발생했습니다: ' + totalErr.message);
+        return;
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['order-items', order.id] }),
+        queryClient.invalidateQueries({ queryKey: ['orders', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory-stock', companyId] }),
+      ]);
+    } finally {
+      setIsAdjusting(false);
     }
   };
 
@@ -438,6 +539,20 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
           <div style={{ flex: 1 }} />
           <button
             type="button"
+            onClick={handleStockCheck}
+            disabled={isAdjusting}
+            title="재고부족 품목을 현재 재고수량으로 강제 조정"
+            className="px-2.5 py-1 text-xs font-medium rounded border border-[var(--warning)] text-[var(--warning)] hover:bg-[var(--warning-wash)] transition-colors disabled:opacity-50"
+          >
+            <AlertTriangle
+              size={11}
+              strokeWidth={1.8}
+              style={{ display: 'inline-block', marginRight: 3, verticalAlign: '-1px' }}
+            />
+            {isAdjusting ? '조정 중…' : '재고 확인'}
+          </button>
+          <button
+            type="button"
             onClick={handleAddReturn}
             className="px-2.5 py-1 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] transition-colors"
           >
@@ -638,42 +753,89 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                         )}
                       </td>
                       <td className="py-1.5 px-2 text-right">
-                        <input
-                          type="number"
-                          min={isNewRow ? 1 : 0}
-                          value={displayQty === 0 ? '' : displayQty}
-                          placeholder={isNewRow ? '수량' : undefined}
-                          onChange={(e) => {
-                            const raw = e.target.value;
-                            const num = raw === '' ? 0 : Number(raw);
-                            const safe = Number.isFinite(num) && num >= 0 ? num : 0;
-                            if (isNewRow) handleQtyChange(item.id, safe);
-                            else handleQtyInput(item.id, safe);
-                          }}
-                          onBlur={
-                            isNewRow ? undefined : () => handleQtyBlur(item.id)
-                          }
-                          onFocus={(e) => {
-                            e.currentTarget.style.border =
-                              '1px solid var(--brand)';
-                          }}
-                          onBlurCapture={(e) => {
-                            e.currentTarget.style.border =
-                              '1px solid transparent';
-                          }}
-                          style={{
-                            width: 52,
-                            textAlign: 'right',
-                            border: '1px solid transparent',
-                            borderRadius: 4,
-                            padding: '2px 4px',
-                            fontSize: 12,
-                            background: 'transparent',
-                            outline: 'none',
-                            color: 'var(--ink)',
-                            fontVariantNumeric: 'tabular-nums',
-                          }}
-                        />
+                        {(() => {
+                          // 재고부족 / 조정 이력 시각 표시 — 신규 행은 적용 안 함.
+                          const row = !isNewRow ? (item as OrderItemRow) : null;
+                          const orig = row?.original_quantity ?? null;
+                          const productId = row?.product_id ?? null;
+                          const stock = productId ? stockOf(productId) : 0;
+                          const isShortage =
+                            !!row &&
+                            !row.is_return &&
+                            orig == null &&
+                            row.quantity > stock;
+                          const inputColor = isShortage
+                            ? 'var(--danger)'
+                            : 'var(--ink)';
+                          return (
+                            <div
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'baseline',
+                                gap: 4,
+                              }}
+                            >
+                              <input
+                                type="number"
+                                min={isNewRow ? 1 : 0}
+                                value={displayQty === 0 ? '' : displayQty}
+                                placeholder={isNewRow ? '수량' : undefined}
+                                title={
+                                  isShortage
+                                    ? `재고부족 — 현재재고 ${stock} (요청 ${row?.quantity})`
+                                    : undefined
+                                }
+                                onChange={(e) => {
+                                  const raw = e.target.value;
+                                  const num = raw === '' ? 0 : Number(raw);
+                                  const safe =
+                                    Number.isFinite(num) && num >= 0 ? num : 0;
+                                  if (isNewRow) handleQtyChange(item.id, safe);
+                                  else handleQtyInput(item.id, safe);
+                                }}
+                                onBlur={
+                                  isNewRow
+                                    ? undefined
+                                    : () => handleQtyBlur(item.id)
+                                }
+                                onFocus={(e) => {
+                                  e.currentTarget.style.border =
+                                    '1px solid var(--brand)';
+                                }}
+                                onBlurCapture={(e) => {
+                                  e.currentTarget.style.border =
+                                    '1px solid transparent';
+                                }}
+                                style={{
+                                  width: 52,
+                                  textAlign: 'right',
+                                  border: '1px solid transparent',
+                                  borderRadius: 4,
+                                  padding: '2px 4px',
+                                  fontSize: 12,
+                                  background: 'transparent',
+                                  outline: 'none',
+                                  color: inputColor,
+                                  fontWeight: isShortage ? 600 : 400,
+                                  fontVariantNumeric: 'tabular-nums',
+                                }}
+                              />
+                              {orig != null && (
+                                <span
+                                  title={`원래 주문수량 ${orig} → 재고조정 ${row?.quantity}`}
+                                  style={{
+                                    color: 'var(--ink-3)',
+                                    textDecoration: 'line-through',
+                                    fontSize: '0.85em',
+                                    fontVariantNumeric: 'tabular-nums',
+                                  }}
+                                >
+                                  {orig}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="py-1.5 px-2 text-right font-num">
                         {item.sell_price > 0

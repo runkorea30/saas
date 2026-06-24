@@ -236,6 +236,7 @@ export function OrdersPage() {
             grade_e: it.product?.grade_e ?? null,
           },
           quantity: it.quantity,
+          original_quantity: it.original_quantity ?? null,
           unit_price: it.unit_price,
           amount: it.amount,
           is_return: it.is_return,

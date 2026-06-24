@@ -39,6 +39,8 @@ export interface InvoiceItem {
     grade_e?: number | null;
   };
   quantity: number;
+  /** 재고부족 강제조정 전 원래 주문수량. null = 정상. */
+  original_quantity?: number | null;
   unit_price: number;
   amount: number;
   is_return: boolean;
@@ -359,7 +361,21 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                             <td style={td('center')}>{r.no}</td>
                             <td style={td('left')}>{it.product.name}</td>
                             <td style={td('center')}>{it.product.code}</td>
-                            <td style={td('right')}>{fmt(it.quantity)}</td>
+                            <td style={td('right')}>
+                              {fmt(it.quantity)}
+                              {it.original_quantity != null && (
+                                <span
+                                  style={{
+                                    marginLeft: '4px',
+                                    color: '#aaa',
+                                    textDecoration: 'line-through',
+                                    fontSize: '0.85em',
+                                  }}
+                                >
+                                  {fmt(it.original_quantity)}
+                                </span>
+                              )}
+                            </td>
                             <td style={td('right')}>{fmt(supplyPrice)}</td>
                             <td style={td('right')}>
                               {it.product.sell_price

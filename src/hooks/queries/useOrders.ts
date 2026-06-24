@@ -24,7 +24,7 @@ const ORDER_SELECT = `
   customer:customers ( id, name, grade ),
   creator:user_profiles ( id, name ),
   items:order_items (
-    id, product_id, quantity, unit_price, amount, is_return,
+    id, product_id, quantity, original_quantity, unit_price, amount, is_return,
     product:products ( id, code, name, category, sell_price, grade_a, grade_b, grade_c, grade_d, grade_e )
   )
 `;

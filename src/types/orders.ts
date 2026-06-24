@@ -35,6 +35,8 @@ export interface OrderItem {
   id: string;
   product_id: string;
   quantity: number;
+  /** 재고부족 강제조정 전 원래 주문수량. null 이면 조정 이력 없음(정상). */
+  original_quantity?: number | null;
   unit_price: number;
   amount: number;
   is_return: boolean;

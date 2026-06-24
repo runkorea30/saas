@@ -15,6 +15,8 @@ export interface OrderItemRow {
   order_id: string;
   product_id: string | null;
   quantity: number;
+  /** 재고부족 강제조정 전 원래 주문수량. null = 조정 이력 없음. */
+  original_quantity: number | null;
   unit_price: number;
   amount: number;
   is_return: boolean;
@@ -39,6 +41,7 @@ interface OrderItemJoinRow {
   order_id: string;
   product_id: string | null;
   quantity: number;
+  original_quantity: number | null;
   unit_price: number;
   amount: number;
   is_return: boolean;
@@ -62,6 +65,7 @@ const ORDER_ITEM_SELECT = `
   order_id,
   product_id,
   quantity,
+  original_quantity,
   unit_price,
   amount,
   is_return,
@@ -100,6 +104,7 @@ export function useOrderItems(orderId: string | null, companyId: string | null) 
         order_id: r.order_id,
         product_id: r.product_id,
         quantity: r.quantity,
+        original_quantity: r.original_quantity,
         unit_price: r.unit_price,
         amount: r.amount,
         is_return: r.is_return,
