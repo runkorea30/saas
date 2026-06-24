@@ -714,9 +714,23 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                               style={{
                                 display: 'inline-flex',
                                 alignItems: 'baseline',
+                                justifyContent: 'flex-end',
                                 gap: 4,
                               }}
                             >
+                              {orig != null && (
+                                <span
+                                  title={`원래 주문수량 ${orig} → 재고조정 ${row?.quantity}`}
+                                  style={{
+                                    color: 'var(--ink-3)',
+                                    textDecoration: 'line-through',
+                                    fontSize: 'inherit',
+                                    fontVariantNumeric: 'tabular-nums',
+                                  }}
+                                >
+                                  {orig}
+                                </span>
+                              )}
                               <input
                                 type="number"
                                 min={isNewRow ? 1 : 0}
@@ -766,19 +780,6 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                                   fontVariantNumeric: 'tabular-nums',
                                 }}
                               />
-                              {orig != null && (
-                                <span
-                                  title={`원래 주문수량 ${orig} → 재고조정 ${row?.quantity}`}
-                                  style={{
-                                    color: 'var(--ink-3)',
-                                    textDecoration: 'line-through',
-                                    fontSize: '0.85em',
-                                    fontVariantNumeric: 'tabular-nums',
-                                  }}
-                                >
-                                  {orig}
-                                </span>
-                              )}
                             </div>
                           );
                         })()}

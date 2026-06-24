@@ -362,19 +362,19 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                             <td style={td('left')}>{it.product.name}</td>
                             <td style={td('center')}>{it.product.code}</td>
                             <td style={td('right')}>
-                              {fmt(it.quantity)}
                               {it.original_quantity != null && (
                                 <span
                                   style={{
-                                    marginLeft: '4px',
+                                    marginRight: '4px',
                                     color: '#aaa',
                                     textDecoration: 'line-through',
-                                    fontSize: '0.85em',
+                                    fontSize: 'inherit',
                                   }}
                                 >
                                   {fmt(it.original_quantity)}
                                 </span>
                               )}
+                              {fmt(it.quantity)}
                             </td>
                             <td style={td('right')}>{fmt(supplyPrice)}</td>
                             <td style={td('right')}>

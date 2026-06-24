@@ -544,6 +544,22 @@ export function OrderEntryPage() {
     //    거래명세서에 `0 ~~원본수량~~` 형태로 표시되어 거래처에 결품 통지 가능.
     const itemsForRpc = adjusted;
 
+    // 🟠 저장 직전 방어용 공급가 재계산 — applyProduct/Excel 파싱에서 누락된 경우 대비.
+    //    selectedCustomer.grade + product.grade_a~e 로 supply 재산출. 0(grade rate 누락)이면
+    //    sell_price 폴백하여 매출 0원 저장 방지. RPC 의 unit_price/amount 가 실거래가가 됨.
+    const productById = new Map(products.map((p) => [p.id, p]));
+    const finalItems = itemsForRpc.map((a) => {
+      const product = productById.get(a.row.product_id);
+      if (!product) return a;
+      const supplyPrice = calcSupplyPriceByCustomerGrade(
+        product.sell_price,
+        selectedCustomer?.grade ?? DEFAULT_CUSTOMER_GRADE,
+        product,
+      );
+      const effective = supplyPrice > 0 ? supplyPrice : a.row.unit_price;
+      return { ...a, row: { ...a.row, unit_price: effective } };
+    });
+
     setIsSaving(true);
     try {
       const { data, error } = await supabase.rpc('insert_order', {
@@ -553,7 +569,7 @@ export function OrderEntryPage() {
         p_source: 'manual',
         p_status: 'confirmed',
         p_memo: memo || null,
-        p_items: itemsForRpc.map((a) => ({
+        p_items: finalItems.map((a) => ({
           product_id: a.row.product_id,
           quantity: a.row.is_return ? -Math.abs(a.finalQty) : a.finalQty,
           original_quantity: a.originalQty,
@@ -584,7 +600,17 @@ export function OrderEntryPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [companyId, customerId, orderDate, memo, queryClient, navigate, stockSummary]);
+  }, [
+    companyId,
+    customerId,
+    orderDate,
+    memo,
+    queryClient,
+    navigate,
+    stockSummary,
+    products,
+    selectedCustomer,
+  ]);
 
   // ───── Ctrl+S 전역 단축키 ─────
   const handleSaveRef = useRef(handleSave);
