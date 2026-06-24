@@ -684,6 +684,51 @@ export function ImportReceivingPage() {
                 />
               </div>
             ))}
+            {/* 도착예정일 (date 컬럼) — companies.import_notice_date */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span
+                style={{
+                  fontSize: 11.5,
+                  color: 'var(--ink-3)',
+                  width: 96,
+                  flexShrink: 0,
+                }}
+              >
+                도착예정일
+              </span>
+              <input
+                type="date"
+                value={noticeDate}
+                onChange={(e) => setNoticeDate(e.target.value)}
+                style={{
+                  border: '1px solid var(--line-strong)',
+                  borderRadius: 6,
+                  padding: '6px 8px',
+                  fontSize: 12.5,
+                  background: 'var(--surface)',
+                  color: 'var(--ink)',
+                  outline: 'none',
+                  width: 200,
+                }}
+              />
+              {noticeDate && (
+                <button
+                  type="button"
+                  onClick={() => setNoticeDate('')}
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--ink-3)',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '4px 6px',
+                  }}
+                  title="비우기"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
 
           {/* 제품 목록 */}
