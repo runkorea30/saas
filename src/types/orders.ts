@@ -73,6 +73,8 @@ export interface OrderItemDraft {
   deleted_at: string | null;
   product_code: string;
   product_name: string;
+  /** products.sell_price (카탈로그 판매가). */
+  sell_price: number;
   /** 계산된 공급가(원). 거래처 등급 × 제품 공급율 × unit_price 결과. */
   supply_price: number;
   /** 제품의 등급별 공급율 (A~E). useOrderItems JOIN에서 채워짐. */

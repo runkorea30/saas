@@ -21,6 +21,8 @@ export interface OrderItemRow {
   deleted_at: string | null;
   product_code: string;
   product_name: string;
+  /** products.sell_price (카탈로그 판매가). */
+  sell_price: number;
   /** products.supply_price (참고용. 등급별 공급가는 grade_X × unit_price 로 계산). */
   supply_price: number;
   /** 거래처 등급(A~E)별 제품 공급율. unit_price × grade_X = 공급가(원). */
@@ -44,6 +46,7 @@ interface OrderItemJoinRow {
   products: {
     code: string;
     name: string;
+    sell_price: number;
     supply_price: number;
     grade_a: number | null;
     grade_b: number | null;
@@ -66,6 +69,7 @@ const ORDER_ITEM_SELECT = `
   products (
     code,
     name,
+    sell_price,
     supply_price,
     grade_a,
     grade_b,
@@ -102,6 +106,7 @@ export function useOrderItems(orderId: string | null, companyId: string | null) 
         deleted_at: r.deleted_at,
         product_code: r.products?.code ?? '',
         product_name: r.products?.name ?? '',
+        sell_price: r.products?.sell_price ?? 0,
         supply_price: r.products?.supply_price ?? 0,
         grade_a: r.products?.grade_a ?? 0,
         grade_b: r.products?.grade_b ?? 0,

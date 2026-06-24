@@ -129,6 +129,7 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
               product_id: p.id,
               product_code: p.code,
               product_name: p.name,
+              sell_price: p.sell_price,
               unit_price: p.sell_price,
               supply_price: p.supply_price,
               grade_a: p.grade_a ?? 0,
@@ -451,6 +452,7 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                   <th className="text-left py-2 px-2 font-medium text-[var(--ink-3)] w-20">코드</th>
                   <th className="text-left py-2 px-2 font-medium text-[var(--ink-3)]">제품명</th>
                   <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-14">수량</th>
+                  <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">판매가</th>
                   <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">공급가</th>
                   <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">합계</th>
                 </tr>
@@ -538,6 +540,11 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                         />
                       </td>
                       <td className="py-1.5 px-2 text-right font-num">
+                        {(item as OrderItemRow).sell_price > 0
+                          ? (item as OrderItemRow).sell_price.toLocaleString()
+                          : '—'}
+                      </td>
+                      <td className="py-1.5 px-2 text-right font-num">
                         {item.unit_price.toLocaleString()}
                       </td>
                       <td className="py-1.5 px-2 text-right font-num font-medium">
@@ -550,7 +557,7 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
               <tfoot>
                 <tr className="border-t-2 border-[var(--line-strong)]">
                   <td
-                    colSpan={4}
+                    colSpan={5}
                     className="py-2 px-2 text-right text-xs font-medium text-[var(--ink-2)]"
                   >
                     합계
@@ -668,6 +675,7 @@ function createNewDraft(args: {
     deleted_at: null,
     product_code: '',
     product_name: '',
+    sell_price: 0,
     supply_price: 0,
     grade_a: 0,
     grade_b: 0,
