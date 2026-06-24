@@ -344,19 +344,28 @@ export function useCreateTaxInvoice(companyId: string | null) {
 // 4. useCreateTaxInvoicesBulk — 일괄 생성 (미발행 건만)
 // ───────────────────────────────────────────────────────────
 
+export interface BulkInsertResult {
+  inserted: number;
+  skipped: number;       // 23505 중복 — 다른 세션이 먼저 발행했거나 stale 데이터
+  failed: number;
+  errors: string[];      // 표시용 — "거래처명: 에러메시지"
+}
+
 export function useCreateTaxInvoicesBulk(companyId: string | null) {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: {
-      year: number;
-      month: number;
-      rows: TaxInvoiceRow[];
-    }) => {
+  return useMutation<BulkInsertResult, Error, { year: number; month: number; rows: TaxInvoiceRow[] }>({
+    mutationFn: async (input) => {
       if (!companyId) throw new Error('회사 정보가 없습니다.');
+      const unissued = input.rows.filter((r) => r.invoice === null);
+      const result: BulkInsertResult = { inserted: 0, skipped: 0, failed: 0, errors: [] };
+      if (unissued.length === 0) return result;
+
       const issuedAt = new Date().toISOString();
-      const toInsert = input.rows
-        .filter((r) => r.invoice === null) // 이미 발행된 건 스킵
-        .map((r) => ({
+
+      // 🟠 순차 INSERT: 한 행 실패가 전체를 막지 않도록.
+      //    23505(unique violation) 은 stale 데이터로 간주하고 skip.
+      for (const r of unissued) {
+        const payload = {
           company_id: companyId,
           customer_id: r.subjectType === 'customer' ? r.subjectId : null,
           customer_group_id: r.subjectType === 'group' ? r.subjectId : null,
@@ -369,11 +378,21 @@ export function useCreateTaxInvoicesBulk(companyId: string | null) {
           payment_type: '02',
           status: 'issued',
           issued_at: issuedAt,
-        }));
-      if (toInsert.length === 0) return { inserted: 0 };
-      const { error } = await supabase.from('tax_invoices').insert(toInsert);
-      if (error) throw error;
-      return { inserted: toInsert.length };
+        };
+        const { error } = await supabase.from('tax_invoices').insert(payload);
+        if (!error) {
+          result.inserted += 1;
+          continue;
+        }
+        if (error.code === '23505') {
+          result.skipped += 1;
+          continue;
+        }
+        result.failed += 1;
+        result.errors.push(`${r.subject.name}: ${error.message}`);
+      }
+
+      return result;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tax-invoices'] });

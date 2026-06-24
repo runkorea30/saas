@@ -207,9 +207,22 @@ export function TaxInvoicesPage() {
     bulkMut.mutate(
       { year, month, rows },
       {
-        onSuccess: ({ inserted }) => {
+        onSuccess: ({ inserted, skipped, failed, errors }) => {
           setBulkConfirmOpen(false);
-          showToast({ kind: 'success', text: `${inserted}건의 세금계산서를 발행했습니다` });
+          if (failed > 0) {
+            const head = errors[0] ?? '';
+            const tail = errors.length > 1 ? ` 외 ${errors.length - 1}건` : '';
+            showToast({
+              kind: 'error',
+              text: `${inserted}건 발행 / ${failed}건 실패 — ${head}${tail}`,
+            });
+            return;
+          }
+          const skipNote = skipped > 0 ? ` (이미 발행 ${skipped}건 스킵)` : '';
+          showToast({
+            kind: 'success',
+            text: `${inserted}건의 세금계산서를 발행했습니다${skipNote}`,
+          });
         },
         onError: (e) => {
           setBulkConfirmOpen(false);
