@@ -12,7 +12,11 @@ import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 import { calcSupplyPriceByGrade } from '@/utils/calculations';
-import { getCategoryLabel } from '@/constants/categories';
+import {
+  getCategoryLabel,
+  PRODUCT_CATEGORY_DEFAULT,
+  PRODUCT_CATEGORY_ALL,
+} from '@/constants/categories';
 import { useToast } from '@/components/ui/Toast';
 import type { CustomerSession } from '@/hooks/useCustomerAuth';
 
@@ -80,7 +84,8 @@ export function CustomerOrderInput({
   const stockQuery = useInventoryStock(customer.companyId);
 
   const [qtyMap, setQtyMap] = useState<Map<string, number>>(new Map());
-  const [category, setCategory] = useState<string>('__ALL__');
+  /** 기본 카테고리 — 운영 데이터 기본값(constants/categories) 사용. */
+  const [category, setCategory] = useState<string>(PRODUCT_CATEGORY_DEFAULT);
   const [fixedWidth, setFixedWidth] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -92,7 +97,7 @@ export function CustomerOrderInput({
   }, [products]);
 
   const filtered = useMemo(() => {
-    if (category === '__ALL__') return products;
+    if (category === PRODUCT_CATEGORY_ALL) return products;
     return products.filter((p) => p.category === category);
   }, [products, category]);
 
@@ -132,14 +137,56 @@ export function CustomerOrderInput({
             supply_price: supply,
           };
         });
-      const { error } = await supabase.from('customer_order_uploads').insert({
+      const totalAmount = items.reduce(
+        (s, it) => s + it.qty * it.sell_price,
+        0,
+      );
+
+      // 1) customer_order_uploads — 거래처 포털 자체 이력 (items JSON 포함)
+      const { error: uploadErr } = await supabase
+        .from('customer_order_uploads')
+        .insert({
+          company_id: customer.companyId,
+          customer_id: customer.customerId,
+          upload_type: 'direct',
+          items,
+          status: 'pending',
+        });
+      if (uploadErr) throw uploadErr;
+
+      // 2) orders 헤더 — OPS 대시보드 주문내역과 연동
+      //    status 는 DB CHECK 제약(draft|confirmed|shipped|done|canceled) 에 따라 'draft'
+      //    source 는 'portal' (거래처 자체 입력)
+      const { data: order, error: orderErr } = await supabase
+        .from('orders')
+        .insert({
+          company_id: customer.companyId,
+          customer_id: customer.customerId,
+          order_date: new Date().toISOString(),
+          status: 'draft',
+          source: 'portal',
+          memo: '거래처 직접입력 주문',
+          total_amount: totalAmount,
+        })
+        .select('id')
+        .single();
+      if (orderErr || !order) throw orderErr ?? new Error('주문 생성 실패');
+
+      // 3) order_items — 실제 컬럼명은 unit_price/amount (sell_price/supply_price 아님)
+      const orderItemsPayload = items.map((it) => ({
+        order_id: order.id,
         company_id: customer.companyId,
-        customer_id: customer.customerId,
-        upload_type: 'direct',
-        items,
-        status: 'pending',
-      });
-      if (error) throw error;
+        product_id: it.product_id,
+        quantity: it.qty,
+        unit_price: it.sell_price,
+        amount: it.qty * it.sell_price,
+        is_return: false,
+      }));
+      const { error: itemsErr } = await supabase
+        .from('order_items')
+        .insert(orderItemsPayload);
+      if (itemsErr) throw itemsErr;
+
       showToast({
         kind: 'success',
         text: `주문서 ${items.length}품목 전송 완료`,
@@ -199,7 +246,7 @@ export function CustomerOrderInput({
             onChange={(e) => setCategory(e.target.value)}
             style={selectStyle}
           >
-            <option value="__ALL__">전체 분류</option>
+            <option value={PRODUCT_CATEGORY_ALL}>전체 분류</option>
             {categories.map((c) => (
               <option key={c} value={c}>
                 {getCategoryLabel(c)}

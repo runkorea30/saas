@@ -4,10 +4,9 @@
  * OPS Shell 과 무관한 독립 페이지. 로그인 세션이 없으면 CustomerOrderLogin 렌더.
  * 로그인 후에는 메인(파일/메시지/직송) 또는 직접 입력 모드 노출.
  */
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  ALargeSmall,
   FileUp,
   Loader2,
   LogOut,
@@ -19,7 +18,6 @@ import {
   X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
 import { useCustomerAuth, type CustomerSession } from '@/hooks/useCustomerAuth';
 import { CustomerOrderLogin } from './CustomerOrderLogin';
@@ -46,34 +44,63 @@ const emptyShipping = (): ShippingRow => ({
   memo: '',
 });
 
-interface UploadItem {
-  qty: number;
-  sell_price: number;
-}
-
-interface UploadRow {
+/** orders + item count 조합 — 우측 패널 표시 행. */
+interface OrderRowWithCount {
   id: string;
-  created_at: string;
-  /** DB 는 string. 화면 분기는 런타임 비교로. */
-  upload_type: string;
-  file_name: string | null;
-  message: string | null;
-  /** Supabase Json 컬럼이므로 런타임에 narrow. */
-  items: UploadItem[] | null;
+  order_date: string;
+  total_amount: number;
   status: string;
+  itemCount: number;
 }
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0');
 }
 
-function uploadAmount(u: UploadRow): number {
-  if (!Array.isArray(u.items)) return 0;
-  return u.items.reduce(
-    (s, it) => s + (Number(it?.qty) || 0) * (Number(it?.sell_price) || 0),
-    0,
-  );
+/**
+ * 주어진 기간 [start, end) 의 거래처 주문을 orders + order_items 조합으로 반환.
+ * item count 는 별도 select 로 집계(중첩 count select 의 형변환 복잡도 회피).
+ */
+async function fetchOrdersWithItemCount(
+  companyId: string,
+  customerId: string,
+  start: Date,
+  end: Date,
+): Promise<OrderRowWithCount[]> {
+  const { data: orders, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_date, total_amount, status')
+    .eq('company_id', companyId)
+    .eq('customer_id', customerId)
+    .gte('order_date', start.toISOString())
+    .lt('order_date', end.toISOString())
+    .is('deleted_at', null)
+    .order('order_date', { ascending: false });
+  if (oErr) throw oErr;
+  const rows = orders ?? [];
+  if (rows.length === 0) return [];
+
+  const ids = rows.map((o) => o.id);
+  const { data: items, error: iErr } = await supabase
+    .from('order_items')
+    .select('order_id')
+    .in('order_id', ids)
+    .is('deleted_at', null);
+  if (iErr) throw iErr;
+  const countMap = new Map<string, number>();
+  for (const it of items ?? []) {
+    countMap.set(it.order_id, (countMap.get(it.order_id) ?? 0) + 1);
+  }
+  return rows.map((o) => ({ ...o, itemCount: countMap.get(o.id) ?? 0 }));
 }
+
+const STATUS_LABEL: Record<string, string> = {
+  draft: '대기',
+  confirmed: '확정',
+  shipped: '출고',
+  done: '완료',
+  canceled: '취소',
+};
 
 export function CustomerOrderPage() {
   const { customer, isLoading, logout } = useCustomerAuth();
@@ -320,6 +347,52 @@ function LeftPanel({
       prev.length === 1 ? [emptyShipping()] : prev.filter((_, i) => i !== idx),
     );
 
+  /**
+   * 직송 셀에 엑셀 다중 셀(또는 행) 붙여넣기를 자동 분배.
+   * - 단일 셀(텍스트에 탭/줄바꿈 없음) 이면 기본 paste 허용 → preventDefault 하지 않음.
+   * - 다중 셀이면 \n 으로 행, \t 으로 컬럼 분리해 (rowIndex+ri, colIndex+ci) 위치에 채움.
+   * - 부족한 행은 emptyShipping 으로 자동 확장.
+   */
+  const SHIPPING_KEYS: ReadonlyArray<keyof ShippingRow> = [
+    'name',
+    'zipcode',
+    'address',
+    'phone1',
+    'phone2',
+    'memo',
+  ];
+  const handleShippingPaste =
+    (rowIndex: number, colIndex: number) =>
+    (e: React.ClipboardEvent<HTMLInputElement>) => {
+      const text = e.clipboardData.getData('text');
+      if (!text) return;
+      if (!text.includes('\t') && !text.includes('\n')) return; // 단일 셀: 기본 동작 유지
+      e.preventDefault();
+      const matrix = text
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .replace(/\n+$/, '')
+        .split('\n')
+        .map((line) => line.split('\t'));
+
+      setShipping((prev) => {
+        const next = [...prev];
+        matrix.forEach((cols, ri) => {
+          const ti = rowIndex + ri;
+          while (next.length <= ti) next.push(emptyShipping());
+          const target = { ...next[ti] };
+          cols.forEach((val, ci) => {
+            const keyIdx = colIndex + ci;
+            if (keyIdx < SHIPPING_KEYS.length) {
+              target[SHIPPING_KEYS[keyIdx]] = val.trim();
+            }
+          });
+          next[ti] = target;
+        });
+        return next;
+      });
+    };
+
   const handleSubmitFile = async () => {
     if (!file) {
       showToast({ kind: 'error', text: '파일을 선택하세요.' });
@@ -344,7 +417,10 @@ function LeftPanel({
         status: 'pending',
       });
       if (error) throw error;
-      showToast({ kind: 'success', text: '주문서 전송 완료' });
+      showToast({
+        kind: 'success',
+        text: '주문서가 전송되었습니다. 담당자가 확인 후 처리합니다.',
+      });
       setFile(null);
       setMessage('');
       setShipping([emptyShipping()]);
@@ -509,36 +585,42 @@ function LeftPanel({
                     <CellInput
                       value={row.name}
                       onChange={(v) => updateShipping(i, 'name', v)}
+                      onPaste={handleShippingPaste(i, 0)}
                     />
                   </ShipTd>
                   <ShipTd>
                     <CellInput
                       value={row.zipcode}
                       onChange={(v) => updateShipping(i, 'zipcode', v)}
+                      onPaste={handleShippingPaste(i, 1)}
                     />
                   </ShipTd>
                   <ShipTd>
                     <CellInput
                       value={row.address}
                       onChange={(v) => updateShipping(i, 'address', v)}
+                      onPaste={handleShippingPaste(i, 2)}
                     />
                   </ShipTd>
                   <ShipTd>
                     <CellInput
                       value={row.phone1}
                       onChange={(v) => updateShipping(i, 'phone1', v)}
+                      onPaste={handleShippingPaste(i, 3)}
                     />
                   </ShipTd>
                   <ShipTd>
                     <CellInput
                       value={row.phone2}
                       onChange={(v) => updateShipping(i, 'phone2', v)}
+                      onPaste={handleShippingPaste(i, 4)}
                     />
                   </ShipTd>
                   <ShipTd>
                     <CellInput
                       value={row.memo}
                       onChange={(v) => updateShipping(i, 'memo', v)}
+                      onPaste={handleShippingPaste(i, 5)}
                     />
                   </ShipTd>
                   <ShipTd width={36}>
@@ -610,62 +692,37 @@ function RightPanel({
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
 
-  const todayQuery = useQuery<UploadRow[]>({
-    queryKey: ['customer-uploads-today', customer.customerId],
+  const todayQuery = useQuery<OrderRowWithCount[]>({
+    queryKey: ['customer-orders-today', customer.customerId],
     queryFn: async () => {
       const start = new Date();
       start.setHours(0, 0, 0, 0);
       const end = new Date(start);
       end.setDate(end.getDate() + 1);
-      return fetchAllRows<UploadRow>(
-        () =>
-          supabase
-            .from('customer_order_uploads')
-            .select(
-              'id, created_at, upload_type, file_name, message, items, status',
-            )
-            .eq('customer_id', customer.customerId)
-            .gte('created_at', start.toISOString())
-            .lt('created_at', end.toISOString())
-            .order('created_at', { ascending: false }) as never,
+      return fetchOrdersWithItemCount(
+        customer.companyId,
+        customer.customerId,
+        start,
+        end,
       );
     },
     staleTime: 15_000,
   });
 
-  const monthlyQuery = useQuery<UploadRow[]>({
-    queryKey: ['customer-uploads-monthly', customer.customerId, year, month],
+  const monthlyQuery = useQuery<OrderRowWithCount[]>({
+    queryKey: ['customer-orders-monthly', customer.customerId, year, month],
     queryFn: async () => {
       const start = new Date(year, month - 1, 1);
       const end = new Date(year, month, 1);
-      return fetchAllRows<UploadRow>(
-        () =>
-          supabase
-            .from('customer_order_uploads')
-            .select(
-              'id, created_at, upload_type, file_name, message, items, status',
-            )
-            .eq('customer_id', customer.customerId)
-            .gte('created_at', start.toISOString())
-            .lt('created_at', end.toISOString())
-            .order('created_at', { ascending: false }) as never,
+      return fetchOrdersWithItemCount(
+        customer.companyId,
+        customer.customerId,
+        start,
+        end,
       );
     },
     staleTime: 30_000,
   });
-
-  const monthlyByDate = useMemo(() => {
-    const map = new Map<string, { count: number; amount: number }>();
-    for (const u of monthlyQuery.data ?? []) {
-      const d = new Date(u.created_at);
-      const key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-      const cur = map.get(key) ?? { count: 0, amount: 0 };
-      cur.count++;
-      cur.amount += uploadAmount(u);
-      map.set(key, cur);
-    }
-    return Array.from(map.entries()).sort((a, b) => (a[0] < b[0] ? 1 : -1));
-  }, [monthlyQuery.data]);
 
   const baseFont = 12 * fontScale;
 
@@ -676,75 +733,16 @@ function RightPanel({
           평일 오후 4시 이후 접수된 주문은 다음 영업일에 출고됩니다.<br />
           긴급 건은 담당자에게 연락 바랍니다.
         </div>
-        <a
-          href="https://pf.kakao.com/"
-          target="_blank"
-          rel="noreferrer noopener"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginTop: 12,
-            height: 40,
-            width: '100%',
-            background: '#FEE500',
-            color: '#3C1E1E',
-            fontSize: 13,
-            fontWeight: 600,
-            borderRadius: 6,
-            textDecoration: 'none',
-          }}
-        >
-          런코리아 카카오톡 채널 추가
-        </a>
       </Card>
 
       <Card title="오늘 주문 내역">
-        {todayQuery.isLoading ? (
-          <div style={{ fontSize: baseFont, color: '#78716C' }}>불러오는 중…</div>
-        ) : (todayQuery.data?.length ?? 0) === 0 ? (
-          <div style={{ fontSize: baseFont, color: '#78716C' }}>
-            오늘 등록한 주문이 없습니다.
-          </div>
-        ) : (
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {todayQuery.data!.map((u) => (
-              <li
-                key={u.id}
-                style={{
-                  padding: '8px 0',
-                  borderBottom: '1px solid #F5F5F4',
-                  fontSize: baseFont,
-                  color: '#1C1917',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    gap: 8,
-                  }}
-                >
-                  <span>
-                    {u.upload_type === 'file'
-                      ? `[파일] ${u.file_name ?? ''}`
-                      : `[직접입력] ${u.items?.length ?? 0}품목`}
-                  </span>
-                  <span style={{ color: '#78716C', fontVariantNumeric: 'tabular-nums' }}>
-                    {uploadAmount(u).toLocaleString('ko-KR')}원
-                  </span>
-                </div>
-                <div style={{ fontSize: 11, color: '#A8A29E', marginTop: 2 }}>
-                  {new Date(u.created_at).toLocaleTimeString('ko-KR', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}{' '}
-                  · {u.status}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+        <OrderList
+          rows={todayQuery.data ?? []}
+          isLoading={todayQuery.isLoading}
+          baseFont={baseFont}
+          emptyText="오늘 등록한 주문이 없습니다."
+          showTime
+        />
       </Card>
 
       <Card title="월별 주문 내역">
@@ -772,38 +770,94 @@ function RightPanel({
             ))}
           </select>
         </div>
-        {monthlyQuery.isLoading ? (
-          <div style={{ fontSize: baseFont, color: '#78716C' }}>불러오는 중…</div>
-        ) : monthlyByDate.length === 0 ? (
-          <div style={{ fontSize: baseFont, color: '#78716C' }}>
-            등록된 주문이 없습니다.
-          </div>
-        ) : (
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {monthlyByDate.map(([date, { count, amount }]) => (
-              <li
-                key={date}
-                style={{
-                  padding: '6px 0',
-                  borderBottom: '1px solid #F5F5F4',
-                  fontSize: baseFont,
-                  color: '#1C1917',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <span>
-                  {date} <span style={{ color: '#78716C' }}>({count}건)</span>
-                </span>
-                <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {amount.toLocaleString('ko-KR')}원
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <OrderList
+          rows={monthlyQuery.data ?? []}
+          isLoading={monthlyQuery.isLoading}
+          baseFont={baseFont}
+          emptyText="등록된 주문이 없습니다."
+        />
       </Card>
     </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────
+
+function OrderList({
+  rows,
+  isLoading,
+  baseFont,
+  emptyText,
+  showTime,
+}: {
+  rows: OrderRowWithCount[];
+  isLoading: boolean;
+  baseFont: number;
+  emptyText: string;
+  showTime?: boolean;
+}) {
+  if (isLoading) {
+    return <div style={{ fontSize: baseFont, color: '#78716C' }}>불러오는 중…</div>;
+  }
+  if (rows.length === 0) {
+    return <div style={{ fontSize: baseFont, color: '#78716C' }}>{emptyText}</div>;
+  }
+  return (
+    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+      {rows.map((r) => {
+        const d = new Date(r.order_date);
+        const datePart = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+        const timePart = showTime
+          ? d.toLocaleTimeString('ko-KR', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })
+          : null;
+        return (
+          <li
+            key={r.id}
+            style={{
+              padding: '8px 0',
+              borderBottom: '1px solid #F5F5F4',
+              fontSize: baseFont,
+              color: '#1C1917',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: 8,
+              }}
+            >
+              <span>
+                {datePart}
+                {timePart && (
+                  <span style={{ color: '#78716C', marginLeft: 6 }}>
+                    {timePart}
+                  </span>
+                )}
+              </span>
+              <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {r.total_amount.toLocaleString('ko-KR')}원
+              </span>
+            </div>
+            <div
+              style={{
+                fontSize: 11,
+                color: '#78716C',
+                marginTop: 2,
+                display: 'flex',
+                justifyContent: 'space-between',
+              }}
+            >
+              <span>품목 {r.itemCount}건</span>
+              <span>{STATUS_LABEL[r.status] ?? r.status}</span>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -887,15 +941,18 @@ function ShipTd({
 function CellInput({
   value,
   onChange,
+  onPaste,
 }: {
   value: string;
   onChange: (v: string) => void;
+  onPaste?: (e: React.ClipboardEvent<HTMLInputElement>) => void;
 }) {
   return (
     <input
       type="text"
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onPaste={onPaste}
       style={{
         width: '100%',
         height: 28,
@@ -946,5 +1003,3 @@ const smallSelect: React.CSSProperties = {
   background: '#FFFFFF',
 };
 
-// 미사용 import 경고 방지용 sentinel (글자크기 컨트롤 아이콘 시맨틱 보존).
-void ALargeSmall;
