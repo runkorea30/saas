@@ -360,6 +360,8 @@ function CustomerOrderShell({
               display: 'flex',
               flexDirection: 'column',
               gap: 16,
+              height: '100%',
+              minHeight: 0,
             }}
           >
             <NoticePanel fontScale={fontScale} />
@@ -1179,6 +1181,11 @@ function ImportNoticeCard({
         border: '1px solid #E7E5E4',
         borderRadius: 10,
         padding: 16,
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+        overflow: 'hidden',
       }}
     >
       {/* 헤더 — 제목 + 도착예정 자유 텍스트 강조 */}
@@ -1317,22 +1324,31 @@ function ImportNoticeCard({
         })}
       </div>
 
-      {/* 제품 목록 — 카테고리 그룹 + 스크롤 (최대 260px) */}
+      {/* 제품 목록 — 카테고리 그룹 + 스크롤 (남은 공간 활용, 카드 내부에서만 스크롤) */}
       {sortedProducts.length > 0 && (
-        <div>
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
+          }}
+        >
           <div
             style={{
               fontSize: 11,
               color: '#6B7280',
               marginBottom: 6,
               fontWeight: 500,
+              flexShrink: 0,
             }}
           >
             입고 예정 제품
           </div>
           <div
             style={{
-              maxHeight: 260,
+              flex: 1,
+              minHeight: 0,
               overflowY: 'auto',
               border: '1px solid #F3F4F6',
               borderRadius: 6,
