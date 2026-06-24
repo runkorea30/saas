@@ -26,6 +26,7 @@ import { CustomerOrderPage } from '@/pages/customer/CustomerOrderPage';
 import { BankingPage } from '@/pages/finance/BankingPage';
 import { ReceivablesPage } from '@/pages/finance/ReceivablesPage';
 import { TaxInvoicesPage } from '@/pages/finance/TaxInvoicesPage';
+import { BillingPage } from '@/pages/sales/BillingPage';
 
 function App() {
   return (
@@ -42,6 +43,7 @@ function App() {
           <Route path="order-entry" element={<OrderEntryPage />} />
           <Route path="analysis" element={<SalesAnalysisPage />} />
           <Route path="invoices" element={<PlaceholderPage />} />
+          <Route path="billing" element={<BillingPage />} />
         </Route>
 
         <Route path="inventory">

@@ -40,6 +40,7 @@ export const navSections: NavSection[] = [
       { path: '/sales/order-entry', label: '수동주문입력' },
       { path: '/sales/analysis', label: '매출분석' },
       { path: '/sales/invoices', label: '송장대장' },
+      { path: '/sales/billing', label: '청구서' },
     ],
   },
   {
