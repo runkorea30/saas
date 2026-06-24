@@ -20,9 +20,12 @@
 | Phase 3.11 | 수동주문입력 페이지 — 스프레드시트 UX + 엑셀 파싱 + RPC 저장 | ✅ 완료 (2026-06-23) |
 | Phase 3.12 | 재고현황 — 최근 움직임 robust 표기 + 재고조정 기능 (RPC) | ✅ 완료 (2026-06-23) |
 | Phase 3.13 | 수입/매입 Phase 2 — 주문서(XLSX) + 인보이스(PDF) 자동 파싱·비교 (Claude API) | ✅ 완료 (2026-06-23) |
-| Phase 4 | 나머지 6 페이지 + Auth 도입 | 대기 |
+| Phase 3.14 | 발주서 페이지 (`/inventory/purchase-orders`) — `calcOrderSuggestion` 기반 | ✅ 완료 (2026-06-24) |
+| Phase 3.15 | 거래처 주문서 포털 (`/customer-order`) — 거래처 로그인 + 주문서 업로드 | ✅ 완료 (2026-06-24) |
+| Phase 3.16 | 주문내역 UI 개선 + 단위 일괄정리 + Vercel 배포 | ✅ 완료 (2026-06-24) |
+| Phase 4 | 나머지 페이지 + Auth 도입 | 대기 |
 
-**페이지 진도: 7 / 13 구현 완료**
+**페이지 진도: 9 / 13 구현 완료**
 
 - `/` — 홈 대시보드 (KPI + Today + Chart + Timeline)
 - `/sales/orders` — 주문내역 (필터/목록/상세 split, 상세에서 수정/저장/반품추가/주문추가)
@@ -30,18 +33,22 @@
 - `/settings/customers` — 거래처 (목록/필터/상세 split)
 - `/inventory/products` — 제품리스트 (CRUD + 모달 + 체크박스 + 필터 초기화)
 - `/inventory/stock` — 재고현황 (기초재고 투입 + 재고조정 + KPI)
-- `/inventory/purchase` — 수입/매입 Phase 1 (수동 입력 + 입고확정, PDF 파싱은 Phase 2)
-- 나머지 6 경로는 전부 `<PlaceholderPage />` 상태
+- `/inventory/purchase` — 수입/매입 Phase 1 + Phase 2 (수동 입력·입고확정 + PDF/XLSX 자동 파싱)
+- `/inventory/purchase-orders` — 발주서 (계산식 기반 발주량 추천 + DZ 반올림 + 카테고리 단일선택)
+- `/customer-order` — 거래처 주문서 포털 (로그인 + 주문서 업로드 + 직송정보 + 월별 주문내역)
+- 나머지 4 경로는 전부 `<PlaceholderPage />` 상태
+
+**배포**: https://saas-beta-pied.vercel.app (Vercel 자동 배포, GitHub push)
 
 ---
 
-## 후속 PR 로드맵 (2026-06-23 갱신)
+## 후속 PR 로드맵 (2026-06-24 갱신)
 
 - **다음 후보 (택1)**:
-  - **수입/매입 Phase 2** — PDF 업로드 + Angelus 인보이스 자동 파싱
-  - **발주서 페이지** (`/inventory/purchase-orders`) — `calcOrderSuggestion` 이미 구현됨
+  - **매출분석 페이지 심화** — 월별/일별/제품별 1차 구현 후 차트·필터·CSV 내보내기 보강
   - **송장대장** (`/sales/invoices`)
   - **미수금** (`/finance/receivables`)
+  - **은행거래** (`/finance/banking`) — 입금 매칭
 - **PR 2 (예정)**: Products 엑셀 업로드 — XLSX 템플릿, 프리뷰, 일괄 추가
 - **PR 3 (예정)**: Products 일괄 수정 — 체크된 행의 판매가/공급가/USD 등 동시 변경. PR 1.5 (#4) 의 체크박스 컬럼이 이 PR을 위한 사전 준비
 - **Phase B (예정)**: Products 행 클릭 상세 펼침
@@ -50,6 +57,61 @@
   - 컬럼간격 드래그 리사이저 (현재는 fixed/flex 토글만)
   - 우상단 "자동수집 OFF" + "수집/팩스" 영역 (의미 미정의)
   - 파일 자체를 서버 업로드 (현재는 클라이언트 미리보기만)
+
+---
+
+## 오늘 추가된 작업 요약 (2026-06-24)
+
+### 발주서 페이지 (Phase 3.14) — `/inventory/purchase-orders`
+- 신규 페이지 `PurchaseOrderPage` — `calcOrderSuggestion(companyId, productId)` 기반 추천 발주량 계산 (과거 6개월 판매 → 3개월치 → DZ).
+- 카테고리 필터 단일 선택 토글 + 발주수량 컬럼 반올림(`Math.round`) 로직 정리 (`de0a7de`, `afad672`).
+- DB: 신규 테이블 `mochicraft_demo.purchase_order_items` (purchase_order_id FK CASCADE, product_id FK, quantity INT, unit_price_usd NUMERIC). 기존 `purchase_orders` 와 1:N.
+- 정책: `anon_all_purchase_orders`, `anon_all_purchase_order_items` (Phase 2 Auth 도입 시 §5 회수 대상).
+- 의존성 없음 (수입/매입 Phase 2 와 독립).
+
+### 거래처 주문서 포털 (Phase 3.15) — `/customer-order`
+- 신규 페이지 `CustomerOrderPage` — 거래처가 자체 로그인하여 주문서를 업로드하는 외부 포털.
+- DB:
+  - `customers.login_id varchar`, `customers.login_password varchar` (평문, dogfooding 전용) 컬럼 추가
+  - `idx_customers_login_id_unique` 부분 UNIQUE 인덱스 (company_id, login_id)
+  - 신규 테이블 `customer_order_uploads` — 업로드 파일 + 파싱 결과 + 직송정보
+  - 정책 `anon_all_customer_order_uploads` (anon ALL USING true)
+- 거래처 로그인 계정 4개 등록: **안앤리 / 엘케이에프 / dienes / shoescare**
+- 페이지 기능:
+  - 거래처 로그인(login_id + login_password)
+  - 주문서 파일(XLSX) 업로드 → 파싱 후 미리보기 → 주문 전송
+  - 직송정보 9컬럼 테이블 (붙여넣기 지원, `0408ac5`)
+  - 월별 주문내역 조회 + v1 UI 형식 (`3ac2b88`)
+  - 기본 필터(이번달) + 카카오 삭제 등 잔버그 일괄 수정 (`717a8e1`)
+- 공급가 계산은 거래처 등급 기반 `calcSupplyPriceByGrade` 로 통일 (`5dc6f5a`).
+- 🟠 Phase 2 Auth 도입 시 `customer_users.password_hash` 로 인증 이관 + 위 컬럼/정책 모두 §5 따라 회수.
+
+### 주문내역 UI 개선 (Phase 3.16)
+- 헤더 축소, 필터 한 줄 정렬, 수량 인라인 편집, 접수경로 컬럼 삭제 (`311d2cf`).
+- 합계를 공급가 기준으로 통일 (`2d7ad4e`).
+- 공급가는 `products.grade_a~e` 기반 계산으로 재구성 (`fd3bd26`).
+- 주문 INSERT 시 `unit_price` 를 판매가 → **공급가**로 교체 (`9aac91c`).
+- 주문상세에서 sell_price 조회 누락으로 판매가 컬럼이 비었던 버그 복원 (`2f64b8e`).
+- `useOrderItems` JOIN 에 `sell_price` 명시 추가.
+
+### 단위 일괄 정리
+- `products.unit` 컬럼: **DZ 798개 일괄 수정**, EA 유지 3개 (예외 케이스 명시적 보존).
+- 발주서/수입매입/주문 전반의 단위 표시 일관성 확보.
+
+### Vercel 배포
+- 운영 URL: **https://saas-beta-pied.vercel.app**
+- `vercel.json` 추가 — SPA 라우팅 rewrites 설정 (`ee86056`).
+  ```json
+  { "rewrites": [{ "source": "/(.*)", "destination": "/" }] }
+  ```
+- GitHub push → Vercel 자동 배포 (CLAUDE.md 8 규칙 준수, `npx vercel --prod` 사용 금지).
+
+### 신규 DB 객체 (§5 rollback 목록에도 기록)
+- 테이블: `mochicraft_demo.purchase_order_items`
+- 테이블: `mochicraft_demo.customer_order_uploads`
+- 컬럼: `customers.login_id`, `customers.login_password`
+- 인덱스: `idx_customers_login_id_unique`
+- 정책: `anon_all_purchase_orders`, `anon_all_purchase_order_items`, `anon_all_customer_order_uploads`
 
 ---
 
@@ -550,21 +612,20 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 
 ## 7. 다음 세션 진입점
 
-### (권장) 수입/매입 Phase 2 — PDF 업로드 + 자동 파싱
-- 경로: `/inventory/purchase` (기존 페이지 확장)
-- 지위: Phase 1 수동 입력이 이미 동작하므로 PDF 파서만 끼워 넣으면 됨. Angelus Invoice #80966 실사용 검증 완료.
-- 작업 범위:
-  - `pdfjs-dist` 의존성 추가
-  - 헤더 폼 상단에 "PDF 업로드" 버튼 신설 → 파일 선택 시 파싱 실행
-  - Angelus 포맷 파서: PO# / Invoice Date / Total USD / Shipping / Line items 추출
-  - 파싱 결과를 `setHeader` + `setRowInputs` 로 주입 → 나머지 로직(계산·매칭·입고확정)은 전부 재사용
-  - 파서 실패 시 Toast 경고 + 수동 입력 폴백 유지
+### (권장) 매출분석 페이지 — 월별/일별/제품별
+- 경로: `/sales/analytics` (또는 `/finance/sales-analytics`)
+- 1차 베이스(`5853096` 매출분석 페이지 구현) 위에 차트·필터·CSV 내보내기 보강.
+- 참고 계산식: `calcMonthlySales`, `calcDailySales`, `calcApproxProfitMargin` 이미 `src/utils/calculations.ts` 에 존재.
+- TODO 후보:
+  - 기간(월/일) 토글 + 시작·종료 날짜 범위
+  - 거래처/카테고리/제품 다중 필터
+  - Recharts 라인/막대 차트
+  - 제품별 매출 Top N 테이블
+  - CSV 내보내기 (`fmtMoney` 통일)
 
-### (대안) 발주서 페이지
-- 경로: `/inventory/purchase-orders`
-- 독립적이며 `purchase_orders` 테이블 이미 존재. 수입/매입 의존성 없음.
-- `calcOrderSuggestion(companyId, productId)` 이미 구현됨 (과거 6개월 판매 기반 DZ 추천).
-
+### ~~(완료) 수입/매입 Phase 2~~ ✅ Phase 3.13 (2026-06-23)
+### ~~(완료) 발주서 페이지~~ ✅ Phase 3.14 (2026-06-24)
+### ~~(완료) 거래처 주문서 포털~~ ✅ Phase 3.15 (2026-06-24)
 ### ~~(대안) 수동주문입력 페이지~~ ✅ 완료 (Phase 3.11)
 - 구현됨: `/sales/order-entry`
 - 단, 도메인 규칙 D(`requested_quantity` 이중 수량 모델)과 B/C(주문 상태별 재고 차감, `inventory_transactions` out)는 **미적용**. 현재는 단순 INSERT (재고 검증/차감 없이) → 본격 운영 전 RPC를 `create_order_with_stock_check` 로 보강 필요.
@@ -601,7 +662,29 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 - DB 수정 시 MochiCraft 브라우저 탭 닫아둘 것 (열려 있으면 프론트가 덮어쓸 가능성)
 - 타입체크: `npx tsc --noEmit` (커밋 전 필수)
 
-### 최근 커밋 (2026-06-23 세션)
+### 최근 커밋 (2026-06-24 세션)
+- `5853096` feat: 매출분석 페이지 구현 (월별/일별/제품별)
+- `2f64b8e` fix: 주문상세 판매가 컬럼 복원 (sell_price 조회 추가)
+- `311d2cf` feat: 주문내역 UI 개선 (헤더축소/필터한줄/수량인라인편집)
+- `55bc563` fix: 주문상세 판매가/공급가 컬럼 표시 오류 수정
+- `2d7ad4e` fix: 주문내역 합계를 공급가 기준으로 수정
+- `fd3bd26` fix: 주문내역 공급가 grade 기반 계산으로 수정
+- `9aac91c` fix: 주문 INSERT unit_price를 판매가→공급가로 수정
+- `e648662` fix: 파일 업로드 주문서 파싱 및 전송 구현
+- `5dc6f5a` fix: 거래처 주문입력 공급가 calcSupplyPriceByGrade로 수정
+- `bcc83e7` fix: 거래처 주문 INSERT/조회 컬럼명 오류 수정
+- `0408ac5` feat: 거래처 직송 정보 테이블 9컬럼 재구성
+- `3ac2b88` feat: 거래처 주문내역 UI v1 형식으로 개선
+- `717a8e1` fix: 거래처 페이지 버그 수정 (주문전송/직송붙여넣기/카카오삭제/월별조회/기본필터)
+- `9cc9d6f` fix: 거래처 로그인 schema 명시 수정
+- `ee86056` fix: Vercel SPA 라우팅 설정 추가 (vercel.json)
+- `e5971a5` feat: 거래처 주문서 업로드 페이지 구현 (/customer-order)
+- `de0a7de` fix: 발주수량 컬럼명 변경 및 반올림 로직 수정
+- `afad672` fix: 발주서 카테고리 단일 선택으로 변경
+- `5b72555` feat: 발주서 페이지 구현 (PurchaseOrderPage)
+- `a01155e` feat: 발주서 페이지 구현 (PurchaseOrderPage)
+
+### 이전 세션 커밋 (2026-06-23 세션)
 - `98ed073` fix(order-entry): 10행 고정 스크롤 + 수량 초기값 제거
 - `d10a195` fix(order-entry): 초기 입력 행 수 10 → 50
 - `ff868dd` fix(order-entry): 레이아웃 좌우 분할 — 우측 미리보기 패널 확대
