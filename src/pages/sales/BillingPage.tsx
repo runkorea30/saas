@@ -12,12 +12,13 @@
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Mail, Printer } from 'lucide-react';
+import { Download, Mail, Printer } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useCustomers } from '@/hooks/queries/useCustomers';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
+import { generateAlphaBillingExcel } from '@/utils/generateAlphaBillingExcel';
 import {
   BillingPrintView,
   type BillingDateGroup,
@@ -199,6 +200,40 @@ export function BillingPage() {
     showToast({ kind: 'info', text: '이메일 발송 기능은 준비 중입니다.' });
   };
 
+  /**
+   * 알파문구 종합청구서 엑셀 다운로드.
+   *
+   * 단일 거래처(=한 지점) 기준 1행짜리 종합청구서.
+   * 청구금액 = is_return=false 항목 amount 합 / 반품금액 = is_return=true 항목 amount 절대값 합.
+   * `orders.total_amount` 는 반품 상쇄가 적용된 순매출이라 청구/반품 분리 표시에 부적합 → items 합산 사용.
+   */
+  const handleAlphaExcelDownload = () => {
+    if (!orders.length || !selectedCustomer) return;
+
+    let totalAmount = 0;
+    let returnAmount = 0;
+    for (const o of orders) {
+      for (const it of o.order_items) {
+        if (it.is_return) returnAmount += Math.abs(it.amount);
+        else totalAmount += it.amount;
+      }
+    }
+
+    generateAlphaBillingExcel({
+      year: selectedYear,
+      month: selectedMonth,
+      branches: [
+        {
+          branchName: selectedCustomer.name,
+          count: orders.length,
+          totalAmount,
+          returnAmount,
+          settlementAmount: totalAmount - returnAmount,
+        },
+      ],
+    });
+  };
+
   // ── 렌더 ───────────────────────────────────────────────────────────────
 
   return (
@@ -274,6 +309,18 @@ export function BillingPage() {
           <Mail className="ico-sm" />
           <span>이메일 발송</span>
         </button>
+        {isAlpha && (
+          <button
+            type="button"
+            onClick={handleAlphaExcelDownload}
+            className="btn-base"
+            disabled={!hasData}
+            title="알파문구 종합청구서 엑셀 다운로드"
+          >
+            <Download className="ico-sm" />
+            <span>종합청구서 다운로드</span>
+          </button>
+        )}
         <button
           type="button"
           onClick={handlePrint}
