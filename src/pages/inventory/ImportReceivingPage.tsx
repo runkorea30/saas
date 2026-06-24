@@ -111,6 +111,15 @@ export function ImportReceivingPage() {
   const [noticeCustomsDate, setNoticeCustomsDate] = useState('');
   const [noticeArrivalText, setNoticeArrivalText] = useState('');
 
+  // 해상운송 전용 상태 (페덱스와 동일 구조, 별도 컬럼).
+  const [noticeTab, setNoticeTab] = useState<'fedex' | 'sea'>('fedex');
+  const [noticeSeaStatus, setNoticeSeaStatus] = useState<'' | ImportNoticeStatus>('');
+  const [noticeSeaProducts, setNoticeSeaProducts] = useState<ImportNoticeProduct[]>([]);
+  const [noticeSeaOrderDate, setNoticeSeaOrderDate] = useState('');
+  const [noticeSeaShipDate, setNoticeSeaShipDate] = useState('');
+  const [noticeSeaCustomsDate, setNoticeSeaCustomsDate] = useState('');
+  const [noticeSeaArrivalText, setNoticeSeaArrivalText] = useState('');
+
   // company 로드/갱신 시 폼 초기값 동기화.
   useEffect(() => {
     if (!company) return;
@@ -121,7 +130,28 @@ export function ImportReceivingPage() {
     setNoticeShipDate(company.import_notice_ship_date ?? '');
     setNoticeCustomsDate(company.import_notice_customs_date ?? '');
     setNoticeArrivalText(company.import_notice_arrival_text ?? '');
+    setNoticeSeaStatus(company.import_notice_sea_status ?? '');
+    setNoticeSeaProducts(company.import_notice_sea_products ?? []);
+    setNoticeSeaOrderDate(company.import_notice_sea_order_date ?? '');
+    setNoticeSeaShipDate(company.import_notice_sea_ship_date ?? '');
+    setNoticeSeaCustomsDate(company.import_notice_sea_customs_date ?? '');
+    setNoticeSeaArrivalText(company.import_notice_sea_arrival_text ?? '');
   }, [company]);
+
+  // ───── 활성 탭 상태 alias — UI 와 핸들러에서 단일 흐름으로 처리. ─────
+  const isSea = noticeTab === 'sea';
+  const activeStatus = isSea ? noticeSeaStatus : noticeStatus;
+  const setActiveStatus = isSea ? setNoticeSeaStatus : setNoticeStatus;
+  const activeOrderDate = isSea ? noticeSeaOrderDate : noticeOrderDate;
+  const setActiveOrderDate = isSea ? setNoticeSeaOrderDate : setNoticeOrderDate;
+  const activeShipDate = isSea ? noticeSeaShipDate : noticeShipDate;
+  const setActiveShipDate = isSea ? setNoticeSeaShipDate : setNoticeShipDate;
+  const activeCustomsDate = isSea ? noticeSeaCustomsDate : noticeCustomsDate;
+  const setActiveCustomsDate = isSea ? setNoticeSeaCustomsDate : setNoticeCustomsDate;
+  const activeArrivalText = isSea ? noticeSeaArrivalText : noticeArrivalText;
+  const setActiveArrivalText = isSea ? setNoticeSeaArrivalText : setNoticeArrivalText;
+  const activeProducts = isSea ? noticeSeaProducts : noticeProducts;
+  const setActiveProducts = isSea ? setNoticeSeaProducts : setNoticeProducts;
 
   // 제품 코드 매칭 맵 (convertedCode = products.code).
   const products = productsQuery.data ?? [];
@@ -316,7 +346,7 @@ export function ImportReceivingPage() {
 
   const busy = createMut.isPending;
 
-  // ───── 수입 안내 핸들러 ─────
+  // ───── 수입 안내 핸들러 — 활성 탭(페덱스/해상운송)에 대해서만 동작. ─────
   const handleAddNoticeProduct = () => {
     const q = noticeProductInput.trim().toUpperCase();
     if (!q) return;
@@ -325,11 +355,11 @@ export function ImportReceivingPage() {
       showToast({ kind: 'error', text: `제품 코드 "${q}"를 찾을 수 없습니다.` });
       return;
     }
-    if (noticeProducts.some((p) => p.code === found.code)) {
+    if (activeProducts.some((p) => p.code === found.code)) {
       showToast({ kind: 'info', text: '이미 추가된 제품입니다.' });
       return;
     }
-    setNoticeProducts((prev) => [...prev, { code: found.code, name: found.name }]);
+    setActiveProducts((prev) => [...prev, { code: found.code, name: found.name }]);
     setNoticeProductInput('');
   };
 
@@ -348,7 +378,7 @@ export function ImportReceivingPage() {
       const parsed = await parseInvoicePDF(file);
       const matched: ImportNoticeProduct[] = [];
       const unmatched: string[] = [];
-      const seen = new Set(noticeProducts.map((p) => p.code));
+      const seen = new Set(activeProducts.map((p) => p.code));
 
       for (const row of parsed.rows) {
         const code = row.item_code.trim();
@@ -366,7 +396,7 @@ export function ImportReceivingPage() {
       }
 
       if (matched.length > 0) {
-        setNoticeProducts((prev) => [...prev, ...matched]);
+        setActiveProducts((prev) => [...prev, ...matched]);
       }
 
       const parts: string[] = [`${matched.length}개 제품 추가됨`];
@@ -395,17 +425,27 @@ export function ImportReceivingPage() {
     if (!companyId) return;
     setNoticeSaving(true);
     try {
+      const updateData = isSea
+        ? {
+            import_notice_sea_status: noticeSeaStatus || null,
+            import_notice_sea_products: noticeSeaProducts as unknown as Json,
+            import_notice_sea_order_date: noticeSeaOrderDate || null,
+            import_notice_sea_ship_date: noticeSeaShipDate || null,
+            import_notice_sea_customs_date: noticeSeaCustomsDate || null,
+            import_notice_sea_arrival_text: noticeSeaArrivalText || null,
+          }
+        : {
+            import_notice_status: noticeStatus || null,
+            import_notice_date: noticeDate || null,
+            import_notice_products: noticeProducts as unknown as Json,
+            import_notice_order_date: noticeOrderDate || null,
+            import_notice_ship_date: noticeShipDate || null,
+            import_notice_customs_date: noticeCustomsDate || null,
+            import_notice_arrival_text: noticeArrivalText || null,
+          };
       const { error } = await supabase
         .from('companies')
-        .update({
-          import_notice_status: noticeStatus || null,
-          import_notice_date: noticeDate || null,
-          import_notice_products: noticeProducts as unknown as Json,
-          import_notice_order_date: noticeOrderDate || null,
-          import_notice_ship_date: noticeShipDate || null,
-          import_notice_customs_date: noticeCustomsDate || null,
-          import_notice_arrival_text: noticeArrivalText || null,
-        })
+        .update(updateData)
         .eq('id', companyId);
       if (error) throw error;
       await queryClient.invalidateQueries({ queryKey: ['current-company'] });
@@ -573,15 +613,54 @@ export function ImportReceivingPage() {
             📦 거래처 포털 수입 안내 설정
           </h3>
 
-          {/* 상태 선택 */}
+          {/* 페덱스 / 해상운송 탭 — 각 탭은 독립된 컬럼 세트로 저장됨. */}
+          <div
+            style={{
+              display: 'flex',
+              gap: 0,
+              borderBottom: '1px solid var(--line)',
+              marginBottom: 14,
+            }}
+          >
+            {(
+              [
+                { key: 'fedex' as const, label: '✈️ 페덱스' },
+                { key: 'sea' as const, label: '🚢 해상운송' },
+              ]
+            ).map((t) => {
+              const on = noticeTab === t.key;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setNoticeTab(t.key)}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: 12,
+                    fontWeight: on ? 600 : 500,
+                    background: 'transparent',
+                    border: 'none',
+                    borderBottom: `2px solid ${on ? 'var(--brand)' : 'transparent'}`,
+                    color: on ? 'var(--brand)' : 'var(--ink-3)',
+                    cursor: 'pointer',
+                    marginBottom: -1,
+                  }}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 상태 선택 (현재 탭 기준) */}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
             {(['주문완료', '운송중', '통관진행중', '도착예정'] as const).map((s) => {
-              const active = noticeStatus === s;
+              const active = activeStatus === s;
               return (
                 <button
                   key={s}
                   type="button"
-                  onClick={() => setNoticeStatus(s)}
+                  onClick={() => setActiveStatus(s)}
                   style={{
                     padding: '6px 12px',
                     fontSize: 12,
@@ -598,14 +677,14 @@ export function ImportReceivingPage() {
             })}
             <button
               type="button"
-              onClick={() => setNoticeStatus('')}
+              onClick={() => setActiveStatus('')}
               style={{
                 padding: '6px 12px',
                 fontSize: 12,
                 borderRadius: 6,
-                border: `1px solid ${!noticeStatus ? '#9CA3AF' : 'var(--line-strong)'}`,
-                background: !noticeStatus ? '#E5E7EB' : 'var(--surface)',
-                color: !noticeStatus ? '#4B5563' : 'var(--ink-3)',
+                border: `1px solid ${!activeStatus ? '#9CA3AF' : 'var(--line-strong)'}`,
+                background: !activeStatus ? '#E5E7EB' : 'var(--surface)',
+                color: !activeStatus ? '#4B5563' : 'var(--ink-3)',
                 cursor: 'pointer',
               }}
             >
@@ -625,29 +704,29 @@ export function ImportReceivingPage() {
             {[
               {
                 label: '주문완료 날짜',
-                value: noticeOrderDate,
-                set: setNoticeOrderDate,
+                value: activeOrderDate,
+                set: setActiveOrderDate,
                 placeholder: '예: 2026-06-22',
                 width: 200,
               },
               {
                 label: '운송중 날짜',
-                value: noticeShipDate,
-                set: setNoticeShipDate,
+                value: activeShipDate,
+                set: setActiveShipDate,
                 placeholder: '예: 2026-06-25',
                 width: 200,
               },
               {
                 label: '통관진행중 날짜',
-                value: noticeCustomsDate,
-                set: setNoticeCustomsDate,
+                value: activeCustomsDate,
+                set: setActiveCustomsDate,
                 placeholder: '예: 2026-07-10',
                 width: 200,
               },
               {
                 label: '도착예정 문구',
-                value: noticeArrivalText,
-                set: setNoticeArrivalText,
+                value: activeArrivalText,
+                set: setActiveArrivalText,
                 placeholder: '예: 7월 15일 도착예정',
                 width: 280,
               },
@@ -684,52 +763,54 @@ export function ImportReceivingPage() {
                 />
               </div>
             ))}
-            {/* 도착예정일 (date 컬럼) — companies.import_notice_date */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span
-                style={{
-                  fontSize: 11.5,
-                  color: 'var(--ink-3)',
-                  width: 96,
-                  flexShrink: 0,
-                }}
-              >
-                도착예정일
-              </span>
-              <input
-                type="text"
-                value={noticeDate}
-                onChange={(e) => setNoticeDate(e.target.value)}
-                placeholder="예: 2026-07-15"
-                style={{
-                  border: '1px solid var(--line-strong)',
-                  borderRadius: 6,
-                  padding: '6px 8px',
-                  fontSize: 12.5,
-                  background: 'var(--surface)',
-                  color: 'var(--ink)',
-                  outline: 'none',
-                  width: 200,
-                }}
-              />
-              {noticeDate && (
-                <button
-                  type="button"
-                  onClick={() => setNoticeDate('')}
+            {/* 도착예정일 (date 컬럼) — companies.import_notice_date. 페덱스 탭에서만 노출. */}
+            {!isSea && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span
                   style={{
-                    fontSize: 11,
+                    fontSize: 11.5,
                     color: 'var(--ink-3)',
-                    background: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    padding: '4px 6px',
+                    width: 96,
+                    flexShrink: 0,
                   }}
-                  title="비우기"
                 >
-                  ✕
-                </button>
-              )}
-            </div>
+                  도착예정일
+                </span>
+                <input
+                  type="text"
+                  value={noticeDate}
+                  onChange={(e) => setNoticeDate(e.target.value)}
+                  placeholder="예: 2026-07-15"
+                  style={{
+                    border: '1px solid var(--line-strong)',
+                    borderRadius: 6,
+                    padding: '6px 8px',
+                    fontSize: 12.5,
+                    background: 'var(--surface)',
+                    color: 'var(--ink)',
+                    outline: 'none',
+                    width: 200,
+                  }}
+                />
+                {noticeDate && (
+                  <button
+                    type="button"
+                    onClick={() => setNoticeDate('')}
+                    style={{
+                      fontSize: 11,
+                      color: 'var(--ink-3)',
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      padding: '4px 6px',
+                    }}
+                    title="비우기"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* 제품 목록 */}
@@ -813,7 +894,7 @@ export function ImportReceivingPage() {
               </label>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {noticeProducts.map((p) => (
+              {activeProducts.map((p) => (
                 <span
                   key={p.code}
                   style={{
@@ -839,7 +920,7 @@ export function ImportReceivingPage() {
                   <button
                     type="button"
                     onClick={() =>
-                      setNoticeProducts((prev) =>
+                      setActiveProducts((prev) =>
                         prev.filter((x) => x.code !== p.code),
                       )
                     }
@@ -858,7 +939,7 @@ export function ImportReceivingPage() {
                   </button>
                 </span>
               ))}
-              {noticeProducts.length === 0 && (
+              {activeProducts.length === 0 && (
                 <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>
                   추가된 제품 없음
                 </span>

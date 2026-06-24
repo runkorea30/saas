@@ -33,6 +33,7 @@ export interface ImportNoticeProduct {
 export interface Company {
   id: string;
   name: string;
+  // Fedex (기존)
   import_notice_status: ImportNoticeStatus | null;
   import_notice_date: string | null;
   import_notice_products: ImportNoticeProduct[];
@@ -40,13 +41,20 @@ export interface Company {
   import_notice_ship_date: string | null;
   import_notice_customs_date: string | null;
   import_notice_arrival_text: string | null;
+  // 해상운송
+  import_notice_sea_status: ImportNoticeStatus | null;
+  import_notice_sea_products: ImportNoticeProduct[];
+  import_notice_sea_order_date: string | null;
+  import_notice_sea_ship_date: string | null;
+  import_notice_sea_customs_date: string | null;
+  import_notice_sea_arrival_text: string | null;
 }
 
 async function fetchFirstCompany() {
   return supabase
     .from('companies')
     .select(
-      'id, name, import_notice_status, import_notice_date, import_notice_products, import_notice_order_date, import_notice_ship_date, import_notice_customs_date, import_notice_arrival_text',
+      'id, name, import_notice_status, import_notice_date, import_notice_products, import_notice_order_date, import_notice_ship_date, import_notice_customs_date, import_notice_arrival_text, import_notice_sea_status, import_notice_sea_products, import_notice_sea_order_date, import_notice_sea_ship_date, import_notice_sea_customs_date, import_notice_sea_arrival_text',
     )
     .is('deleted_at', null)
     .order('created_at', { ascending: true })
@@ -56,24 +64,37 @@ async function fetchFirstCompany() {
 
 type CompanyRow = NonNullable<Awaited<ReturnType<typeof fetchFirstCompany>>['data']>;
 
+function normalizeProductsJson(raw: unknown): ImportNoticeProduct[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as unknown as ImportNoticeProduct[]).filter(
+    (p): p is ImportNoticeProduct =>
+      !!p &&
+      typeof p === 'object' &&
+      typeof p.code === 'string' &&
+      typeof p.name === 'string',
+  );
+}
+
 function normalizeCompany(row: CompanyRow | null): Company | null {
   if (!row) return null;
-  const products = Array.isArray(row.import_notice_products)
-    ? (row.import_notice_products as unknown as ImportNoticeProduct[]).filter(
-        (p): p is ImportNoticeProduct =>
-          !!p && typeof p === 'object' && typeof p.code === 'string' && typeof p.name === 'string',
-      )
-    : [];
   return {
     id: row.id,
     name: row.name,
+    // Fedex
     import_notice_status: (row.import_notice_status as ImportNoticeStatus | null) ?? null,
     import_notice_date: row.import_notice_date ?? null,
-    import_notice_products: products,
+    import_notice_products: normalizeProductsJson(row.import_notice_products),
     import_notice_order_date: row.import_notice_order_date ?? null,
     import_notice_ship_date: row.import_notice_ship_date ?? null,
     import_notice_customs_date: row.import_notice_customs_date ?? null,
     import_notice_arrival_text: row.import_notice_arrival_text ?? null,
+    // 해상운송
+    import_notice_sea_status: (row.import_notice_sea_status as ImportNoticeStatus | null) ?? null,
+    import_notice_sea_products: normalizeProductsJson(row.import_notice_sea_products),
+    import_notice_sea_order_date: row.import_notice_sea_order_date ?? null,
+    import_notice_sea_ship_date: row.import_notice_sea_ship_date ?? null,
+    import_notice_sea_customs_date: row.import_notice_sea_customs_date ?? null,
+    import_notice_sea_arrival_text: row.import_notice_sea_arrival_text ?? null,
   };
 }
 

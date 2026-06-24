@@ -314,6 +314,12 @@ export type Database = {
           import_notice_date: string | null
           import_notice_order_date: string | null
           import_notice_products: Json
+          import_notice_sea_arrival_text: string | null
+          import_notice_sea_customs_date: string | null
+          import_notice_sea_order_date: string | null
+          import_notice_sea_products: Json
+          import_notice_sea_ship_date: string | null
+          import_notice_sea_status: string | null
           import_notice_ship_date: string | null
           import_notice_status: string | null
           industry: string | null
@@ -332,6 +338,12 @@ export type Database = {
           import_notice_date?: string | null
           import_notice_order_date?: string | null
           import_notice_products?: Json
+          import_notice_sea_arrival_text?: string | null
+          import_notice_sea_customs_date?: string | null
+          import_notice_sea_order_date?: string | null
+          import_notice_sea_products?: Json
+          import_notice_sea_ship_date?: string | null
+          import_notice_sea_status?: string | null
           import_notice_ship_date?: string | null
           import_notice_status?: string | null
           industry?: string | null
@@ -350,6 +362,12 @@ export type Database = {
           import_notice_date?: string | null
           import_notice_order_date?: string | null
           import_notice_products?: Json
+          import_notice_sea_arrival_text?: string | null
+          import_notice_sea_customs_date?: string | null
+          import_notice_sea_order_date?: string | null
+          import_notice_sea_products?: Json
+          import_notice_sea_ship_date?: string | null
+          import_notice_sea_status?: string | null
           import_notice_ship_date?: string | null
           import_notice_status?: string | null
           industry?: string | null

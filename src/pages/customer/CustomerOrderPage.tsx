@@ -23,7 +23,10 @@ import { useToast } from '@/components/ui/Toast';
 import { useCustomerAuth, type CustomerSession } from '@/hooks/useCustomerAuth';
 import { CustomerOrderLogin } from './CustomerOrderLogin';
 import { CustomerOrderInput } from './CustomerOrderInput';
-import { calcSupplyPriceByCustomerGrade } from '@/utils/calculations';
+import {
+  calcCurrentStockByProduct,
+  calcSupplyPriceByCustomerGrade,
+} from '@/utils/calculations';
 import type { Json } from '@/types/database';
 
 // ───────────────────────────────────────────────────────────
@@ -1066,15 +1069,44 @@ interface ImportNoticeProduct {
   code: string;
   name: string;
   category: string | null;
+  /** 수량(개) — 재고부족 탭에서만 표시. */
+  qty?: number;
 }
 
-interface ImportNoticeData {
+interface ImportNoticeShipment {
   status: ImportNoticeStep | null;
   products: ImportNoticeProduct[];
   orderDate: string | null;
   shipDate: string | null;
   customsDate: string | null;
   arrivalText: string | null;
+}
+
+interface ImportNoticeData {
+  fedex: ImportNoticeShipment;
+  sea: ImportNoticeShipment;
+}
+
+type ImportNoticeTab = 'fedex' | 'sea' | 'soldout' | 'low';
+
+const IMPORT_TABS: ReadonlyArray<{ key: ImportNoticeTab; label: string }> = [
+  { key: 'fedex', label: '✈️ 페덱스' },
+  { key: 'sea', label: '🚢 해상운송' },
+  { key: 'soldout', label: '품절' },
+  { key: 'low', label: '재고부족' },
+];
+
+/** 카테고리 → 코드 오름차순 정렬. */
+function sortByCategoryThenCode<T extends { code: string; category: string | null }>(
+  items: T[],
+): T[] {
+  return [...items].sort((a, b) => {
+    const catA = a.category ?? '기타';
+    const catB = b.category ?? '기타';
+    const catCmp = catA.localeCompare(catB, 'ko');
+    if (catCmp !== 0) return catCmp;
+    return a.code.localeCompare(b.code);
+  });
 }
 
 function ImportNoticeCard({
@@ -1084,95 +1116,132 @@ function ImportNoticeCard({
   companyId: string;
   fontScale: number;
 }) {
+  const [tab, setTab] = useState<ImportNoticeTab>('fedex');
+
+  // ① 수입 안내 (페덱스 + 해상운송) — companies + 코드 카테고리 보강
   const { data: notice } = useQuery<ImportNoticeData | null>({
     queryKey: ['customer-import-notice', companyId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('companies')
         .select(
-          'import_notice_status, import_notice_products, import_notice_order_date, import_notice_ship_date, import_notice_customs_date, import_notice_arrival_text',
+          'import_notice_status, import_notice_products, import_notice_order_date, import_notice_ship_date, import_notice_customs_date, import_notice_arrival_text, import_notice_sea_status, import_notice_sea_products, import_notice_sea_order_date, import_notice_sea_ship_date, import_notice_sea_customs_date, import_notice_sea_arrival_text',
         )
         .eq('id', companyId)
         .maybeSingle();
       if (error) throw error;
       if (!data) return null;
 
-      const rawProducts = data.import_notice_products;
-      const baseProducts = Array.isArray(rawProducts)
-        ? (rawProducts as unknown as { code?: unknown; name?: unknown }[])
-            .filter(
-              (p): p is { code: string; name: string } =>
-                !!p &&
-                typeof p === 'object' &&
-                typeof p.code === 'string' &&
-                typeof p.name === 'string',
-            )
-            .map((p) => ({ code: p.code, name: p.name }))
-        : [];
+      const fedexBase = pickNoticeProducts(data.import_notice_products);
+      const seaBase = pickNoticeProducts(data.import_notice_sea_products);
+      const allCodes = Array.from(
+        new Set([...fedexBase.map((p) => p.code), ...seaBase.map((p) => p.code)]),
+      );
 
-      // 카테고리 보강 — 필요한 코드만 조회해서 페이로드 최소화.
-      let products: ImportNoticeProduct[] = baseProducts.map((p) => ({
-        ...p,
-        category: null,
-      }));
-      if (baseProducts.length > 0) {
-        const codes = Array.from(new Set(baseProducts.map((p) => p.code)));
-        const { data: productRows } = await supabase
+      const catByCode = new Map<string, string | null>();
+      if (allCodes.length > 0) {
+        const { data: prodRows } = await supabase
           .from('products')
           .select('code, category')
           .eq('company_id', companyId)
-          .in('code', codes);
-        const catByCode = new Map<string, string | null>();
-        for (const row of productRows ?? []) {
+          .in('code', allCodes);
+        for (const row of prodRows ?? []) {
           catByCode.set(row.code, row.category ?? null);
         }
-        products = baseProducts.map((p) => ({
-          ...p,
-          category: catByCode.get(p.code) ?? null,
-        }));
       }
 
-      const status = data.import_notice_status as ImportNoticeStep | null;
+      const enrich = (
+        rows: { code: string; name: string }[],
+      ): ImportNoticeProduct[] =>
+        rows.map((p) => ({
+          code: p.code,
+          name: p.name,
+          category: catByCode.get(p.code) ?? null,
+        }));
+
+      const normalizeStatus = (
+        s: unknown,
+      ): ImportNoticeStep | null =>
+        IMPORT_NOTICE_STEPS.includes(s as ImportNoticeStep)
+          ? (s as ImportNoticeStep)
+          : null;
+
       return {
-        status: IMPORT_NOTICE_STEPS.includes(status as ImportNoticeStep)
-          ? status
-          : null,
-        products,
-        orderDate: data.import_notice_order_date ?? null,
-        shipDate: data.import_notice_ship_date ?? null,
-        customsDate: data.import_notice_customs_date ?? null,
-        arrivalText: data.import_notice_arrival_text ?? null,
+        fedex: {
+          status: normalizeStatus(data.import_notice_status),
+          products: enrich(fedexBase),
+          orderDate: data.import_notice_order_date ?? null,
+          shipDate: data.import_notice_ship_date ?? null,
+          customsDate: data.import_notice_customs_date ?? null,
+          arrivalText: data.import_notice_arrival_text ?? null,
+        },
+        sea: {
+          status: normalizeStatus(data.import_notice_sea_status),
+          products: enrich(seaBase),
+          orderDate: data.import_notice_sea_order_date ?? null,
+          shipDate: data.import_notice_sea_ship_date ?? null,
+          customsDate: data.import_notice_sea_customs_date ?? null,
+          arrivalText: data.import_notice_sea_arrival_text ?? null,
+        },
       };
     },
     staleTime: 60_000,
   });
 
-  if (!notice || !notice.status) return null;
-  const currentIdx = IMPORT_NOTICE_STEPS.indexOf(notice.status);
-  const baseFont = 11 * fontScale;
-
-  const stepDates: Array<string | null> = [
-    notice.orderDate,
-    notice.shipDate,
-    notice.customsDate,
-    null,
-  ];
-
-  // 카테고리 → 코드 정렬, 그리고 카테고리별 그룹.
-  const sortedProducts = [...notice.products].sort((a, b) => {
-    const catA = a.category ?? '기타';
-    const catB = b.category ?? '기타';
-    const catCmp = catA.localeCompare(catB, 'ko');
-    if (catCmp !== 0) return catCmp;
-    return a.code.localeCompare(b.code);
+  // ② 재고 (품절/재고부족 탭 전용) — 활성 탭이 stock 인 경우에만 fetch.
+  const stockNeeded = tab === 'soldout' || tab === 'low';
+  const { data: stockItems } = useQuery<ImportNoticeProduct[]>({
+    queryKey: ['customer-stock-snapshot', companyId],
+    enabled: stockNeeded,
+    queryFn: async () => {
+      const [stockMap, prodRes] = await Promise.all([
+        calcCurrentStockByProduct(companyId),
+        supabase
+          .from('products')
+          .select('id, code, name, category, is_active')
+          .eq('company_id', companyId)
+          .eq('is_active', true)
+          .is('deleted_at', null),
+      ]);
+      if (prodRes.error) throw prodRes.error;
+      const items: ImportNoticeProduct[] = [];
+      for (const p of prodRes.data ?? []) {
+        const info = stockMap.get(p.id);
+        const qty = info?.current ?? 0;
+        items.push({
+          code: p.code,
+          name: p.name,
+          category: p.category ?? null,
+          qty,
+        });
+      }
+      return items;
+    },
+    staleTime: 60_000,
   });
-  const grouped = new Map<string, ImportNoticeProduct[]>();
-  for (const p of sortedProducts) {
-    const cat = p.category ?? '기타';
-    const arr = grouped.get(cat) ?? [];
-    arr.push(p);
-    grouped.set(cat, arr);
+
+  const activeShipment: ImportNoticeShipment | null =
+    tab === 'fedex' ? (notice?.fedex ?? null)
+    : tab === 'sea' ? (notice?.sea ?? null)
+    : null;
+
+  let productList: ImportNoticeProduct[] = [];
+  if (tab === 'fedex' || tab === 'sea') {
+    productList = sortByCategoryThenCode(activeShipment?.products ?? []);
+  } else if (tab === 'soldout') {
+    productList = sortByCategoryThenCode(
+      (stockItems ?? []).filter((p) => (p.qty ?? 0) <= 0),
+    );
+  } else if (tab === 'low') {
+    productList = sortByCategoryThenCode(
+      (stockItems ?? []).filter((p) => {
+        const q = p.qty ?? 0;
+        return q > 0 && q <= 5;
+      }),
+    );
   }
+
+  const baseFont = 11 * fontScale;
 
   return (
     <section
@@ -1188,14 +1257,15 @@ function ImportNoticeCard({
         overflow: 'hidden',
       }}
     >
-      {/* 헤더 — 제목 + 도착예정 자유 텍스트 강조 */}
+      {/* 헤더 — 제목 + (페덱스/해상운송 탭의 경우) 도착예정 자유 텍스트 강조 */}
       <div
         style={{
           display: 'flex',
           alignItems: 'baseline',
           gap: 10,
           flexWrap: 'wrap',
-          marginBottom: 14,
+          marginBottom: 10,
+          flexShrink: 0,
         }}
       >
         <span
@@ -1208,7 +1278,7 @@ function ImportNoticeCard({
         >
           🚢 수입 입고 예정일
         </span>
-        {notice.arrivalText && (
+        {activeShipment?.arrivalText && (
           <span
             style={{
               fontSize: 15,
@@ -1216,193 +1286,303 @@ function ImportNoticeCard({
               color: '#2563EB',
             }}
           >
-            {notice.arrivalText}
+            {activeShipment.arrivalText}
           </span>
         )}
       </div>
 
-      {/* 진행 스텝퍼 (날짜 텍스트 포함) — 4스텝 균등 분할, 카드 너비 초과 금지 */}
+      {/* 탭 헤더 (4탭) */}
       <div
         style={{
           display: 'flex',
-          alignItems: 'flex-start',
-          width: '100%',
-          marginBottom: 14,
-          overflow: 'hidden',
+          gap: 0,
+          borderBottom: '1px solid #E5E7EB',
+          marginBottom: 12,
+          flexShrink: 0,
         }}
       >
-        {IMPORT_NOTICE_STEPS.map((s, i) => {
-          const isCurrent = i === currentIdx;
-          const isDone = i <= currentIdx;
-          const reached = isDone;
-          const bg = reached ? '#2563EB' : '#F5F5F4';
-          const fg = reached ? '#FFFFFF' : '#9CA3AF';
-          const border = reached ? '#2563EB' : '#D6D3D1';
-          const dateText = isDone ? stepDates[i] : null;
+        {IMPORT_TABS.map((t) => {
+          const on = tab === t.key;
           return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              style={{
+                flex: 1,
+                padding: '6px 4px',
+                fontSize: 11,
+                fontWeight: on ? 600 : 500,
+                background: 'transparent',
+                border: 'none',
+                borderBottom: `2px solid ${on ? '#2563EB' : 'transparent'}`,
+                color: on ? '#2563EB' : '#6B7280',
+                cursor: 'pointer',
+                marginBottom: -1,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 스텝퍼 — 페덱스/해상운송 탭에서만 노출 */}
+      {(tab === 'fedex' || tab === 'sea') && activeShipment?.status && (
+        <ImportStepper shipment={activeShipment} />
+      )}
+
+      {/* 제품 목록 (모든 탭 공통) */}
+      <ProductList
+        items={productList}
+        baseFont={baseFont}
+        emptyText={tab === 'soldout' ? '품절 제품 없음' : tab === 'low' ? '재고부족 제품 없음' : '입고 예정 제품 없음'}
+        showQty={tab === 'low'}
+      />
+    </section>
+  );
+}
+
+/** companies.import_notice_products / sea_products jsonb → {code,name} 배열로 안전 추출. */
+function pickNoticeProducts(raw: unknown): { code: string; name: string }[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as unknown as { code?: unknown; name?: unknown }[])
+    .filter(
+      (p): p is { code: string; name: string } =>
+        !!p &&
+        typeof p === 'object' &&
+        typeof p.code === 'string' &&
+        typeof p.name === 'string',
+    )
+    .map((p) => ({ code: p.code, name: p.name }));
+}
+
+function ImportStepper({ shipment }: { shipment: ImportNoticeShipment }) {
+  const currentIdx = shipment.status
+    ? IMPORT_NOTICE_STEPS.indexOf(shipment.status)
+    : -1;
+  const stepDates: Array<string | null> = [
+    shipment.orderDate,
+    shipment.shipDate,
+    shipment.customsDate,
+    null,
+  ];
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        width: '100%',
+        marginBottom: 12,
+        overflow: 'hidden',
+        flexShrink: 0,
+      }}
+    >
+      {IMPORT_NOTICE_STEPS.map((s, i) => {
+        const isCurrent = i === currentIdx;
+        const isDone = i <= currentIdx;
+        const reached = isDone;
+        const bg = reached ? '#2563EB' : '#F5F5F4';
+        const fg = reached ? '#FFFFFF' : '#9CA3AF';
+        const border = reached ? '#2563EB' : '#D6D3D1';
+        const dateText = isDone ? stepDates[i] : null;
+        return (
+          <div
+            key={s}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
             <div
-              key={s}
               style={{
                 display: 'flex',
-                alignItems: 'flex-start',
+                flexDirection: 'column',
+                alignItems: 'center',
                 flex: 1,
                 minWidth: 0,
               }}
             >
               <div
                 style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: '50%',
+                  background: bg,
+                  color: fg,
+                  border: `1px solid ${border}`,
+                  fontSize: 10,
+                  fontWeight: 700,
                   display: 'flex',
-                  flexDirection: 'column',
                   alignItems: 'center',
-                  flex: 1,
-                  minWidth: 0,
+                  justifyContent: 'center',
+                  opacity: isDone && !isCurrent ? 0.55 : 1,
+                  flexShrink: 0,
                 }}
               >
-                <div
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: '50%',
-                    background: bg,
-                    color: fg,
-                    border: `1px solid ${border}`,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    opacity: isDone && !isCurrent ? 0.55 : 1,
-                    flexShrink: 0,
-                  }}
-                >
-                  {isDone && !isCurrent ? '✓' : i + 1}
-                </div>
+                {isDone && !isCurrent ? '✓' : i + 1}
+              </div>
+              <span
+                style={{
+                  fontSize: 9,
+                  marginTop: 4,
+                  color: isCurrent ? '#2563EB' : '#6B7280',
+                  fontWeight: isCurrent ? 600 : 400,
+                  textAlign: 'center',
+                  lineHeight: 1.2,
+                  wordBreak: 'keep-all',
+                }}
+              >
+                {s}
+              </span>
+              {dateText && (
                 <span
                   style={{
-                    fontSize: 9,
-                    marginTop: 4,
-                    color: isCurrent ? '#2563EB' : '#6B7280',
-                    fontWeight: isCurrent ? 600 : 400,
+                    fontSize: 8,
+                    marginTop: 2,
+                    color: '#9CA3AF',
                     textAlign: 'center',
                     lineHeight: 1.2,
                     wordBreak: 'keep-all',
                   }}
                 >
-                  {s}
+                  {dateText}
                 </span>
-                {dateText && (
-                  <span
-                    style={{
-                      fontSize: 8,
-                      marginTop: 2,
-                      color: '#9CA3AF',
-                      textAlign: 'center',
-                      lineHeight: 1.2,
-                      wordBreak: 'keep-all',
-                    }}
-                  >
-                    {dateText}
-                  </span>
-                )}
-              </div>
-              {i < IMPORT_NOTICE_STEPS.length - 1 && (
-                <div
-                  style={{
-                    width: 12,
-                    height: 2,
-                    marginTop: 10,
-                    marginLeft: 2,
-                    marginRight: 2,
-                    background: i < currentIdx ? '#2563EB' : '#E5E7EB',
-                    opacity: i < currentIdx ? 0.55 : 1,
-                    flexShrink: 0,
-                  }}
-                />
               )}
             </div>
-          );
-        })}
-      </div>
-
-      {/* 제품 목록 — 카테고리 그룹 + 스크롤 (남은 공간 활용, 카드 내부에서만 스크롤) */}
-      {sortedProducts.length > 0 && (
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            minHeight: 0,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 11,
-              color: '#6B7280',
-              marginBottom: 6,
-              fontWeight: 500,
-              flexShrink: 0,
-            }}
-          >
-            입고 예정 제품
+            {i < IMPORT_NOTICE_STEPS.length - 1 && (
+              <div
+                style={{
+                  width: 12,
+                  height: 2,
+                  marginTop: 10,
+                  marginLeft: 2,
+                  marginRight: 2,
+                  background: i < currentIdx ? '#2563EB' : '#E5E7EB',
+                  opacity: i < currentIdx ? 0.55 : 1,
+                  flexShrink: 0,
+                }}
+              />
+            )}
           </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProductList({
+  items,
+  baseFont,
+  emptyText,
+  showQty,
+}: {
+  items: ImportNoticeProduct[];
+  baseFont: number;
+  emptyText: string;
+  showQty: boolean;
+}) {
+  // 카테고리 그룹핑 (items 는 이미 카테고리→코드 정렬됨)
+  const grouped = new Map<string, ImportNoticeProduct[]>();
+  for (const p of items) {
+    const cat = p.category ?? '기타';
+    const arr = grouped.get(cat) ?? [];
+    arr.push(p);
+    grouped.set(cat, arr);
+  }
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+      }}
+    >
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          border: '1px solid #F3F4F6',
+          borderRadius: 6,
+        }}
+      >
+        {items.length === 0 ? (
           <div
             style={{
-              flex: 1,
-              minHeight: 0,
-              overflowY: 'auto',
-              border: '1px solid #F3F4F6',
-              borderRadius: 6,
+              padding: 16,
+              textAlign: 'center',
+              fontSize: 11,
+              color: '#9CA3AF',
             }}
           >
-            {Array.from(grouped.entries()).map(([cat, items]) => (
-              <div key={cat}>
+            {emptyText}
+          </div>
+        ) : (
+          Array.from(grouped.entries()).map(([cat, list]) => (
+            <div key={cat}>
+              <div
+                style={{
+                  position: 'sticky',
+                  top: 0,
+                  background: '#FAFAF9',
+                  padding: '4px 8px',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: '#6B7280',
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase',
+                  borderBottom: '1px solid #E5E7EB',
+                }}
+              >
+                {cat}
+              </div>
+              {list.map((p, idx) => (
                 <div
+                  key={p.code}
                   style={{
-                    position: 'sticky',
-                    top: 0,
-                    background: '#FAFAF9',
-                    padding: '4px 8px',
-                    fontSize: 10,
-                    fontWeight: 600,
-                    color: '#6B7280',
-                    letterSpacing: '0.05em',
-                    textTransform: 'uppercase',
-                    borderBottom: '1px solid #E5E7EB',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    fontSize: baseFont,
+                    padding: '5px 8px',
+                    borderTop: idx === 0 ? 'none' : '1px solid #F3F4F6',
                   }}
                 >
-                  {cat}
-                </div>
-                {items.map((p, idx) => (
-                  <div
-                    key={p.code}
+                  <span
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      fontSize: baseFont,
-                      padding: '5px 8px',
-                      borderTop: idx === 0 ? 'none' : '1px solid #F3F4F6',
+                      fontFamily: 'var(--font-num)',
+                      color: '#6B7280',
+                      width: 84,
+                      flexShrink: 0,
                     }}
                   >
+                    {p.code}
+                  </span>
+                  <span style={{ color: '#1F2937', flex: 1 }}>{p.name}</span>
+                  {showQty && (
                     <span
                       style={{
                         fontFamily: 'var(--font-num)',
-                        color: '#6B7280',
-                        width: 84,
+                        color: '#B45309',
+                        fontWeight: 600,
                         flexShrink: 0,
                       }}
                     >
-                      {p.code}
+                      {(p.qty ?? 0).toLocaleString('ko-KR')}개
                     </span>
-                    <span style={{ color: '#1F2937' }}>{p.name}</span>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </section>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   );
 }
 
