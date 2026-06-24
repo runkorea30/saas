@@ -30,7 +30,7 @@ const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-sonnet-4-6';
 const ANTHROPIC_VERSION = '2023-06-01';
 
-const PROMPT = `이 인보이스 PDF에서 품목 데이터를 추출해 JSON만 반환하세요 (마크다운 없이, 순수 JSON만).
+const PROMPT = `이 인보이스 PDF에서 품목 데이터를 추출해 JSON 객체 1개만 반환하세요.
 
 형식:
 {
@@ -47,7 +47,9 @@ const PROMPT = `이 인보이스 PDF에서 품목 데이터를 추출해 JSON만
 - qty_shipped: QTY SHPD 컬럼 숫자 (정수)
 - QTY BO(백오더) 행은 qty_shipped=0 으로 포함
 - price/amount: 숫자 (통화기호/콤마 제거)
-- invoice_date: DATE 필드를 YYYY-MM-DD 형식으로`;
+- invoice_date: DATE 필드를 YYYY-MM-DD 형식으로
+
+⚠️ 중요: 마크다운 코드블록(\`\`\`), 설명 텍스트, 서문, 후기 일절 없이 { 로 시작해서 } 로 끝나는 순수 JSON 객체만 응답하세요. 모든 품목을 빠짐없이 포함하세요 (페이지가 여러 장이어도 끝까지).`;
 
 interface AnthropicTextBlock {
   type: 'text';
@@ -77,7 +79,8 @@ export async function parseInvoicePDF(file: File): Promise<InvoiceParsed> {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 4000,
+      // 8페이지/100품목 인보이스 응답을 위한 여유. (Sonnet 4.6 max output 64K 내)
+      max_tokens: 8192,
       messages: [
         {
           role: 'user',
@@ -115,11 +118,19 @@ export async function parseInvoicePDF(file: File): Promise<InvoiceParsed> {
 
   if (!text) throw new Error('Claude 응답에서 텍스트를 찾지 못했습니다.');
 
-  const cleaned = stripJsonFence(text);
+  const cleaned = extractJson(text);
   let parsed: unknown;
   try {
     parsed = JSON.parse(cleaned);
   } catch (e) {
+    // 잘림 감지: '{' 로 시작했는데 '}' 로 끝나지 않으면 max_tokens 초과 가능성.
+    const trimmed = cleaned.trim();
+    if (trimmed.startsWith('{') && !trimmed.endsWith('}')) {
+      throw new Error(
+        '인보이스가 너무 길어 Claude 응답이 잘렸습니다. PDF 를 페이지 단위로 나눠 업로드해 주세요.',
+      );
+    }
+    console.error('인보이스 JSON 파싱 실패. 응답 앞부분:', cleaned.slice(0, 300));
     throw new Error(
       `JSON 파싱 실패 — 응답 앞부분: ${cleaned.slice(0, 200)}${cleaned.length > 200 ? '…' : ''}`,
     );
@@ -130,12 +141,22 @@ export async function parseInvoicePDF(file: File): Promise<InvoiceParsed> {
 
 // ───────────────────────────────────────────────────────────
 
-function stripJsonFence(s: string): string {
-  let out = s.trim();
-  if (out.startsWith('```')) {
-    out = out.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+/**
+ * Claude 응답에서 JSON 본문만 추출.
+ *  1) ```json ... ``` 또는 ``` ... ``` 코드펜스 안 내용 우선
+ *  2) 펜스 없으면 첫 '{' ~ 마지막 '}' 까지 부분문자열
+ *  3) 둘 다 실패하면 원문 trim
+ */
+function extractJson(text: string): string {
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch?.[1]) return fenceMatch[1].trim();
+
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start !== -1 && end !== -1 && end > start) {
+    return text.slice(start, end + 1).trim();
   }
-  return out.trim();
+  return text.trim();
 }
 
 function normalizeInvoice(raw: unknown): InvoiceParsed {
