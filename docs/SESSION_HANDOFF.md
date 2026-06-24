@@ -25,6 +25,7 @@
 | Phase 3.16 | 주문내역 UI 개선 + 단위 일괄정리 + Vercel 배포 | ✅ 완료 (2026-06-24) |
 | Phase 3.17 | 은행거래 페이지 (`/finance/banking`) — 3탭 (입출금장부/월별정산/매칭설정) + KB엑셀 파싱 + 자동매칭 | ✅ 완료 (2026-06-24) |
 | Phase 3.18 | 미수금 관리 페이지 (`/finance/receivables`) — 카드형 현황 + 월별 상세 모달 | ✅ 완료 (2026-06-24) |
+| Phase 3.19 | 은행거래 버그 수정 + 운영 보강 (입금 매출월 매칭 로직 개편, 사업자계좌 포맷, target_sales_month 수동지정) | ✅ 완료 (2026-06-25) |
 | Phase 4 | 나머지 페이지 + Auth 도입 | 대기 |
 
 **페이지 진도: 11 / 13 구현 완료**
@@ -62,6 +63,52 @@
   - 컬럼간격 드래그 리사이저 (현재는 fixed/flex 토글만)
   - 우상단 "자동수집 OFF" + "수집/팩스" 영역 (의미 미정의)
   - 파일 자체를 서버 업로드 (현재는 클라이언트 미리보기만)
+
+---
+
+## 오늘 추가된 작업 요약 (2026-06-25)
+
+### 은행거래 버그 수정 & 운영 보강 (Phase 3.19)
+
+#### 매출월 매칭 로직 개편 — `calcMonthlyReconciliation`
+- **초기 단순 매칭 (단일 입금월=매출월) → 입금월 역산 (offset만큼) → due_date ±7일 유예 → "매출월별 입금 허용 구간"** 으로 3단계 진화 (`2d76508` → `5e93363` → `63cef51`).
+- 최종 규칙: 각 매출월에 대해
+  - `windowStart = (year, month-1+offset, 1)` (offset: 당월 0 / 익월 1 / 2개월 2)
+  - `windowEnd = (offset만큼 미룬) 해당월 말일 + 7일`
+  - 입금일이 이 구간에 속하면 그 매출월에 귀속, 어느 구간에도 속하지 않으면 미귀속.
+- **`calcDueDate` UTC 오프셋 버그**: `due.toISOString().slice(0,10)` 이 KST(+9)에서 말일을 하루 당겨 표시하던 문제 → 로컬 `getFullYear`/`getMonth`/`getDate` 추출로 교체.
+- **입금일자 표시**: `MonthlyReconciliation.deposit_dates: string[]` 신설. MonthlyTab/ReceivablesPage 상세 모달의 입금합계 셀이 2줄로 표시 — `₩금액` + `입금일: MM-DD, MM-DD`.
+
+#### `target_sales_month` 수동 지정 기능 (`f045d69`)
+- DB: `bank_transactions.target_sales_month VARCHAR(7)` 컬럼 추가 (마이그레이션 `20260624010000_add_target_sales_month_to_bank_transactions.sql`).
+- `null` 이면 자동 매칭 로직(±7일 구간) 사용, 값(`'YYYY-MM'`) 있으면 자동 계산 무시하고 그 월로 직접 귀속.
+- LedgerTab 매칭 행에 "매출월" 컬럼 추가 — select(자동 / 과거 12개월 YYYY-MM), 값 있으면 `text-blue-600 font-medium` 강조. 변경 즉시 `useUpdateBankTransaction` 호출.
+- TS 타입: `BankTransaction` 인터페이스 + `Database` 제네릭의 `bank_transactions` Row/Insert/Update 3종에 필드 추가. `useUpdateBankTransaction` 페이로드 타입에도 추가.
+- 호출부 `MonthlyTab.tsx` / `ReceivablesPage.tsx` 의 `calcMonthlyReconciliation` 매핑에 `target_sales_month` 전달.
+
+#### 매핑 룰 추가 시 소급 자동 매칭 (`67fa309`)
+- `useAddBankMapping`: INSERT 후 동일 트랜잭션으로 `bank_transactions` 일괄 UPDATE — `company_id` + `type='deposit'` + `match_status='unmatched'` + `depositor_name ILIKE %bank_name%` 조건. `customer_id`/`match_status='matched'`/`match_type='매핑'`/`updated_at` 갱신.
+- 반환 `{ mappingId, updatedCount }`. `SettingsTab` toast: `매핑 룰 추가 완료 — 기존 미매칭 N건 자동 매칭되었습니다`.
+- `onSuccess` 에 `['bank-transactions', companyId]` invalidate 추가.
+
+#### KB 사업자계좌 엑셀 포맷 자동 감지 (`356a7e9`)
+- `parseKBBank`: 헤더행 col 0 값이 `'no'` 이면 사업자 포맷, 아니면 개인 포맷.
+- 컬럼 인덱스 변수화: 사업자 (date 1 / depositor 2 / desc 8 / deposit 4) vs 개인 (date 0 / desc 1 / depositor 2 / deposit 5).
+
+#### 정산이동 컬럼 UI 숨김 (`33dee9c`)
+- LedgerTab 에서 "정산이동" 컬럼/체크박스/`onToggleMoved` 핸들러 제거 (colSpan 9→8).
+- DB 컬럼 `bank_transactions.moved_to_monthly` 는 유지 (롤백 시점에 함께 회수 — §5 기록 그대로).
+
+### 신규 DB 객체 (이번 세션, §5 rollback 목록 추가됨)
+- 컬럼: `bank_transactions.target_sales_month VARCHAR(7)` — 롤백: `ALTER TABLE mochicraft_demo.bank_transactions DROP COLUMN target_sales_month;`
+- 로컬 마이그레이션: `supabase/migrations/20260624010000_add_target_sales_month_to_bank_transactions.sql`
+
+### 알려진 이슈 / 운영 메모 (도그푸딩에서 확정)
+- **십원 단위 절사 입금**: 거래처가 입금 시 자투리(예: ₩87)를 절사해서 보내는 케이스 → `target_sales_month` 수동 지정으로 그 매출월에 귀속시키고, 차액 소액은 감수(별도 보정 없음).
+- **합산 입금 (복수 매출월)**: 거래처가 2~3 개월치를 한 번에 입금하는 케이스 → `target_sales_month` 로 대표 월(보통 가장 오래된 미수월)에 귀속. 미세 차액은 다음 입금에서 자연 상쇄.
+- **에스닷 등 익월 중간일 입금 업체**: 익월 말일+7일 구간을 벗어나 익월 15~20일경 입금 → 자동 매칭 실패. `target_sales_month` 수동 지정 필요.
+- **정산이동(`moved_to_monthly`) 컬럼**: UI 숨김 처리. 자동 매칭 + `target_sales_month` 조합으로 충분히 커버되어 더 이상 사용하지 않음. DB 컬럼은 회수 시점까지 유지.
+- **KB 엑셀 두 포맷 지원**: 개인계좌(헤더 col0=거래일시)/사업자계좌(헤더 col0=No) 자동 감지. 다른 은행 추가 시 헤더 시그니처 분기 위치는 `parseKBBank` 헤더 판별부.
 
 ---
 
@@ -456,6 +503,8 @@ ProductListTable에서 `Check` 컴포넌트(`orders/primitives.tsx`)를 신규 i
   - `GRANT SELECT, INSERT, UPDATE, DELETE ON bank_transactions/bank_mappings TO anon`
   - `GRANT SELECT, INSERT, DELETE ON bank_exclude_keywords TO anon`
   - v1 → OPS 데이터 (bank_transactions 48 / mappings 11 / keywords 7) 는 일회성 INSERT 라 별도 롤백 불필요 (`DELETE FROM ... WHERE company_id = '...'` 로 일괄 제거 가능)
+- **은행거래 보강 (Phase 3.19 — `20260624010000_add_target_sales_month_to_bank_transactions.sql`):**
+  - `bank_transactions.target_sales_month VARCHAR(7)` 컬럼 — 롤백: `ALTER TABLE mochicraft_demo.bank_transactions DROP COLUMN target_sales_month;`
 
 ### 원복 SQL
 ```sql
@@ -690,12 +739,13 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 - `/finance/tax-invoices` — 세금계산서 발행/조회. `mochicraft_demo.tax_invoices` 테이블 기존 존재 (조회만 필요 시 그대로, 발행 플로우는 별도 RPC 설계).
 - `/finance/pnl` — 손익계산서. **`calcCostOfSales` 선행 구현 필요** (FIFO 로트 소비 로직 — `inventory_lots.remaining_quantity` × `cost_krw` 차감 누적).
 
-### (권장 직후) 브라우저 검증 — Phase 3.17~3.18
-- 은행거래 / 미수금 페이지가 코드상 완료되었으나 **브라우저 검증 미수행**. 다음 세션 진입 시:
-  - KB 엑셀 업로드 → 미리보기 모달 → 저장 → 중복 검증
+### (권장 직후) 브라우저 검증 — Phase 3.17~3.19
+- 은행거래 / 미수금 페이지가 코드상 완료되었고 핵심 매칭 로직은 3.19에서 정비됐으나 **브라우저 검증 미수행 영역 잔존**. 다음 세션 진입 시:
+  - KB 엑셀 (개인 + **사업자**) 업로드 → 미리보기 모달 → 저장 → 중복 검증
   - 거래처 인라인 select, 제외 → 키워드 자동 등록 confirm
-  - 월별 정산표 합계/색상
-  - 매핑/키워드 CRUD
+  - **매핑 룰 추가 시 소급 자동 매칭 toast (N건)** 확인
+  - 월별 정산표 합계/색상 + **입금일자 2번째 줄 표시**
+  - **LedgerTab matched 행 "매출월" select** — 자동/YYYY-MM 변경 즉시 DB 반영 → MonthlyTab/ReceivablesPage 에서 해당 매출월로 입금 반영, '자동' 선택 시 자동 매칭으로 복귀
   - 미수금 카드 정렬 + 상세 모달 누적미수금/연체일수 계산
 - 확인된 버그가 있으면 우선 수정.
 
@@ -749,7 +799,17 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 - DB 수정 시 MochiCraft 브라우저 탭 닫아둘 것 (열려 있으면 프론트가 덮어쓸 가능성)
 - 타입체크: `npx tsc --noEmit` (커밋 전 필수) — **단, 루트 tsconfig.json 이 files:[] 라 이걸로는 미감지. `npm run build` 로 검증할 것**
 
+### 최근 커밋 (2026-06-25 세션 — 은행거래 버그수정 & 운영 보강)
+- `33dee9c` feat(banking): 입출금 장부 정산이동 컬럼 UI 숨김 (DB 컬럼 유지)
+- `356a7e9` fix(banking): KB 사업자계좌 엑셀 포맷 자동 감지 지원
+- `63cef51` fix(banking): 입금 허용 구간 기반 매출월 매칭 (익월=다음달 1일~말일+7일)
+- `f045d69` feat(banking): 입금 매출월 수동 지정 기능 (target_sales_month)
+- `67fa309` feat(banking): 매핑 룰 추가 시 기존 미매칭 거래 소급 자동 매칭
+- `5e93363` fix(banking): 정산마감일 UTC 오프셋 수정 + ±7일 유예범위 매칭
+- `2d76508` fix(banking): 익월정산 입금-매출월 역산 매칭 + 입금일자 표시
+
 ### 최근 커밋 (2026-06-24 세션 후반 — 은행거래/미수금)
+- `f1a25a1` docs: SESSION_HANDOFF 갱신 — 은행거래/미수금 페이지 완료 (Phase 3.17~3.18)
 - `7516bae` feat(banking): 은행거래/미수금 페이지 구현 (3탭 + 카드형 현황)
 - `541f415` feat(banking): 파서/계산/훅 — KB엑셀 파싱, 자동매칭, 미수금 계산
 - `118e1f8` feat(banking): DB 스키마 + TS 타입 — bank_mappings/exclude_keywords/payment_cycle
