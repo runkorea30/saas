@@ -17,12 +17,93 @@ import {
   Truck,
   X,
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/Toast';
 import { useCustomerAuth, type CustomerSession } from '@/hooks/useCustomerAuth';
 import { CustomerOrderLogin } from './CustomerOrderLogin';
 import { CustomerOrderInput } from './CustomerOrderInput';
 import type { Json } from '@/types/database';
+
+// ───────────────────────────────────────────────────────────
+// 거래처 주문서 엑셀 파싱
+// ───────────────────────────────────────────────────────────
+
+interface ParsedExcelItem {
+  /** 시트별 진단용 */
+  sheet: string;
+  /** 제품 코드 (products.code 매칭 키) */
+  code: string;
+  /** 제품명 (참고 표시) */
+  name: string;
+  qty: number;
+  sell_price: number;
+  supply_price: number;
+  /** 엑셀의 합계 셀 값 또는 qty × (supply||sell) */
+  amount: number;
+}
+
+/**
+ * 거래처 주문서 양식(.xlsx/.xls/.csv) 을 파싱.
+ *
+ * 양식 가정:
+ *  - 시트는 여러 개일 수 있음 (엔젤러스 / 레이스랩 ...) → 모두 순회
+ *  - 1~4 행: 헤더(컬럼명 포함) → 무시
+ *  - 5 행(index 4) 이후: 데이터 + 카테고리 소제목 혼재
+ *    · 코드(B열, idx=1) 비어 있거나 수량(C열, idx=2) <=0 → skip
+ *  - 컬럼 인덱스 (0 base): 0=제품명, 1=코드, 2=수량, 3=판매가, 4=공급가, 5=합계
+ */
+async function parseOrderExcel(file: File): Promise<ParsedExcelItem[]> {
+  const buffer = await file.arrayBuffer();
+  const wb = XLSX.read(buffer, { type: 'array' });
+  const items: ParsedExcelItem[] = [];
+
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) continue;
+    const rows = XLSX.utils.sheet_to_json<Array<string | number | null>>(ws, {
+      header: 1,
+      defval: null,
+    });
+    for (let i = 4; i < rows.length; i++) {
+      const row = rows[i] ?? [];
+      const codeRaw = row[1];
+      const qtyRaw = row[2];
+      const code =
+        codeRaw == null
+          ? ''
+          : String(codeRaw)
+              .trim()
+              .replace(/\.0+$/, ''); // 엑셀이 숫자 코드를 '1234.0' 으로 변환하는 케이스 보정
+      const qty = Number(qtyRaw);
+      if (!code || !Number.isFinite(qty) || qty <= 0) continue;
+
+      const name = row[0] != null ? String(row[0]).trim() : '';
+      const sellPrice = Number(row[3]) || 0;
+      const supplyPrice = Number(row[4]) || 0;
+      const explicitAmount = Number(row[5]);
+      const amount = Number.isFinite(explicitAmount) && explicitAmount > 0
+        ? explicitAmount
+        : qty * (supplyPrice || sellPrice);
+      items.push({
+        sheet: sheetName,
+        code,
+        name,
+        qty,
+        sell_price: sellPrice,
+        supply_price: supplyPrice,
+        amount,
+      });
+    }
+  }
+  return items;
+}
+
+const PARSABLE_EXTENSIONS = new Set(['xlsx', 'xls', 'csv']);
+function isParsableExcel(fileName: string): boolean {
+  const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
+  return PARSABLE_EXTENSIONS.has(ext);
+}
 
 const ACCEPT_EXT = '.xlsx,.xls,.csv,.jpg,.jpeg,.png,.pdf';
 
@@ -496,6 +577,97 @@ function LeftPanel({
     }
     setSending(true);
     try {
+      // 1) 파일 파싱 (엑셀/CSV 만). 이미지/PDF 는 customer_order_uploads 만 기록.
+      const parsable = isParsableExcel(file.name);
+      let parsed: ParsedExcelItem[] = [];
+      if (parsable) {
+        parsed = await parseOrderExcel(file);
+        // eslint-disable-next-line no-console
+        console.log('[customer-file.parsed]', {
+          fileName: file.name,
+          sheets: parsed.length,
+          first: parsed[0],
+          count: parsed.length,
+        });
+        if (parsed.length === 0) {
+          showToast({
+            kind: 'error',
+            text: '주문 품목이 없습니다. 파일을 확인해주세요.',
+          });
+          return;
+        }
+      }
+
+      // 2) products 코드 매핑 (회사 범위)
+      const codeToProductId = new Map<string, string>();
+      let unmatchedCount = 0;
+      if (parsed.length > 0) {
+        const codes = Array.from(new Set(parsed.map((p) => p.code)));
+        const { data: productRows, error: prodErr } = await supabase
+          .from('products')
+          .select('id, code')
+          .eq('company_id', customer.companyId)
+          .in('code', codes);
+        if (prodErr) throw prodErr;
+        for (const p of productRows ?? []) codeToProductId.set(p.code, p.id);
+        unmatchedCount = parsed.filter(
+          (it) => !codeToProductId.has(it.code),
+        ).length;
+        // eslint-disable-next-line no-console
+        console.log('[customer-file.codeMap]', {
+          requested: codes.length,
+          matched: codeToProductId.size,
+          unmatched: unmatchedCount,
+        });
+      }
+
+      // 3) orders + order_items INSERT (매칭된 품목이 있을 때만)
+      const matched = parsed.filter((it) => codeToProductId.has(it.code));
+      let createdOrderId: string | null = null;
+      if (matched.length > 0) {
+        const totalAmount = matched.reduce(
+          (s, it) => s + it.qty * it.sell_price,
+          0,
+        );
+        const { data: order, error: orderErr } = await supabase
+          .from('orders')
+          .insert({
+            company_id: customer.companyId,
+            customer_id: customer.customerId,
+            order_date: new Date().toISOString(),
+            status: 'draft',
+            source: 'portal',
+            memo: `파일업로드: ${file.name}`,
+            total_amount: totalAmount,
+          })
+          .select('id')
+          .single();
+        // eslint-disable-next-line no-console
+        console.log('[customer-file.order]', { order, orderErr });
+        if (orderErr || !order) throw orderErr ?? new Error('주문 생성 실패');
+        createdOrderId = order.id;
+
+        const orderItemsPayload = matched.map((it) => ({
+          order_id: order.id,
+          company_id: customer.companyId,
+          product_id: codeToProductId.get(it.code)!,
+          quantity: it.qty,
+          unit_price: it.sell_price,
+          amount: it.qty * it.sell_price,
+          is_return: false,
+        }));
+        const { error: itemsErr } = await supabase
+          .from('order_items')
+          .insert(orderItemsPayload);
+        // eslint-disable-next-line no-console
+        console.log('[customer-file.items]', {
+          itemsErr,
+          count: orderItemsPayload.length,
+        });
+        if (itemsErr) throw itemsErr;
+      }
+
+      // 4) customer_order_uploads — 모든 경우(엑셀/이미지/PDF) 기록
       const filledShipping = shipping
         .filter((s) => s.name || s.address || s.phone1 || s.product)
         .map((s) => ({
@@ -503,31 +675,50 @@ function LeftPanel({
           customer: customer.customerName,
           credit: CREDIT_LABEL,
         }));
-      const { error } = await supabase.from('customer_order_uploads').insert({
-        company_id: customer.companyId,
-        customer_id: customer.customerId,
-        upload_type: 'file',
-        file_name: file.name,
-        file_url: null,
-        message: message || null,
-        shipping_info:
-          filledShipping.length > 0
-            ? (filledShipping as unknown as Json)
-            : null,
-        status: 'pending',
-      });
-      if (error) throw error;
-      showToast({
-        kind: 'success',
-        text: '주문서가 전송되었습니다. 담당자가 확인 후 처리합니다.',
-      });
+      const { error: uploadErr } = await supabase
+        .from('customer_order_uploads')
+        .insert({
+          company_id: customer.companyId,
+          customer_id: customer.customerId,
+          upload_type: 'file',
+          file_name: file.name,
+          file_url: null,
+          message: message || null,
+          shipping_info:
+            filledShipping.length > 0
+              ? (filledShipping as unknown as Json)
+              : null,
+          items: parsed.length > 0 ? (parsed as unknown as Json) : null,
+          status: 'pending',
+        });
+      // eslint-disable-next-line no-console
+      console.log('[customer-file.uploads]', { uploadErr });
+      if (uploadErr) throw uploadErr;
+
+      // 5) 토스트 — 케이스별 메시지
+      if (createdOrderId) {
+        const skipMsg =
+          unmatchedCount > 0 ? ` (코드 미매칭 ${unmatchedCount}건 제외)` : '';
+        showToast({
+          kind: 'success',
+          text: `주문서 ${matched.length}품목 전송 완료${skipMsg}`,
+        });
+      } else {
+        showToast({
+          kind: 'success',
+          text: '주문서가 전송되었습니다. 담당자가 확인 후 처리합니다.',
+        });
+      }
+
       setFile(null);
       setMessage('');
       setShipping([emptyShipping()]);
     } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[customer-file.submit] 실패', e);
       showToast({
         kind: 'error',
-        text: e instanceof Error ? e.message : '전송 실패',
+        text: e instanceof Error ? e.message : '전송 중 오류가 발생했습니다.',
       });
     } finally {
       setSending(false);
