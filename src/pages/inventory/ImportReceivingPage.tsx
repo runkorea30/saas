@@ -340,6 +340,7 @@ export function ImportReceivingPage() {
 
         <InvoiceUploadCard
           disabled={busy}
+          products={productsQuery.data}
           onFill={(rows, headerPatch) => {
             setRowInputs(rows.length > 0 ? rows : [createEmptyRow()]);
             setHeader((h) => ({ ...h, ...headerPatch }));

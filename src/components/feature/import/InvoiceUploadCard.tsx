@@ -23,6 +23,13 @@ import {
 } from '@/utils/invoiceParser';
 import type { ImportRowInput, ImportInvoiceHeader } from '@/types/import';
 
+// 주문서/인보이스/OPS 제품 코드 간 매칭용 정규화.
+// 공백·하이픈 제거 + 소문자 통일. (leading-zero 는 제거하지 않음 — 다른 SKU 가 충돌할 수 있음.)
+function normalizeCode(code: string | number | null | undefined): string {
+  if (code === null || code === undefined) return '';
+  return String(code).trim().replace(/-/g, '').replace(/\s/g, '').toLowerCase();
+}
+
 // ───── 비교 결과 타입 ─────
 
 export type CompareStatus =
@@ -55,6 +62,8 @@ interface Props {
   /** 비교 결과를 기존 행 입력 폼으로 옮길 때 호출. */
   onFill: (rows: ImportRowInput[], headerPatch: Partial<ImportInvoiceHeader>) => void;
   disabled?: boolean;
+  /** OPS products 목록. 매칭된 코드의 한글 제품명을 표시하는 데 사용. */
+  products?: ReadonlyArray<{ code: string; name: string }>;
 }
 
 type Tab = 'all' | 'diff' | 'backorder';
@@ -71,7 +80,7 @@ const STATUS_META: Record<
 
 // ───────────────────────────────────────────────────────────
 
-export function InvoiceUploadCard({ onFill, disabled }: Props) {
+export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
   const [orderFile, setOrderFile] = useState<File | null>(null);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [parsing, setParsing] = useState(false);
@@ -82,6 +91,16 @@ export function InvoiceUploadCard({ onFill, disabled }: Props) {
     invoiceDate: string;
   } | null>(null);
   const [tab, setTab] = useState<Tab>('all');
+
+  // 정규화된 OPS 제품코드 → 한글명 맵. (인보이스/주문서의 영문명을 한글로 치환)
+  const productNameByCode = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of products ?? []) {
+      const key = normalizeCode(p.code);
+      if (key && p.name) map.set(key, p.name);
+    }
+    return map;
+  }, [products]);
 
   const canCompare = Boolean(orderFile && invoiceFile) && !parsing && !disabled;
 
@@ -95,7 +114,7 @@ export function InvoiceUploadCard({ onFill, disabled }: Props) {
         parseOrderSheet(orderFile),
         parseInvoicePDF(invoiceFile),
       ]);
-      const rows = compareOrderInvoice(orderRows, invoice);
+      const rows = compareOrderInvoice(orderRows, invoice, productNameByCode);
       setComparison({
         rows,
         invoiceNo: invoice.invoice_no,
@@ -688,26 +707,30 @@ function makeId(): string {
 function compareOrderInvoice(
   orders: OrderSheetRow[],
   invoice: InvoiceParsed,
+  productNameByCode: ReadonlyMap<string, string> = new Map(),
 ): ComparisonRow[] {
+  // 정규화된 코드 → 주문 행. (대소문자/공백/하이픈 차이로 매칭 누락되던 문제 해결)
   const orderByCode = new Map<string, OrderSheetRow>();
-  for (const o of orders) orderByCode.set(o.code, o);
-
-  const invoiceByCode = new Map<string, InvoiceParsed['rows'][number]>();
-  for (const r of invoice.rows) invoiceByCode.set(r.item_code, r);
+  for (const o of orders) orderByCode.set(normalizeCode(o.code), o);
 
   const seen = new Set<string>();
   const out: ComparisonRow[] = [];
 
   // 인보이스 기준 1차 패스
   for (const inv of invoice.rows) {
-    const ord = orderByCode.get(inv.item_code);
-    seen.add(inv.item_code);
+    const normInv = normalizeCode(inv.item_code);
+    const ord = orderByCode.get(normInv);
+    seen.add(normInv);
+
+    // OPS 한글 제품명 우선, 없으면 인보이스/주문서 영문명.
+    const opsName = productNameByCode.get(normInv);
+    const desc = opsName || inv.description || ord?.description || '';
 
     if (inv.qty_shipped === 0) {
       // BO — 주문 있었지만 출하 0 (또는 정보용)
       out.push({
         code: inv.item_code,
-        description: inv.description || ord?.description || '',
+        description: desc,
         unit: (ord?.unit ?? inv.unit) as 'DZ' | 'EA',
         orderQty: ord?.qty ?? 0,
         invoiceQty: 0,
@@ -722,7 +745,7 @@ function compareOrderInvoice(
     if (!ord) {
       out.push({
         code: inv.item_code,
-        description: inv.description,
+        description: desc,
         unit: inv.unit,
         orderQty: 0,
         invoiceQty: inv.qty_shipped,
@@ -736,7 +759,7 @@ function compareOrderInvoice(
 
     out.push({
       code: inv.item_code,
-      description: inv.description || ord.description,
+      description: desc,
       unit: ord.unit,
       orderQty: ord.qty,
       invoiceQty: inv.qty_shipped,
@@ -749,10 +772,12 @@ function compareOrderInvoice(
 
   // 주문서에만 있고 인보이스 전무 (Claude 가 BO 항목까지 포함 못 한 경우의 안전망)
   for (const ord of orders) {
-    if (seen.has(ord.code)) continue;
+    const normOrd = normalizeCode(ord.code);
+    if (seen.has(normOrd)) continue;
+    const opsName = productNameByCode.get(normOrd);
     out.push({
       code: ord.code,
-      description: ord.description,
+      description: opsName || ord.description,
       unit: ord.unit,
       orderQty: ord.qty,
       invoiceQty: 0,
