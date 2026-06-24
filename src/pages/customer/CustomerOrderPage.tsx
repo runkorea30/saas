@@ -235,13 +235,13 @@ function isDirectShipping(memo: string | null): boolean {
 }
 
 /**
- * 주문 소계 = Σ(items.amount).
- * 🟠 items.amount 는 주문 시점에 저장된 quantity × unit_price 값 → 단일 진실 원본.
- *    products.supply_price 기반 계산(이전 calcOrderTotal) 은 supply_price=0 인 제품에서
- *    소계가 0으로 표시되는 문제가 있어 폐기.
+ * 주문 소계 = Σ(quantity × unit_price).
+ * 🟠 unit_price 에는 주문 시점의 공급가가 저장됨 (CustomerOrderInput / 파일업로드 모두).
+ *    items.amount 는 과거 일부 데이터에서 판매가 기준으로 저장된 경우가 있어 신뢰 불가.
+ * 🟠 customer.grade 가 함수 시그니처에 없으므로 등급 재계산 불가 → 저장된 unit_price 사용.
  */
 function calcOrderTotal(order: OrderDetail): number {
-  return order.items.reduce((s, it) => s + (it.amount ?? 0), 0);
+  return order.items.reduce((s, it) => s + it.quantity * it.unit_price, 0);
 }
 
 function fmtWon(v: number): string {
@@ -1530,8 +1530,8 @@ function OrderCard({
               </tr>
             ) : (
               order.items.map((it) => {
-                // 공급가 = grade 기반 계산 (products.supply_price 는 0 이라 사용 불가)
-                // 합계 = order_items.amount (주문 시점 저장값)
+                // 공급가 = grade 기반 재계산 (단가 표시 일관성 유지)
+                // 합계 = quantity × 공급가 (it.amount 는 저장값 시점 의존성이 있어 신뢰 불가)
                 const supplyPrice = it.product
                   ? calcSupplyPriceByCustomerGrade(
                       it.product.sell_price,
@@ -1539,7 +1539,7 @@ function OrderCard({
                       it.product,
                     )
                   : 0;
-                const lineSum = it.amount ?? 0;
+                const lineSum = it.quantity * supplyPrice;
                 return (
                   <tr
                     key={it.id}
