@@ -10,7 +10,9 @@
  *    상세 펼침(Phase B), 컬럼 커스터마이징(Phase C)은 별도 PR.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { Download, Plus } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Download, Plus, Trash2 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
 import {
   useProducts,
@@ -45,6 +47,8 @@ export function ProductsPage() {
   const createMut = useCreateProduct(companyId);
   const updateMut = useUpdateProduct(companyId);
   const deleteMut = useDeleteProduct(companyId);
+  const queryClient = useQueryClient();
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   // ───── 필터 상태 ─────
   const [query, setQuery] = useState('');
@@ -219,6 +223,45 @@ export function ProductsPage() {
     });
   };
 
+  /**
+   * 일괄 soft-delete — 체크된 제품의 deleted_at 을 NOW() 로 갱신.
+   * 🟠 useDeleteProduct 는 단건 mutation 이라 여기서는 supabase 를 직접 호출하고
+   *    동일한 ['products', companyId] 키를 무효화한다.
+   */
+  const handleBulkDelete = async () => {
+    if (selectedCount === 0 || !companyId || isBulkDeleting) return;
+    const ids = Object.keys(checked);
+    const confirmed = window.confirm(
+      `선택한 ${ids.length}개 제품을 삭제하시겠습니까?\n\n삭제된 제품은 복구할 수 없습니다.`,
+    );
+    if (!confirmed) return;
+    setIsBulkDeleting(true);
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({ deleted_at: new Date().toISOString() })
+        .in('id', ids)
+        .eq('company_id', companyId)
+        .is('deleted_at', null);
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ['products', companyId] });
+      setChecked({});
+      showToast({
+        kind: 'success',
+        text: `${ids.length}개 제품을 삭제했습니다`,
+      });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[products.bulk-delete]', e);
+      showToast({
+        kind: 'error',
+        text: e instanceof Error ? e.message : '삭제 중 오류가 발생했습니다.',
+      });
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <main
@@ -284,6 +327,32 @@ export function ProductsPage() {
               />
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
+              {selectedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleBulkDelete}
+                  disabled={isBulkDeleting}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    height: 32,
+                    padding: '0 14px',
+                    borderRadius: 6,
+                    fontSize: 12.5,
+                    fontWeight: 500,
+                    border: '1.5px solid #ef4444',
+                    background: isBulkDeleting ? '#fef2f2' : '#FFFFFF',
+                    color: '#ef4444',
+                    cursor: isBulkDeleting ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  <Trash2 size={13} />
+                  {isBulkDeleting
+                    ? '삭제 중…'
+                    : `선택 삭제 (${selectedCount})`}
+                </button>
+              )}
               <button
                 type="button"
                 disabled
