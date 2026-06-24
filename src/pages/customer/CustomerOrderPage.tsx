@@ -355,7 +355,14 @@ function CustomerOrderShell({
             fontScale={fontScale}
             onOpenInput={() => setMode('input')}
           />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16,
+              height: '100%',
+            }}
+          >
             <NoticePanel fontScale={fontScale} />
             <ImportNoticeCard
               companyId={customer.companyId}
@@ -1173,6 +1180,10 @@ function ImportNoticeCard({
         border: '1px solid #E7E5E4',
         borderRadius: 10,
         padding: 16,
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
       }}
     >
       {/* 헤더 — 제목 + 도착예정 자유 텍스트 강조 */}
@@ -1193,7 +1204,7 @@ function ImportNoticeCard({
             flexShrink: 0,
           }}
         >
-          🚢 수입 예정 제품 안내
+          🚢 수입 입고 예정일
         </span>
         {notice.arrivalText && (
           <span
@@ -1215,6 +1226,7 @@ function ImportNoticeCard({
           alignItems: 'flex-start',
           gap: 0,
           marginBottom: 14,
+          overflow: 'hidden',
         }}
       >
         {IMPORT_NOTICE_STEPS.map((s, i) => {
@@ -1240,7 +1252,7 @@ function ImportNoticeCard({
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
-                  minWidth: 64,
+                  minWidth: 52,
                 }}
               >
                 <div
@@ -1263,7 +1275,7 @@ function ImportNoticeCard({
                 </div>
                 <span
                   style={{
-                    fontSize: 10,
+                    fontSize: 9,
                     marginTop: 4,
                     color: isCurrent ? '#2563EB' : '#6B7280',
                     fontWeight: isCurrent ? 600 : 400,
@@ -1276,7 +1288,7 @@ function ImportNoticeCard({
                 {dateText && (
                   <span
                     style={{
-                      fontSize: 9,
+                      fontSize: 8,
                       marginTop: 2,
                       color: '#9CA3AF',
                       whiteSpace: 'nowrap',
@@ -1293,8 +1305,8 @@ function ImportNoticeCard({
                     flex: 1,
                     height: 2,
                     marginTop: 10,
-                    marginLeft: 4,
-                    marginRight: 4,
+                    marginLeft: 2,
+                    marginRight: 2,
                     background: i < currentIdx ? '#2563EB' : '#E5E7EB',
                     opacity: i < currentIdx ? 0.55 : 1,
                   }}
@@ -1305,9 +1317,16 @@ function ImportNoticeCard({
         })}
       </div>
 
-      {/* 제품 목록 — 카테고리 그룹 + 스크롤 (최대 280px) */}
+      {/* 제품 목록 — 카테고리 그룹 + 스크롤 (남은 공간 모두 활용) */}
       {sortedProducts.length > 0 && (
-        <div>
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
+          }}
+        >
           <div
             style={{
               fontSize: 11,
@@ -1320,7 +1339,8 @@ function ImportNoticeCard({
           </div>
           <div
             style={{
-              maxHeight: 280,
+              flex: 1,
+              minHeight: 120,
               overflowY: 'auto',
               border: '1px solid #F3F4F6',
               borderRadius: 6,
