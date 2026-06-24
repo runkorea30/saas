@@ -37,9 +37,16 @@ interface ComparisonRow {
   unit: 'DZ' | 'EA';
   orderQty: number; // 0 = 주문서에 없음
   invoiceQty: number; // 0 = 인보이스에 없거나 BO
+  originalInvoiceQty: number; // 파싱 직후의 원본 인보이스 수량 (편집 비교용)
   price: number; // 인보이스 단가 (있으면) > 주문서 단가
   amount: number; // 인보이스 금액 (있으면) > 주문서 금액
   status: CompareStatus;
+}
+
+function recomputeStatus(orderQty: number, invoiceQty: number): CompareStatus {
+  if (invoiceQty === 0 && orderQty > 0) return 'backorder';
+  if (orderQty === 0) return 'invoice_only';
+  return invoiceQty === orderQty ? 'match' : 'qty_diff';
 }
 
 // ───── Props ─────
@@ -106,12 +113,30 @@ export function InvoiceUploadCard({ onFill, disabled }: Props) {
     const rows = comparison?.rows ?? [];
     let diff = 0;
     let bo = 0;
+    let edited = 0;
     for (const r of rows) {
       if (r.status === 'qty_diff' || r.status === 'invoice_only') diff++;
       if (r.status === 'backorder') bo++;
+      if (r.invoiceQty !== r.originalInvoiceQty) edited++;
     }
-    return { all: rows.length, diff, bo };
+    return { all: rows.length, diff, bo, edited };
   }, [comparison]);
+
+  const handleQtyChange = (code: string, newQty: number) => {
+    setComparison((prev) => {
+      if (!prev) return prev;
+      const safeQty = Number.isFinite(newQty) ? Math.max(0, Math.floor(newQty)) : 0;
+      const nextRows = prev.rows.map((row) => {
+        if (row.code !== code) return row;
+        return {
+          ...row,
+          invoiceQty: safeQty,
+          status: recomputeStatus(row.orderQty, safeQty),
+        };
+      });
+      return { ...prev, rows: nextRows };
+    });
+  };
 
   const visibleRows = useMemo(() => {
     if (!comparison) return [];
@@ -288,6 +313,18 @@ export function InvoiceUploadCard({ onFill, disabled }: Props) {
               label={`백오더 ${counts.bo}`}
               tone="danger"
             />
+            {counts.edited > 0 && (
+              <span
+                style={{
+                  marginLeft: 'auto',
+                  fontSize: 11.5,
+                  color: 'var(--warning)',
+                  fontWeight: 500,
+                }}
+              >
+                {counts.edited}건 수정됨
+              </span>
+            )}
           </div>
 
           {/* 결과 테이블 */}
@@ -346,9 +383,10 @@ export function InvoiceUploadCard({ onFill, disabled }: Props) {
                         : diff > 0
                           ? 'var(--success)'
                           : 'var(--danger)';
+                    const edited = r.invoiceQty !== r.originalInvoiceQty;
                     return (
                       <div
-                        key={`${r.code}-${r.status}`}
+                        key={r.code}
                         style={{
                           display: 'grid',
                           gridTemplateColumns:
@@ -359,6 +397,7 @@ export function InvoiceUploadCard({ onFill, disabled }: Props) {
                           fontSize: 12.5,
                           alignItems: 'center',
                           minWidth: 760,
+                          background: edited ? 'var(--warning-wash)' : undefined,
                         }}
                       >
                         <span className="num" style={{ color: 'var(--ink-2)' }}>
@@ -390,18 +429,37 @@ export function InvoiceUploadCard({ onFill, disabled }: Props) {
                         >
                           {r.orderQty === 0 ? '—' : r.orderQty.toLocaleString('ko-KR')}
                         </span>
-                        <span
-                          className="num"
-                          style={{
-                            textAlign: 'right',
-                            color: 'var(--ink)',
-                            fontWeight: 500,
-                          }}
-                        >
-                          {r.invoiceQty === 0
-                            ? '—'
-                            : r.invoiceQty.toLocaleString('ko-KR')}
-                        </span>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                          <input
+                            type="number"
+                            min={0}
+                            step={1}
+                            value={r.invoiceQty}
+                            onChange={(e) =>
+                              handleQtyChange(r.code, Number(e.target.value))
+                            }
+                            onFocus={(e) => e.currentTarget.select()}
+                            title={
+                              edited
+                                ? `원본: ${r.originalInvoiceQty.toLocaleString('ko-KR')}`
+                                : undefined
+                            }
+                            className="num"
+                            style={{
+                              width: 72,
+                              height: 26,
+                              padding: '0 6px',
+                              textAlign: 'right',
+                              border: `1px solid ${edited ? 'var(--warning)' : 'var(--line)'}`,
+                              borderRadius: 4,
+                              background: 'var(--surface)',
+                              color: 'var(--ink)',
+                              fontWeight: 500,
+                              fontSize: 12.5,
+                              outline: 'none',
+                            }}
+                          />
+                        </div>
                         <span
                           className="num"
                           style={{
@@ -653,6 +711,7 @@ function compareOrderInvoice(
         unit: (ord?.unit ?? inv.unit) as 'DZ' | 'EA',
         orderQty: ord?.qty ?? 0,
         invoiceQty: 0,
+        originalInvoiceQty: 0,
         price: inv.price || ord?.price || 0,
         amount: inv.amount,
         status: 'backorder',
@@ -667,6 +726,7 @@ function compareOrderInvoice(
         unit: inv.unit,
         orderQty: 0,
         invoiceQty: inv.qty_shipped,
+        originalInvoiceQty: inv.qty_shipped,
         price: inv.price,
         amount: inv.amount,
         status: 'invoice_only',
@@ -680,6 +740,7 @@ function compareOrderInvoice(
       unit: ord.unit,
       orderQty: ord.qty,
       invoiceQty: inv.qty_shipped,
+      originalInvoiceQty: inv.qty_shipped,
       price: inv.price || ord.price,
       amount: inv.amount,
       status: ord.qty === inv.qty_shipped ? 'match' : 'qty_diff',
@@ -695,6 +756,7 @@ function compareOrderInvoice(
       unit: ord.unit,
       orderQty: ord.qty,
       invoiceQty: 0,
+      originalInvoiceQty: 0,
       price: ord.price,
       amount: 0,
       status: 'backorder',
