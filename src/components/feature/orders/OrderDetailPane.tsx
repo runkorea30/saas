@@ -8,17 +8,14 @@
  */
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { FileText, MoreHorizontal, Printer, Tag, Truck } from 'lucide-react';
+import { FileText, MoreHorizontal, Tag } from 'lucide-react';
 import {
   GradeBadge,
   SourceIcon,
   StatusBadge,
   fmtDateTime,
 } from './primitives';
-import {
-  calcSupplyAmount,
-  calcSupplyPriceByCustomerGrade,
-} from '@/utils/calculations';
+import { calcSupplyPriceByCustomerGrade } from '@/utils/calculations';
 import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
 import { useOrderItems, type OrderItemRow } from '@/hooks/queries/useOrderItems';
@@ -47,37 +44,28 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
   );
   const { data: products = [] } = useProducts(companyId);
 
-  // 자동완성 후보 — 현재 포커스된 셀의 쿼리(코드 prefix / 이름 부분일치) 기준.
+  // 자동완성 후보 — 코드/이름 모두 대소문자 무시 부분일치 (includes).
   const suggestions: Product[] = useMemo(() => {
     if (!autoFocus) return [];
     const draft = draftItems.find((d) => d.id === autoFocus.draftId);
     if (!draft) return [];
     if (autoFocus.col === 'code') {
-      const q = draft.product_code.trim().toUpperCase();
+      const q = draft.product_code.trim().toLowerCase();
       if (!q) return [];
       return products
-        .filter((p) => p.code.toUpperCase().startsWith(q))
+        .filter((p) => p.code.toLowerCase().includes(q))
         .slice(0, 10);
     }
-    const q = draft.product_name.trim();
+    const q = draft.product_name.trim().toLowerCase();
     if (!q) return [];
-    return products.filter((p) => p.name.includes(q)).slice(0, 10);
+    return products
+      .filter((p) => p.name.toLowerCase().includes(q))
+      .slice(0, 10);
   }, [autoFocus, draftItems, products]);
 
   if (!order) return <DetailEmpty />;
 
   const d = new Date(order.order_date);
-  const saleSubtotal = order.items.reduce(
-    (s, it) => s + (it.is_return ? 0 : it.amount),
-    0,
-  );
-  const returnTotal = order.items.reduce(
-    (s, it) => s + (it.is_return ? it.amount : 0),
-    0,
-  );
-  const total = saleSubtotal + returnTotal;
-  // 🔴 CLAUDE.md §4: 매출금액은 이미 부가세 포함. 공급가액은 ÷ 1.1로 역산.
-  const { vat } = calcSupplyAmount(saleSubtotal);
 
   // ───── 인라인 수량 편집 (기존 행) — blur 시 자동저장 ─────
   const handleQtyInput = (id: string, raw: number) => {
@@ -216,6 +204,34 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
       ),
     );
     setAutoFocus({ draftId, col: 'name' });
+  };
+
+  /**
+   * Enter/Tab 으로 자동완성 확정 — OrderEntryPage 패턴.
+   *  1) 정확히 일치하는 제품이 있으면 즉시 적용.
+   *  2) 단일 후보 매칭이면 그것을 적용.
+   *  3) 아니면 그냥 통과 (블러 효과).
+   */
+  const handleAutocompleteKeyDown = (
+    draftId: string,
+    col: 'code' | 'name',
+    e: React.KeyboardEvent<HTMLInputElement>,
+  ) => {
+    if (e.key !== 'Enter' && e.key !== 'Tab') return;
+    const draft = draftItems.find((d) => d.id === draftId);
+    if (!draft) return;
+    const q = (col === 'code' ? draft.product_code : draft.product_name)
+      .trim()
+      .toLowerCase();
+    if (!q) return;
+    const field = col === 'code' ? 'code' : 'name';
+    const exact = products.find((p) => p[field].toLowerCase() === q);
+    const matches = products.filter((p) => p[field].toLowerCase().includes(q));
+    const target = exact ?? (matches.length === 1 ? matches[0] : null);
+    if (target) {
+      e.preventDefault();
+      applyProductToDraft(draftId, target);
+    }
   };
 
   const handleAddReturn = () => {
@@ -566,6 +582,9 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                                   );
                                 }, 120)
                               }
+                              onKeyDown={(e) =>
+                                handleAutocompleteKeyDown(item.id, 'code', e)
+                              }
                               placeholder="코드"
                               className="w-full border border-[var(--line-strong)] rounded px-1 py-0.5 bg-[var(--surface)] text-[var(--ink)] text-xs focus:outline-none focus:border-[var(--brand)]"
                             />
@@ -601,6 +620,9 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                                   );
                                 }, 120)
                               }
+                              onKeyDown={(e) =>
+                                handleAutocompleteKeyDown(item.id, 'name', e)
+                              }
                               placeholder="제품명 검색"
                               className="w-full border border-[var(--line-strong)] rounded px-1 py-0.5 bg-[var(--surface)] text-[var(--ink)] text-xs focus:outline-none focus:border-[var(--brand)]"
                             />
@@ -618,7 +640,7 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                       <td className="py-1.5 px-2 text-right">
                         <input
                           type="number"
-                          min={0}
+                          min={isNewRow ? 1 : 0}
                           value={displayQty === 0 ? '' : displayQty}
                           placeholder={isNewRow ? '수량' : undefined}
                           onChange={(e) => {
@@ -690,88 +712,6 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
         )}
       </div>
 
-      {/* Totals (뷰 모드 전용) */}
-      {!editMode && (
-        <div
-          style={{
-            padding: '12px 20px 16px',
-            borderTop: '1px solid var(--line)',
-            background: 'var(--surface-2)',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <TotalRow label="판매 소계" value={saleSubtotal} />
-            {returnTotal < 0 && (
-              <TotalRow label="반품" value={returnTotal} tone="danger" />
-            )}
-            <TotalRow label="VAT 포함분 (10%)" value={vat} faded />
-            <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'baseline',
-              }}
-            >
-              <span style={{ fontSize: 12, color: 'var(--ink-2)', fontWeight: 500 }}>합계</span>
-              <span
-                style={{
-                  fontFamily: 'var(--font-num)',
-                  fontSize: 18,
-                  fontWeight: 600,
-                  color: 'var(--ink)',
-                  fontVariantNumeric: 'tabular-nums',
-                }}
-              >
-                {total.toLocaleString('ko-KR')}
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: 'var(--ink-3)',
-                    fontWeight: 500,
-                    marginLeft: 3,
-                  }}
-                >
-                  KRW
-                </span>
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Actions */}
-      <div
-        style={{
-          padding: '12px 20px',
-          borderTop: '1px solid var(--line)',
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 6,
-        }}
-      >
-        <button
-          type="button"
-          className="btn-base primary"
-          style={{ height: 32, fontSize: 12.5 }}
-        >
-          <Truck size={13} /> 출고 처리
-        </button>
-        <button type="button" className="btn-base" style={{ height: 32, fontSize: 12.5 }}>
-          <FileText size={13} /> 거래명세서
-        </button>
-        <button type="button" className="btn-base" style={{ height: 32, fontSize: 12.5 }}>
-          <Printer size={13} /> 송장 인쇄
-        </button>
-        <div style={{ flex: 1 }} />
-        <button
-          type="button"
-          className="btn-base ghost"
-          style={{ height: 32, fontSize: 12.5 }}
-        >
-          <MoreHorizontal size={13} />
-        </button>
-      </div>
     </div>
   );
 }
@@ -922,36 +862,3 @@ function DetailEmpty() {
   );
 }
 
-function TotalRow({
-  label,
-  value,
-  tone,
-  faded,
-}: {
-  label: string;
-  value: number;
-  tone?: 'danger';
-  faded?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        fontSize: 12,
-        color: faded ? 'var(--ink-3)' : 'var(--ink-2)',
-      }}
-    >
-      <span>{label}</span>
-      <span
-        style={{
-          fontFamily: 'var(--font-num)',
-          fontVariantNumeric: 'tabular-nums',
-          color: tone === 'danger' ? 'var(--danger)' : 'inherit',
-        }}
-      >
-        {value.toLocaleString('ko-KR')}원
-      </span>
-    </div>
-  );
-}

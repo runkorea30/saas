@@ -9,17 +9,48 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Download, Plus } from 'lucide-react';
+import { Calendar, Download, Flag, Plus, Users } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useResizableSplit } from '@/hooks/useResizableSplit';
 import { useOrders } from '@/hooks/queries/useOrders';
-import { OrderFilterBar } from '@/components/feature/orders/OrderFilterBar';
 import { OrderListTable } from '@/components/feature/orders/OrderListTable';
 import { OrderDetailPane } from '@/components/feature/orders/OrderDetailPane';
 import { OrderBulkBar } from '@/components/feature/orders/OrderBulkBar';
-import { fmtWon, periodRange } from '@/components/feature/orders/primitives';
+import {
+  GradeBadge,
+  MultiChip,
+  Segmented,
+  fmtWon,
+  periodRange,
+} from '@/components/feature/orders/primitives';
 import type { OrderStatus } from '@/types/common';
 import type { Order, PeriodKey } from '@/types/orders';
+
+const PERIOD_OPTIONS: { id: PeriodKey; label: string }[] = [
+  { id: 'today', label: '오늘' },
+  { id: 'week', label: '이번 주' },
+  { id: 'month', label: '이번 달' },
+  { id: 'lastmonth', label: '지난 달' },
+  { id: '90d', label: '90일' },
+  { id: 'custom', label: '사용자 지정' },
+];
+
+const STATUS_OPTIONS: { id: OrderStatus; label: string; dot: string }[] = [
+  { id: 'draft', label: '임시', dot: 'var(--ink-4)' },
+  { id: 'confirmed', label: '확정', dot: 'var(--info)' },
+  { id: 'shipped', label: '출고', dot: 'var(--warning)' },
+  { id: 'done', label: '완료', dot: 'var(--success)' },
+  { id: 'canceled', label: '취소', dot: 'var(--danger)' },
+];
+
+const dateInputStyle: React.CSSProperties = {
+  border: 'none',
+  background: 'transparent',
+  fontFamily: 'var(--font-num)',
+  fontSize: 12,
+  color: 'var(--ink-2)',
+  outline: 'none',
+};
 
 const PER_PAGE = 14;
 
@@ -168,8 +199,8 @@ export function OrdersPage() {
           margin: '0 auto',
         }}
       >
-        {/* 페이지 헤더 — 상하 padding 최소화 */}
-        <header style={{ marginBottom: 8 }}>
+        {/* 페이지 헤더 — 제목 + 필터 + 액션을 한 줄에, 요약은 별도 줄 */}
+        <header style={{ marginBottom: 10 }}>
           <div
             style={{
               fontSize: 10.5,
@@ -182,11 +213,12 @@ export function OrdersPage() {
           >
             판매 › 주문내역
           </div>
+          {/* Row 1: 제목 | 기간 | 날짜 | 거래처 | 상태 | grow | 엑셀 | 주문추가 */}
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 14,
+              gap: 8,
               flexWrap: 'wrap',
             }}
           >
@@ -198,60 +230,115 @@ export function OrdersPage() {
                 margin: 0,
                 color: 'var(--ink)',
                 lineHeight: 1.1,
+                marginRight: 4,
               }}
             >
               주문내역
             </h1>
-            <div
-              style={{
-                display: 'flex',
-                gap: 14,
-                flex: 1,
-                flexWrap: 'wrap',
-              }}
+            <Segmented
+              compact
+              options={PERIOD_OPTIONS}
+              value={period}
+              onChange={setPeriod}
+            />
+            {period === 'custom' && (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '4px 10px',
+                  borderRadius: 8,
+                  border: '1px solid var(--line)',
+                  background: 'var(--surface)',
+                  fontFamily: 'var(--font-num)',
+                  fontSize: 12,
+                  color: 'var(--ink-2)',
+                }}
+              >
+                <Calendar size={13} color="var(--ink-3)" strokeWidth={1.6} />
+                <input
+                  type="date"
+                  value={custom.from}
+                  onChange={(e) => setCustom({ ...custom, from: e.target.value })}
+                  style={dateInputStyle}
+                />
+                <span style={{ color: 'var(--ink-4)' }}>—</span>
+                <input
+                  type="date"
+                  value={custom.to}
+                  onChange={(e) => setCustom({ ...custom, to: e.target.value })}
+                  style={dateInputStyle}
+                />
+              </div>
+            )}
+            <MultiChip
+              label="거래처"
+              icon={<Users size={13} strokeWidth={1.6} />}
+              selected={customerSel}
+              onChange={setCustomerSel}
+              options={customerOptions.map((c) => ({
+                id: c.id,
+                label: c.name,
+                prefix: <GradeBadge grade={c.grade} size="sm" />,
+              }))}
+            />
+            <MultiChip
+              label="상태"
+              icon={<Flag size={13} strokeWidth={1.6} />}
+              selected={statusSel}
+              onChange={(ids) => setStatusSel(ids as OrderStatus[])}
+              options={STATUS_OPTIONS.map((s) => ({
+                id: s.id,
+                label: s.label,
+                prefix: (
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      width: 8,
+                      height: 8,
+                      borderRadius: 999,
+                      background: s.dot,
+                    }}
+                  />
+                ),
+              }))}
+            />
+            <div style={{ flex: 1 }} />
+            <button
+              type="button"
+              className="btn-base"
+              style={{ height: 30, fontSize: 12 }}
             >
-              <SummaryItem label="건수" value={`${summary.count.toLocaleString('ko-KR')}건`} />
-              <SummaryItem label="총액" value={`${fmtWon(summary.gross)}원`} />
-              <SummaryItem
-                label="순액"
-                value={`${fmtWon(summary.net)}원`}
-                tone={summary.returns < 0 ? 'danger' : undefined}
-              />
-              <SummaryItem label="평균" value={`${fmtWon(summary.avg)}원`} muted />
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                type="button"
-                className="btn-base"
-                style={{ height: 30, fontSize: 12 }}
-              >
-                <Download size={13} /> 엑셀
-              </button>
-              <button
-                type="button"
-                className="btn-base primary"
-                style={{ height: 30, fontSize: 12 }}
-              >
-                <Plus size={13} /> 주문 추가
-              </button>
-            </div>
+              <Download size={13} /> 엑셀
+            </button>
+            <button
+              type="button"
+              className="btn-base primary"
+              style={{ height: 30, fontSize: 12 }}
+            >
+              <Plus size={13} /> 주문 추가
+            </button>
+          </div>
+          {/* Row 2: 요약 */}
+          <div
+            style={{
+              display: 'flex',
+              gap: 18,
+              flexWrap: 'wrap',
+              marginTop: 8,
+            }}
+          >
+            <SummaryItem label="건수" value={`${summary.count.toLocaleString('ko-KR')}건`} />
+            <SummaryItem label="총액" value={`${fmtWon(summary.gross)}원`} />
+            <SummaryItem
+              label="순액"
+              value={`${fmtWon(summary.net)}원`}
+              tone={summary.returns < 0 ? 'danger' : undefined}
+            />
+            <SummaryItem label="평균" value={`${fmtWon(summary.avg)}원`} muted />
           </div>
         </header>
-
-        <OrderFilterBar
-          period={period}
-          onPeriodChange={setPeriod}
-          custom={custom}
-          onCustomChange={setCustom}
-          statusSel={statusSel}
-          onStatusChange={setStatusSel}
-          customerSel={customerSel}
-          onCustomerChange={setCustomerSel}
-          customers={customerOptions}
-          rangeStart={rangeStart}
-          rangeEnd={rangeEnd}
-          count={filtered.length}
-        />
 
         {/* 마스터-디테일 분할 */}
         <div
