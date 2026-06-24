@@ -24,10 +24,13 @@ export interface MatchedBankRow extends ParsedBankRow {
 /**
  * KB국민은행 엑셀(.xls/.xlsx) 파싱.
  *
- * 헤더 컬럼 순서:
- *   거래일시(0) | 적요(1) | 보낸분/받는분(2) | 송금메모(3) | 출금액(4) | 입금액(5) | 잔액(6) | 거래점(7) | 구분(8)
+ * 두 가지 포맷 자동 감지:
+ *   A) 개인계좌: 거래일시(0) | 적요(1) | 보낸분/받는분(2) | 송금메모(3) | 출금액(4) | 입금액(5) | ...
+ *   B) 사업자계좌: No(0) | 거래일시(1) | 보낸분/받는분(2) | 출금액(원)(3) | 입금액(원)(4) | ... | 적요(8)
  *
- * 입금 조건: 입금액(col5) > 0 인 행만 처리. 출금 행은 무시.
+ * 판별: 헤더행 col 0 값이 'No' 이면 포맷 B, 그 외 포맷 A.
+ *
+ * 입금 조건: 입금액 > 0 인 행만 처리. 출금 행은 무시.
  */
 export function parseKBBank(file: File): Promise<ParsedBankRow[]> {
   return new Promise((resolve, reject) => {
@@ -48,13 +51,21 @@ export function parseKBBank(file: File): Promise<ParsedBankRow[]> {
         );
         if (headerIdx === -1) headerIdx = 4;
 
+        // 포맷 판별 (사업자계좌 헤더 col0 = 'No')
+        const headerRow = rows[headerIdx] ?? [];
+        const isBusiness = String(headerRow[0] ?? '').trim().toLowerCase() === 'no';
+        const colDate = isBusiness ? 1 : 0;
+        const colDepositor = 2;
+        const colDesc = isBusiness ? 8 : 1;
+        const colDeposit = isBusiness ? 4 : 5;
+
         const result: ParsedBankRow[] = [];
         for (let i = headerIdx + 1; i < rows.length; i++) {
           const row = rows[i];
-          const dateRaw = String(row[0] ?? '').trim();
-          const desc = String(row[1] ?? '').trim();
-          const depositor = String(row[2] ?? '').trim();
-          const deposit = parseAmount(row[5]);
+          const dateRaw = String(row[colDate] ?? '').trim();
+          const desc = String(row[colDesc] ?? '').trim();
+          const depositor = String(row[colDepositor] ?? '').trim();
+          const deposit = parseAmount(row[colDeposit]);
 
           if (!dateRaw || deposit <= 0) continue;
 
