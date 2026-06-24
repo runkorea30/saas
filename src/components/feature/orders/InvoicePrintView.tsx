@@ -115,35 +115,38 @@ function computeSupplyPrice(
 }
 
 /**
- * 표 행 시퀀스 생성 — 카테고리 sub-row + 아이템 행 평탄화.
- * No 카운터는 섹션 전체에서 연속.
+ * 표 행 시퀀스 생성 — category 오름차순 정렬 + 변경 시점에 sub-header 삽입.
+ *
+ * 정책:
+ *  - category 는 localeCompare('ko') 로 정렬. 빈 문자열은 자연스럽게 선두로 모임.
+ *  - category 가 직전 행과 달라질 때만 sub-header 행 삽입.
+ *  - 빈/null category 행은 sub-header 없이 그대로 표시 (사용자 요구).
+ *  - No 카운터는 섹션 전체에서 연속(헤더 행은 카운트 안 함).
  */
 type Row =
   | { kind: 'cat'; category: string; key: string }
   | { kind: 'item'; item: InvoiceItem; no: number; key: string };
 
 function buildRows(items: InvoiceItem[]): Row[] {
-  // 입력 순서를 유지하면서 카테고리 그룹을 모음.
-  const order: string[] = [];
-  const byCat = new Map<string, InvoiceItem[]>();
-  for (const it of items) {
-    const cat = it.product.category && it.product.category.trim()
-      ? it.product.category
-      : '기타';
-    if (!byCat.has(cat)) {
-      byCat.set(cat, []);
-      order.push(cat);
-    }
-    byCat.get(cat)!.push(it);
-  }
+  // 1) category 오름차순 정렬.
+  const sorted = [...items].sort((a, b) => {
+    const ca = a.product.category ?? '';
+    const cb = b.product.category ?? '';
+    return ca.localeCompare(cb, 'ko');
+  });
+
+  // 2) 평탄화 — category 가 바뀌는 시점에만 헤더 삽입.
   const rows: Row[] = [];
+  let lastCategory = '';
   let no = 0;
-  for (const cat of order) {
-    rows.push({ kind: 'cat', category: cat, key: `cat-${cat}` });
-    for (const it of byCat.get(cat)!) {
-      no += 1;
-      rows.push({ kind: 'item', item: it, no, key: `it-${it.id}` });
+  for (const it of sorted) {
+    const cat = (it.product.category ?? '').trim();
+    if (cat && cat !== lastCategory) {
+      rows.push({ kind: 'cat', category: cat, key: `cat-${cat}` });
+      lastCategory = cat;
     }
+    no += 1;
+    rows.push({ kind: 'item', item: it, no, key: `it-${it.id}` });
   }
   return rows;
 }
