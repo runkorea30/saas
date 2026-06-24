@@ -31,9 +31,10 @@
 | Phase 3.22 | 미수금 페이지 — 월별 정산마감 기준 미수금/정산대기 재계산 + 카드 배경색 3단계 + 필터 4종 | ✅ 완료 (2026-06-25) |
 | Phase 3.23 | 주문내역 UI 정리 + 거래명세서 인쇄 + 재고부족 자동조정 + 수동주문 공급가 폴백 | ✅ 완료 (2026-06-25) |
 | Phase 3.24 | 수입 입고 예정일 4탭 카드 (페덱스/해상운송/품절/재고부족) + 제품 일괄삭제/일괄수정/노출금지 | ✅ 완료 (2026-06-25) |
+| Phase 3.25 | 청구서 페이지 (`/sales/billing`) — 거래처+연월 선택, 날짜별 그룹핑, 알파문구 거래명세서 분기, 인쇄 | ✅ 완료 (2026-06-25) |
 | Phase 4 | 나머지 페이지 + Auth 도입 | 대기 |
 
-**페이지 진도: 12 / 13 구현 완료** (`/finance/pnl` 만 남음)
+**페이지 진도: 13 / 14 구현 완료** (`/finance/pnl` 만 남음, `/sales/invoices` 는 placeholder 유지)
 
 - `/` — 홈 대시보드 (KPI + Today + Chart + Timeline)
 - `/sales/orders` — 주문내역 (필터/목록/상세 split, 상세에서 수정/저장/반품추가/주문추가)
@@ -47,7 +48,8 @@
 - `/finance/banking` — 은행거래 (KB엑셀 업로드, 자동매칭, 월별정산, 매핑설정)
 - `/finance/receivables` — 미수금 관리 (카드형 현황, 월별 누적미수금, 연체일수)
 - `/finance/tax-invoices` — 세금계산서대장 (사업자번호 단위 발행, 국세청 일괄발급 엑셀 다운로드)
-- 나머지 1 경로 (`/finance/pnl`) 는 `<PlaceholderPage />` 상태
+- `/sales/billing` — 청구서 (거래처+연월 선택, 날짜별 그룹핑, 알파문구 거래명세서 분기, A4 인쇄)
+- 나머지 1 경로 (`/finance/pnl`) 는 `<PlaceholderPage />` 상태. `/sales/invoices` 도 placeholder 유지.
 
 **배포**: https://saas-beta-pied.vercel.app (Vercel 자동 배포, GitHub push)
 
@@ -70,6 +72,61 @@
   - 컬럼간격 드래그 리사이저 (현재는 fixed/flex 토글만)
   - 우상단 "자동수집 OFF" + "수집/팩스" 영역 (의미 미정의)
   - 파일 자체를 서버 업로드 (현재는 클라이언트 미리보기만)
+- **청구서 페이지 후속** (Phase 3.25 완료 후 사용자 명시):
+  - 브라우저 실 확인 — 알파문구 거래처 + 데이터 있는 월 선택 → 미리보기/인쇄 동작 확인
+  - 이메일 발송 기능 구현 (발송 방식 미결정 — Supabase Edge Function + 이메일 서비스 고려)
+  - 서버사이드 PDF 생성 후 이메일 첨부 발송 (이전 결정사항)
+  - 발송 기록 DB 저장 (발송 일시, 수신자, 상태)
+  - 매월 3일 자동 발송 스케줄 (pg_cron 또는 Edge Function cron)
+
+---
+
+## 오늘 추가된 작업 요약 (2026-06-25, 청구서 페이지)
+
+### 청구서 페이지 (Phase 3.25) — `/sales/billing`
+
+이번 세션 3건 커밋 (`6708bf3` → `31b5a27`, 범위 `1646779..31b5a27`).
+
+#### 커밋 구성
+1. **`6708bf3`** — `feat: BillingPrintView 컴포넌트 신설 (날짜별 청구서/거래명세서)` — 357줄.
+2. **`1dc5666`** — `feat: 청구서 페이지 신설 (거래처+연월 선택, 인쇄, 이메일버튼 UI)` — `BillingPage` + `.no-print` CSS, 381줄.
+3. **`31b5a27`** — `feat: 청구서 라우팅 및 네비 메뉴 추가` — `/sales/billing` 라우트 + SectionNav 탭 (3줄).
+
+#### 신규 파일
+- `src/pages/sales/BillingPage.tsx` — 페이지 (필터 + 미리보기 + 인쇄 portal).
+- `src/components/feature/billing/BillingPrintView.tsx` — 인쇄 뷰 (날짜별 그룹핑, 알파문구 거래명세서 분기).
+
+#### 주요 동작
+- **필터**: 연도 select (2023 ~ 현재+1) + 월 select (1~12) + 거래처 select (`useCustomers` 재사용, `compareCompanyName` 정렬).
+- **데이터**: `useBillingOrders` 신규 훅 — `orders` + 중첩 `order_items` + `products` (sell_price + grade_a~e) 단일 쿼리, `fetchAllRows` 경유.
+  - 필터: `company_id` + `customer_id` + `status='confirmed'` + `deleted_at IS NULL` + `order_date .gte(YYYY-MM-01).lt(다음달 1일)`.
+  - 정렬: `order_date asc`.
+- **날짜 그룹핑**: `useMemo` 로 `order_date` (timestamptz) → KST `YYYY-MM-DD` 변환 후 Map 그룹핑 (`toKstDateKey` 헬퍼, +9h 보정).
+- **알파문구 분기**: `customer.name.includes('알파문구')` → 제목 `'거 래 명 세 서'`, 그 외 → `'청 구 서'` (`spacedTitle` 헬퍼로 글자 사이 공백).
+  - 알파문구 계열 거래처 7개 모두 `grade='D'`, `email=NULL` 확인.
+- **공급가 계산**: 기존 `calcSupplyPriceByCustomerGrade(sell_price, grade, gradeRates)` 재사용 — 새 계산식 함수 없음. `grade`/`gradeRate` 없거나 0 이면 `unit_price` 폴백.
+
+#### 인쇄 인프라 — 기존 거래명세서와 동일 패턴 재사용
+- 기존 `.invoice-print-portal` 클래스 (`src/index.css`) + `@media print { body > #root { display:none } body > .invoice-print-portal { display:block } @page { size: A4 portrait; margin: 12mm 10mm } }` 그대로 활용.
+- 추가: `.no-print { display:none !important }` 유틸 클래스 추가 (필터 바에 적용).
+- 인쇄 트리거: `setIsPrinting(true)` → `setTimeout(() => { window.print(); setIsPrinting(false); }, 300)` — OrdersPage 패턴 그대로.
+- `createPortal` 로 `document.body` 직속에 `<div className="invoice-print-portal"><BillingPrintView /></div>` 렌더.
+
+#### 이메일 발송 — UI만 (기능 미구현)
+- `useToast` 훅 사용 — `showToast({ kind: 'info', text: '이메일 발송 기능은 준비 중입니다.' })`.
+- 후속 구현 시 결정사항 (이전 합의):
+  - 서버사이드 PDF 생성 후 이메일 첨부 발송
+  - 발송 기록 DB 저장 (발송 일시, 수신자, 상태)
+  - 매월 3일 자동 발송 스케줄 (pg_cron 또는 Edge Function cron)
+
+#### 라우팅 / 네비
+- `src/App.tsx` — `<Route path="billing" element={<BillingPage />} />` 추가 (송장대장 placeholder 다음).
+- `src/components/nav/navConfig.ts` — `/sales` 섹션 items 마지막에 `{ path: '/sales/billing', label: '청구서' }` 추가. 순서: 주문내역 / 수동주문입력 / 매출분석 / 송장대장 / **청구서**.
+
+#### 검증
+- `npx tsc --noEmit` → 0 errors.
+- `npm run build` → 성공 (5.80s, 1757 modules).
+- 브라우저 실 확인은 사용자가 진행 예정 (위 "청구서 페이지 후속" 항목).
 
 ---
 
