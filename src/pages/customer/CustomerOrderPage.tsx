@@ -1250,69 +1250,41 @@ function ImportNoticeCard({
         padding: 16,
       }}
     >
-      {/* 헤더 — 제목 + (페덱스/해상운송 탭의 경우) 도착예정 자유 텍스트 강조 */}
+      {/* 탭 (4탭) — 최상단, 알약 뱃지 스타일 (탭별 색상 구분) */}
       <div
         style={{
           display: 'flex',
-          alignItems: 'baseline',
-          gap: 10,
+          gap: 6,
           flexWrap: 'wrap',
-          marginBottom: 10,
-          flexShrink: 0,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 14,
-            fontWeight: 600,
-            color: '#1C1917',
-            flexShrink: 0,
-          }}
-        >
-          🚢 수입 입고 예정일
-        </span>
-        {activeShipment?.arrivalText && (
-          <span
-            style={{
-              fontSize: 15,
-              fontWeight: 700,
-              color: '#2563EB',
-            }}
-          >
-            {activeShipment.arrivalText}
-          </span>
-        )}
-      </div>
-
-      {/* 탭 헤더 (4탭) */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 0,
-          borderBottom: '1px solid #E5E7EB',
           marginBottom: 12,
           flexShrink: 0,
         }}
       >
         {IMPORT_TABS.map((t) => {
           const on = tab === t.key;
+          const variant = tabBadgeColors(t.key);
           return (
             <button
               key={t.key}
               type="button"
               onClick={() => setTab(t.key)}
               style={{
-                flex: 1,
-                padding: '6px 4px',
+                padding: '4px 12px',
                 fontSize: 11,
-                fontWeight: on ? 600 : 500,
-                background: 'transparent',
-                border: 'none',
-                borderBottom: `2px solid ${on ? '#2563EB' : 'transparent'}`,
-                color: on ? '#2563EB' : '#6B7280',
+                fontWeight: 500,
+                borderRadius: 999,
+                border: `1px solid ${on ? variant.solidBorder : variant.outlineBorder}`,
+                background: on ? variant.solidBg : '#FFFFFF',
+                color: on ? '#FFFFFF' : variant.outlineFg,
                 cursor: 'pointer',
-                marginBottom: -1,
                 whiteSpace: 'nowrap',
+                transition: 'background 0.15s, color 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                if (!on) e.currentTarget.style.background = variant.hoverBg;
+              }}
+              onMouseLeave={(e) => {
+                if (!on) e.currentTarget.style.background = '#FFFFFF';
               }}
             >
               {t.label}
@@ -1320,6 +1292,42 @@ function ImportNoticeCard({
           );
         })}
       </div>
+
+      {/* 헤더 — 페덱스/해상운송 탭일 때만 (제목 + 도착예정 자유 텍스트) */}
+      {(tab === 'fedex' || tab === 'sea') && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'baseline',
+            gap: 10,
+            flexWrap: 'wrap',
+            marginBottom: 10,
+            flexShrink: 0,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: '#1C1917',
+              flexShrink: 0,
+            }}
+          >
+            🚢 수입 입고 예정일
+          </span>
+          {activeShipment?.arrivalText && (
+            <span
+              style={{
+                fontSize: 15,
+                fontWeight: 700,
+                color: '#2563EB',
+              }}
+            >
+              {activeShipment.arrivalText}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* 스텝퍼 — 페덱스/해상운송 탭에서만 노출 */}
       {(tab === 'fedex' || tab === 'sea') && activeShipment?.status && (
@@ -1335,6 +1343,44 @@ function ImportNoticeCard({
       />
     </section>
   );
+}
+
+/**
+ * 탭 뱃지 색상 팔레트 — 페덱스/해상운송은 브랜드 블루, 품절은 빨강, 재고부족은 주황.
+ * 활성 상태는 solid 채움, 비활성은 outline + hover wash.
+ */
+function tabBadgeColors(key: ImportNoticeTab): {
+  solidBg: string;
+  solidBorder: string;
+  outlineBorder: string;
+  outlineFg: string;
+  hoverBg: string;
+} {
+  if (key === 'soldout') {
+    return {
+      solidBg: '#EF4444',
+      solidBorder: '#EF4444',
+      outlineBorder: '#FCA5A5',
+      outlineFg: '#EF4444',
+      hoverBg: '#FEF2F2',
+    };
+  }
+  if (key === 'low') {
+    return {
+      solidBg: '#F59E0B',
+      solidBorder: '#F59E0B',
+      outlineBorder: '#FCD34D',
+      outlineFg: '#D97706',
+      hoverBg: '#FFFBEB',
+    };
+  }
+  return {
+    solidBg: '#2563EB',
+    solidBorder: '#2563EB',
+    outlineBorder: '#D6D3D1',
+    outlineFg: '#6B7280',
+    hoverBg: '#F5F5F4',
+  };
 }
 
 /** companies.import_notice_products / sea_products jsonb → {code,name} 배열로 안전 추출. */
