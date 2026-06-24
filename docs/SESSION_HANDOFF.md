@@ -146,6 +146,7 @@
 #### 수량 셀 표시
 - **OrderDetailPane**: 사전 조정 시 input 빨간색 + bold + tooltip `재고부족 — 현재재고 N (요청 M)`. `original_quantity != null` 이면 옆에 `~~original_quantity~~` 회색 취소선. 신규 행만 `0 → 빈문자열` 변환, 기존 행은 `0` 명시 (품절 자동조정 결과를 가시화).
 - **InvoicePrintView**: `original_quantity != null` 이면 수량 셀에 `{quantity} ~~{original_quantity}~~` (`marginLeft 4px`, `color #aaa`, `line-through`, `fontSize 0.85em`). 품절(0) 행도 거래처 안내 목적으로 그대로 출력.
+- **(`8af8b49` 갱신)** 두 곳 모두 표시 순서를 `~~원본수량~~ {quantity}` 로 변경 (취소선이 앞, 실제 수량이 뒤). 글자 크기는 `fontSize: 'inherit'` 로 통일 — 기존 `0.85em` 은 너무 작아 가독성 저하.
 
 #### 알려진 이슈
 - `OrderDetailPane.handleSave`의 INSERT payload는 Supabase 자동생성 타입에 `original_quantity` 미반영 → 타입 단언(`as unknown as {...}`)으로 우회. `supabase gen types typescript --schema mochicraft_demo` 재실행 후 단언 제거 권장.
@@ -165,12 +166,42 @@
 - 적용 위치: `applyProduct`, `handleCustomerChange`, Excel 파싱 — 모두 동일 호출로 통일.
 - DB의 `products.grade_a..grade_e` 자체가 NULL이면 폴백 의미 없음 → products 페이지에서 등급별 공급율 등록 필요.
 
+### Phase 3.23 후속 패치 (2026-06-25 추가, `060045e` → `7bb68d1`)
+
+오늘 6건 추가 커밋. Phase 3.23 마무리.
+
+#### `060045e` — 재고 자동조정 quantity=0 INSERT 정책 통일
+- `OrderEntryPage.handleSave` 의 `itemsForRpc = adjusted.filter(a => Math.abs(a.finalQty) > 0)` 한 줄 제거 → `const itemsForRpc = adjusted;`.
+- 결품(finalQty=0) 행도 RPC 에 전달되어 DB INSERT. `OrderDetailPane` 정책과 통일.
+- 진단: 사전 DB 검증 결과 `insert_order` RPC 와 `order_items.original_quantity` 컬럼은 이미 마이그레이션 반영 상태, 추가 DDL 불필요.
+
+#### `8af8b49` — 수량 셀 표시 순서/크기 + handleSave 공급가 재계산 패스
+- **OrderDetailPane** 수량 셀: input 다음에 있던 strikethrough span 을 input 앞으로 이동. inline-flex 에 `justifyContent: 'flex-end'` 추가. `fontSize: '0.85em' → 'inherit'`.
+- **InvoicePrintView** 수량 셀: 동일 순서, `marginLeft → marginRight`, `fontSize: '0.85em' → 'inherit'`.
+- **OrderEntryPage.handleSave**: RPC 호출 직전 `productById` 맵 + `calcSupplyPriceByCustomerGrade` 재계산 패스 추가. `unit_price` 와 `amount` 가 공급가 기반으로 저장. supply=0 시 sell_price 폴백.
+
+#### `c12833c` — 🔴 useProducts grade 컬럼 누락 root cause fix
+- **진짜 버그**: `useProducts` 의 `PRODUCT_SELECT` 에 `grade_a, grade_b, grade_c, grade_d, grade_e` 5컬럼 누락. Supabase 가 grade rate 없이 row 반환 → `calcSupplyPriceByCustomerGrade(price, grade, product)` 가 `product.grade_X` 를 항상 undefined 로 읽어 0 반환 → 이전 커밋의 폴백 (`supply > 0 ? supply : sell_price`) 으로 sell_price 가 저장되며 grade 할인이 무시되던 문제.
+- 5컬럼 SELECT 추가 + `Product.grade_a..e` 타입을 `number?` → `number | null` 로 정정 (DB numeric NULL 허용과 일치).
+- `OrderEntryPage.computeSupply` 헬퍼에 `supply > 0 ? supply : product.sell_price` 폴백 일원화. `handleSave` 의 finalItems 매핑도 `computeSupply` 단일 진입점으로 정리. 4개 진입점 (applyProduct/handleCustomerChange/Excel/handleSave) 모두 동일 동작.
+- DB 검증: `mochicraft_demo.products` 에 `grade_a..e` numeric 5컬럼 존재 확인.
+
+#### `7e7ad19` — 수동주문입력 합계 공급가 기준
+- `OrderEntryPage.applyProduct`: `amount: r.quantity * product.sell_price` → `amount: r.quantity * supplyPrice`.
+- 수량 onChange: `amount: safe * r.unit_price` → `amount: safe * r.supply_price`.
+- 우측 "합계" 컬럼 + 하단 바 합계 모두 공급가 × 수량 기준 표시. RPC 저장값과 화면 합계 정합.
+
+#### `7bb68d1` — 주문 정렬 보강
+- `useOrders`: `.order('created_at', { ascending: false })` 보조 정렬 추가 → 같은 `order_date` 내에서 나중에 입력된 주문이 위로.
+- `useOrderItems`: `ORDER_ITEM_SELECT` 및 `OrderItemJoinRow.products` / `OrderItemRow` 에 `category` 추가. map 매핑도 갱신.
+- `OrderDetailPane`: `displayRows` 를 `useMemo` 로 래핑, 기존 행(`!_isNew`)은 `category` 오름차순 → `product_code` 오름차순 (`localeCompare('ko')`). 신규 draft 행(`_isNew`)은 정렬 제외 후 맨 뒤 유지.
+
 ### 다음 세션 후속 작업 (사용자 명시)
 
-1. (완료) ~~재고 자동조정 quantity=0 INSERT 정책 통일~~ — `060045e` 로 완료. `OrderEntryPage.handleSave` 의 `itemsForRpc` filter 제거.
+1. (완료) ~~재고 자동조정 quantity=0 INSERT 정책 통일~~ — `060045e` 로 완료.
 2. **거래처 주문서 업로드 페이지(`/customer-order`) 재고부족 동일 표시** — 거래처 포털에서도 자동조정 + 원본수량 취소선.
 3. **추가주문 구분 표시** — `orders.is_additional` 컬럼 신설 + `InvoicePrintView` 섹션 라벨 결정 로직 보강 (현재는 customer 그룹 내 날짜순 index 기반).
-4. (완료) ~~수동주문입력 공급가 자동계산~~ — `b8b2c5d`로 완료.
+4. (완료) ~~수동주문입력 공급가 자동계산~~ — `b8b2c5d` + `c12833c` (root cause) + `7e7ad19` (합계) 로 완료.
 
 ---
 
