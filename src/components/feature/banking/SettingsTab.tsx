@@ -64,12 +64,18 @@ function MappingSection({
     const cust = customers.find((c) => c.id === draftCustomerId);
     if (!cust) return;
     try {
-      await add.mutateAsync({
+      const { updatedCount } = await add.mutateAsync({
         bank_name: key,
         customer_id: cust.id,
         customer_name: cust.name,
       });
-      showToast({ kind: 'success', text: '매핑 룰 추가됨' });
+      showToast({
+        kind: 'success',
+        text:
+          updatedCount > 0
+            ? `매핑 룰 추가 완료 — 기존 미매칭 ${updatedCount}건 자동 매칭되었습니다`
+            : '매핑 룰 추가 완료',
+      });
       resetDraft();
     } catch (err) {
       showToast({

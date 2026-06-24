@@ -234,6 +234,8 @@ export function useUpdateBankTransaction() {
 }
 
 // ── useAddBankMapping ────────────────────────────────────────────────
+// INSERT 후 기존 미매칭(deposit/unmatched, depositor_name ILIKE %bank_name%) 거래에
+// customer_id/match_status/match_type='매핑' 으로 소급 적용.
 export function useAddBankMapping() {
   const { companyId } = useCompany();
   const qc = useQueryClient();
@@ -243,16 +245,39 @@ export function useAddBankMapping() {
       bank_name: string;
       customer_id: string | null;
       customer_name: string;
-    }) => {
+    }): Promise<{ mappingId: string; updatedCount: number }> => {
       if (!companyId) throw new Error('회사 컨텍스트 미초기화');
 
-      const { error } = await supabase
+      const { data: insertData, error } = await supabase
         .from('bank_mappings')
-        .insert({ ...payload, company_id: companyId });
+        .insert({ ...payload, company_id: companyId })
+        .select('id')
+        .single();
       if (error) throw error;
+
+      const { data: updateData, error: updateError } = await supabase
+        .from('bank_transactions')
+        .update({
+          customer_id: payload.customer_id,
+          match_status: 'matched',
+          match_type: '매핑',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('company_id', companyId)
+        .eq('type', 'deposit')
+        .eq('match_status', 'unmatched')
+        .ilike('depositor_name', `%${payload.bank_name}%`)
+        .select('id');
+      if (updateError) throw updateError;
+
+      return {
+        mappingId: insertData.id,
+        updatedCount: (updateData ?? []).length,
+      };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bank-mappings', companyId] });
+      qc.invalidateQueries({ queryKey: ['bank-transactions', companyId] });
     },
   });
 }
