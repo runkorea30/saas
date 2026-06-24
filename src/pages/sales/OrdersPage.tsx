@@ -19,7 +19,7 @@ import { OrderDetailPane } from '@/components/feature/orders/OrderDetailPane';
 import { OrderBulkBar } from '@/components/feature/orders/OrderBulkBar';
 import { fmtWon, periodRange } from '@/components/feature/orders/primitives';
 import type { OrderStatus } from '@/types/common';
-import type { Order, PeriodKey, SourceFilter } from '@/types/orders';
+import type { Order, PeriodKey } from '@/types/orders';
 
 const PER_PAGE = 14;
 
@@ -40,10 +40,8 @@ export function OrdersPage() {
     from: '2026-03-01',
     to: '2026-04-19',
   });
-  const [query, setQuery] = useState('');
   const [statusSel, setStatusSel] = useState<OrderStatus[]>([]);
   const [customerSel, setCustomerSel] = useState<string[]>([]);
-  const [source, setSource] = useState<SourceFilter>('all');
 
   // ───── 선택 상태 ─────
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -87,25 +85,13 @@ export function OrdersPage() {
 
   // ───── 클라이언트 필터링 ─────
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
     return orders.filter((o) => {
       if (statusSel.length && !statusSel.includes(o.status)) return false;
       if (customerSel.length && (!o.customer || !customerSel.includes(o.customer.id)))
         return false;
-      if (source !== 'all' && o.source !== source) return false;
-      if (q) {
-        const inId = o.id.toLowerCase().includes(q);
-        const inCust = o.customer?.name.toLowerCase().includes(q) ?? false;
-        const inItem = o.items.some(
-          (it) =>
-            (it.product?.name.toLowerCase().includes(q) ?? false) ||
-            (it.product?.code.toLowerCase().includes(q) ?? false),
-        );
-        if (!inId && !inCust && !inItem) return false;
-      }
       return true;
     });
-  }, [orders, statusSel, customerSel, source, query]);
+  }, [orders, statusSel, customerSel]);
 
   // ───── 합계 KPI ─────
   const summary = useMemo(() => {
@@ -126,7 +112,7 @@ export function OrdersPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [period, custom, statusSel, customerSel, source, query]);
+  }, [period, custom, statusSel, customerSel]);
 
   useEffect(() => {
     if (!selectedId || !filtered.find((o) => o.id === selectedId)) {
@@ -168,8 +154,6 @@ export function OrdersPage() {
   const resetFilters = () => {
     setStatusSel([]);
     setCustomerSel([]);
-    setSource('all');
-    setQuery('');
     setPeriod('90d');
   };
 
@@ -178,22 +162,22 @@ export function OrdersPage() {
       <main
         style={{
           flex: 1,
-          padding: '20px 32px 80px',
+          padding: '12px 32px 80px',
           maxWidth: 1720,
           width: '100%',
           margin: '0 auto',
         }}
       >
-        {/* 페이지 헤더 — 다음 태스크에서 공용 PageHeader로 추출 */}
-        <header style={{ marginBottom: 14 }}>
+        {/* 페이지 헤더 — 상하 padding 최소화 */}
+        <header style={{ marginBottom: 8 }}>
           <div
             style={{
-              fontSize: 11,
+              fontSize: 10.5,
               color: 'var(--ink-3)',
               fontFamily: 'var(--font-num)',
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
-              marginBottom: 6,
+              marginBottom: 2,
             }}
           >
             판매 › 주문내역
@@ -201,18 +185,19 @@ export function OrdersPage() {
           <div
             style={{
               display: 'flex',
-              alignItems: 'flex-end',
-              gap: 20,
+              alignItems: 'center',
+              gap: 14,
               flexWrap: 'wrap',
             }}
           >
             <h1
               className="disp"
               style={{
-                fontSize: 26,
+                fontSize: 20,
                 fontWeight: 500,
                 margin: 0,
                 color: 'var(--ink)',
+                lineHeight: 1.1,
               }}
             >
               주문내역
@@ -220,10 +205,9 @@ export function OrdersPage() {
             <div
               style={{
                 display: 'flex',
-                gap: 18,
+                gap: 14,
                 flex: 1,
                 flexWrap: 'wrap',
-                paddingBottom: 4,
               }}
             >
               <SummaryItem label="건수" value={`${summary.count.toLocaleString('ko-KR')}건`} />
@@ -239,14 +223,14 @@ export function OrdersPage() {
               <button
                 type="button"
                 className="btn-base"
-                style={{ height: 32, fontSize: 12.5 }}
+                style={{ height: 30, fontSize: 12 }}
               >
                 <Download size={13} /> 엑셀
               </button>
               <button
                 type="button"
                 className="btn-base primary"
-                style={{ height: 32, fontSize: 12.5 }}
+                style={{ height: 30, fontSize: 12 }}
               >
                 <Plus size={13} /> 주문 추가
               </button>
@@ -259,14 +243,10 @@ export function OrdersPage() {
           onPeriodChange={setPeriod}
           custom={custom}
           onCustomChange={setCustom}
-          query={query}
-          onQueryChange={setQuery}
           statusSel={statusSel}
           onStatusChange={setStatusSel}
           customerSel={customerSel}
           onCustomerChange={setCustomerSel}
-          source={source}
-          onSourceChange={setSource}
           customers={customerOptions}
           rangeStart={rangeStart}
           rangeEnd={rangeEnd}
@@ -370,7 +350,7 @@ function SummaryItem({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <span
         style={{
-          fontSize: 10.5,
+          fontSize: 10,
           color: 'var(--ink-3)',
           fontFamily: 'var(--font-num)',
           letterSpacing: '0.08em',
@@ -382,7 +362,7 @@ function SummaryItem({
       <span
         className="num"
         style={{
-          fontSize: 14,
+          fontSize: 12.5,
           fontWeight: 600,
           color:
             tone === 'danger'

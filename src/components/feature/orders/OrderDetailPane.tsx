@@ -26,9 +26,12 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
   const { companyId } = useCompany();
   const queryClient = useQueryClient();
 
+  /** 새 행 추가 모드 — 반품추가/주문추가 클릭 시 활성. */
   const [editMode, setEditMode] = useState(false);
   const [draftItems, setDraftItems] = useState<OrderItemDraft[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  /** 수량 인라인 편집의 임시 오버라이드 — blur 시 DB 반영 + 클리어. */
+  const [qtyOverrides, setQtyOverrides] = useState<Record<string, number>>({});
 
   const { data: orderItems = [], isLoading: itemsLoading } = useOrderItems(
     order?.id ?? null,
@@ -51,14 +54,50 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
   // 🔴 CLAUDE.md §4: 매출금액은 이미 부가세 포함. 공급가액은 ÷ 1.1로 역산.
   const { vat } = calcSupplyAmount(saleSubtotal);
 
-  // ───── 편집 핸들러 ─────
-  const handleEditClick = () => {
-    setDraftItems(
-      orderItems.map((it) => toDraft(it)),
-    );
-    setEditMode(true);
+  // ───── 인라인 수량 편집 (기존 행) — blur 시 자동저장 ─────
+  const handleQtyInput = (id: string, raw: number) => {
+    setQtyOverrides((prev) => ({ ...prev, [id]: Math.max(0, Math.floor(raw)) }));
   };
 
+  const handleQtyBlur = async (id: string) => {
+    if (!order || !companyId) return;
+    const nextQty = qtyOverrides[id];
+    if (nextQty === undefined) return;
+    const item = orderItems.find((i) => i.id === id);
+    if (!item || item.quantity === nextQty) {
+      // 변경 없음 — 오버라이드만 제거
+      setQtyOverrides((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      return;
+    }
+    try {
+      const { error } = await supabase
+        .from('order_items')
+        .update({
+          quantity: nextQty,
+          amount: nextQty * item.unit_price,
+        })
+        .eq('id', id)
+        .eq('company_id', companyId);
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ['order-items', order.id] });
+      await queryClient.invalidateQueries({ queryKey: ['orders'] });
+    } catch (err) {
+      console.error('수량 자동저장 실패:', err);
+      alert('수량 저장 중 오류가 발생했습니다.');
+    } finally {
+      setQtyOverrides((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
+  };
+
+  // ───── 새 행 추가 모드 ─────
   const handleCancel = () => {
     setDraftItems([]);
     setEditMode(false);
@@ -107,6 +146,7 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
 
   const handleAddReturn = () => {
     if (!companyId || !order) return;
+    setEditMode(true);
     setDraftItems((prev) => [
       ...prev,
       createNewDraft({ orderId: order.id, companyId, isReturn: true }),
@@ -115,6 +155,7 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
 
   const handleAddOrderItem = () => {
     if (!companyId || !order) return;
+    setEditMode(true);
     setDraftItems((prev) => [
       ...prev,
       createNewDraft({ orderId: order.id, companyId, isReturn: false }),
@@ -172,36 +213,43 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
     }
   };
 
+  // 일반 모드: orderItems 만 표시 (수량은 인라인 편집).
+  // 새 행 추가 모드: orderItems + draftItems (신규 행만 별도 INSERT).
   const displayRows: Array<OrderItemRow | OrderItemDraft> = editMode
-    ? draftItems
+    ? [...orderItems, ...draftItems]
     : orderItems;
-  const tableTotal = displayRows.reduce(
-    (sum, it) =>
-      sum +
-      (editMode
-        ? (it as OrderItemDraft).quantity * it.unit_price
-        : (it as OrderItemRow).amount),
-    0,
-  );
+  const tableTotal = displayRows.reduce((sum, it) => {
+    if ((it as OrderItemDraft)._isNew) {
+      return sum + (it as OrderItemDraft).quantity * it.unit_price;
+    }
+    return sum + (it as OrderItemRow).amount;
+  }, 0);
 
   return (
     <div
       className="card-surface"
       style={{ padding: 0, position: 'sticky', top: 24, overflow: 'hidden' }}
     >
-      {/* Header */}
+      {/* Header — 압축형 */}
       <div
         style={{
-          padding: '16px 20px 14px',
+          padding: '8px 12px 6px',
           borderBottom: '1px solid var(--line)',
           background: 'var(--surface)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            flexWrap: 'wrap',
+          }}
+        >
           <span
             style={{
               fontFamily: 'var(--font-num)',
-              fontSize: 10.5,
+              fontSize: 10,
               color: 'var(--ink-3)',
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
@@ -212,7 +260,7 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
           <span
             style={{
               fontFamily: 'var(--font-num)',
-              fontSize: 13,
+              fontSize: 12,
               fontWeight: 600,
               color: 'var(--ink)',
             }}
@@ -225,55 +273,59 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
           <button
             type="button"
             className="btn-base ghost"
-            style={{ height: 28, fontSize: 12, padding: '0 8px' }}
+            style={{ height: 24, fontSize: 11, padding: '0 6px' }}
           >
-            <MoreHorizontal size={13} />
+            <MoreHorizontal size={12} />
           </button>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <GradeBadge grade={order.customer?.grade ?? null} size="md" />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <h2
-              className="disp"
-              style={{
-                fontSize: 20,
-                fontWeight: 500,
-                margin: 0,
-                letterSpacing: '-0.015em',
-                color: 'var(--ink)',
-              }}
-            >
-              {order.customer?.name ?? '—'}
-            </h2>
-            <div
-              style={{
-                fontSize: 11.5,
-                color: 'var(--ink-3)',
-                fontFamily: 'var(--font-num)',
-                marginTop: 2,
-              }}
-            >
-              {fmtDateTime(d)}
-              {order.creator && ` · 작성 ${order.creator.name}`}
-            </div>
-          </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginTop: 4,
+          }}
+        >
+          <GradeBadge grade={order.customer?.grade ?? null} size="sm" />
+          <h2
+            className="disp"
+            style={{
+              fontSize: 15,
+              fontWeight: 500,
+              margin: 0,
+              letterSpacing: '-0.01em',
+              color: 'var(--ink)',
+            }}
+          >
+            {order.customer?.name ?? '—'}
+          </h2>
+          <span
+            style={{
+              fontSize: 11,
+              color: 'var(--ink-3)',
+              fontFamily: 'var(--font-num)',
+            }}
+          >
+            {fmtDateTime(d)}
+            {order.creator && ` · ${order.creator.name}`}
+          </span>
         </div>
         {order.memo && (
           <div
             style={{
-              marginTop: 10,
-              padding: '7px 10px',
+              marginTop: 6,
+              padding: '5px 8px',
               background: 'var(--surface-2)',
               border: '1px solid var(--line)',
-              borderRadius: 8,
+              borderRadius: 6,
               display: 'flex',
               alignItems: 'center',
-              gap: 6,
-              fontSize: 11.5,
+              gap: 5,
+              fontSize: 11,
               color: 'var(--ink-2)',
             }}
           >
-            <Tag size={11} color="var(--ink-3)" strokeWidth={1.6} />
+            <Tag size={10} color="var(--ink-3)" strokeWidth={1.6} />
             <span>{order.memo}</span>
           </div>
         )}
@@ -303,18 +355,18 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
           <div
             key={i}
             style={{
-              padding: '12px 16px',
+              padding: '6px 12px',
               borderLeft: i === 0 ? 'none' : '1px solid var(--line)',
             }}
           >
             <div
               style={{
-                fontSize: 10,
+                fontSize: 9.5,
                 color: 'var(--ink-3)',
                 fontFamily: 'var(--font-num)',
                 letterSpacing: '0.1em',
                 textTransform: 'uppercase',
-                marginBottom: 3,
+                marginBottom: 1,
               }}
             >
               {s.label}
@@ -322,7 +374,7 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
             <div
               style={{
                 fontFamily: 'var(--font-num)',
-                fontSize: s.bold ? 16 : 14,
+                fontSize: s.bold ? 14 : 12,
                 fontWeight: s.bold ? 600 : 500,
                 color: 'var(--ink)',
                 fontVariantNumeric: 'tabular-nums',
@@ -352,32 +404,24 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
           <span>{displayRows.length}개 라인</span>
         </div>
 
-        {/* 버튼 행 */}
+        {/* 버튼 행 — 수량은 항상 인라인 편집(blur autosave). 행 추가만 별도 모드. */}
         <div className="flex gap-2 mb-3">
-          {!editMode ? (
-            <button
-              type="button"
-              onClick={handleEditClick}
-              className="px-3 py-1.5 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] transition-colors"
-            >
-              수정하기
-            </button>
-          ) : (
+          <button
+            type="button"
+            onClick={handleAddReturn}
+            className="px-3 py-1.5 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] transition-colors"
+          >
+            반품추가
+          </button>
+          <button
+            type="button"
+            onClick={handleAddOrderItem}
+            className="px-3 py-1.5 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] transition-colors"
+          >
+            주문추가
+          </button>
+          {editMode && (
             <>
-              <button
-                type="button"
-                onClick={handleAddReturn}
-                className="px-3 py-1.5 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] transition-colors"
-              >
-                반품추가
-              </button>
-              <button
-                type="button"
-                onClick={handleAddOrderItem}
-                className="px-3 py-1.5 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] transition-colors"
-              >
-                주문추가
-              </button>
               <button
                 type="button"
                 onClick={handleSave}
@@ -413,13 +457,17 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
               </thead>
               <tbody>
                 {displayRows.map((item) => {
-                  const isNewRow = editMode && (item as OrderItemDraft)._isNew === true;
-                  const qty = editMode
+                  const isNewRow = (item as OrderItemDraft)._isNew === true;
+                  // 신규 행: draft.quantity 직접 사용 + handleQtyChange (저장 전 임시)
+                  // 기존 행: orderItems.quantity 가 base, qtyOverrides 가 우선
+                  const displayQty = isNewRow
                     ? (item as OrderItemDraft).quantity
-                    : item.quantity;
-                  const rowAmount = editMode
+                    : (qtyOverrides[item.id] ?? item.quantity);
+                  const rowAmount = isNewRow
                     ? (item as OrderItemDraft).quantity * item.unit_price
-                    : (item as OrderItemRow).amount;
+                    : (qtyOverrides[item.id] !== undefined
+                        ? qtyOverrides[item.id] * item.unit_price
+                        : (item as OrderItemRow).amount);
                   // 🟠 거래처 포털 INSERT 정책: unit_price = 공급가.
                   //    OPS 수동주문입력 INSERT 정책: unit_price = 판매가.
                   //    혼재 가능하나 dogfooding 단계에서는 unit_price 를 공급가로 표시.
@@ -455,19 +503,39 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                         )}
                       </td>
                       <td className="py-1.5 px-2 text-right">
-                        {editMode ? (
-                          <input
-                            type="number"
-                            min={0}
-                            value={qty}
-                            onChange={(e) =>
-                              handleQtyChange(item.id, Number(e.target.value))
-                            }
-                            className="w-14 text-right border border-[var(--line-strong)] rounded px-1 py-0.5 bg-[var(--surface)] text-[var(--ink)] text-xs focus:outline-none focus:border-[var(--brand)]"
-                          />
-                        ) : (
-                          qty.toLocaleString()
-                        )}
+                        <input
+                          type="number"
+                          min={0}
+                          value={displayQty}
+                          onChange={(e) =>
+                            isNewRow
+                              ? handleQtyChange(item.id, Number(e.target.value))
+                              : handleQtyInput(item.id, Number(e.target.value))
+                          }
+                          onBlur={
+                            isNewRow ? undefined : () => handleQtyBlur(item.id)
+                          }
+                          onFocus={(e) => {
+                            e.currentTarget.style.border =
+                              '1px solid var(--brand)';
+                          }}
+                          onBlurCapture={(e) => {
+                            e.currentTarget.style.border =
+                              '1px solid transparent';
+                          }}
+                          style={{
+                            width: 52,
+                            textAlign: 'right',
+                            border: '1px solid transparent',
+                            borderRadius: 4,
+                            padding: '2px 4px',
+                            fontSize: 12,
+                            background: 'transparent',
+                            outline: 'none',
+                            color: 'var(--ink)',
+                            fontVariantNumeric: 'tabular-nums',
+                          }}
+                        />
                       </td>
                       <td className="py-1.5 px-2 text-right font-num">
                         {item.unit_price.toLocaleString()}
@@ -581,30 +649,6 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
       </div>
     </div>
   );
-}
-
-function toDraft(it: OrderItemRow): OrderItemDraft {
-  return {
-    id: it.id,
-    company_id: it.company_id,
-    order_id: it.order_id,
-    product_id: it.product_id,
-    quantity: it.quantity,
-    unit_price: it.unit_price,
-    amount: it.amount,
-    is_return: it.is_return,
-    deleted_at: it.deleted_at,
-    product_code: it.product_code,
-    product_name: it.product_name,
-    supply_price: it.supply_price,
-    grade_a: it.grade_a,
-    grade_b: it.grade_b,
-    grade_c: it.grade_c,
-    grade_d: it.grade_d,
-    grade_e: it.grade_e,
-    _dirty: false,
-    _isNew: false,
-  };
 }
 
 function createNewDraft(args: {
