@@ -14,6 +14,8 @@ export interface OrderProductRef {
   id: string;
   code: string;
   name: string;
+  /** 제품 카테고리 — 거래명세서에서 sub-header 그룹핑 키. */
+  category?: string | null;
   /** 카탈로그 판매가 — 거래명세서 "판매가" 컬럼 출력용. */
   sell_price?: number;
   /** 거래처 등급별 공급율 (A~E). 거래명세서에서 unit_price × grade_X 로 공급가 계산. */

@@ -227,6 +227,7 @@ export function OrdersPage() {
           product: {
             code: it.product?.code ?? '',
             name: it.product?.name ?? '',
+            category: it.product?.category ?? null,
             sell_price: it.product?.sell_price,
             grade_a: it.product?.grade_a ?? null,
             grade_b: it.product?.grade_b ?? null,
