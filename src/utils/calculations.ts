@@ -983,3 +983,17 @@ export function calcReceivableCards(
       order[a.badge] - order[b.badge] || a.customer_name.localeCompare(b.customer_name),
   );
 }
+
+/**
+ * 월차감 거래처 정상 입금 여부 판정.
+ * 실입금 + 차감액 ≥ 미수금 → true.
+ *
+ * 예: 한가람문구 미수금 100,000원 · 실입금 97,800원 · 차감 2,200원 = 100,000원 → 정상.
+ */
+export function isNormalPaymentWithDeduction(
+  amount: number,
+  deductionApplied: number,
+  outstanding: number,
+): boolean {
+  return amount + deductionApplied >= outstanding;
+}

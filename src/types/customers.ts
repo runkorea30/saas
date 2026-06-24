@@ -31,3 +31,24 @@ export interface GroupPayment {
   created_at: string;
   updated_at: string;
 }
+
+/**
+ * 미수금 요약 (receivables_summary 뷰).
+ *
+ * - entity_key: 'group:{uuid}' 또는 'customer:{uuid}'
+ * - is_group=true: 그룹 멤버들의 매출/입금 합산
+ * - total_paid: bank_transactions(matched) + group_payments 합산
+ */
+export interface ReceivableSummary {
+  entity_key: string;
+  display_name: string;
+  billing_name: string;
+  is_group: boolean;
+  group_id: string | null;
+  total_billed: number;
+  total_paid: number;
+  outstanding: number;
+  monthly_deduction: number;
+  deduction_note: string | null;
+  company_id: string;
+}

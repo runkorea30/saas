@@ -1532,7 +1532,22 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      receivables_summary: {
+        Row: {
+          billing_name: string
+          company_id: string
+          deduction_note: string | null
+          display_name: string
+          entity_key: string
+          group_id: string | null
+          is_group: boolean
+          monthly_deduction: number
+          outstanding: number
+          total_billed: number
+          total_paid: number
+        }
+        Relationships: []
+      }
     }
     Functions: {
       current_company_ids: { Args: never; Returns: string[] }
