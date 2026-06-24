@@ -29,6 +29,7 @@
 | Phase 3.20 | 입금 분할 기능 + 허용 오차(100원) 정산완료 처리 (bank_transaction_splits) | ✅ 완료 (2026-06-25, 브라우저 검증 미수행) |
 | Phase 3.21 | 세금계산서대장 페이지 (`/finance/tax-invoices`) — 사업자번호 단위 발행 + 국세청 일괄발급 엑셀 다운로드 | ✅ 완료 (2026-06-25) |
 | Phase 3.22 | 미수금 페이지 — 월별 정산마감 기준 미수금/정산대기 재계산 + 카드 배경색 3단계 + 필터 4종 | ✅ 완료 (2026-06-25) |
+| Phase 3.23 | 주문내역 UI 정리 + 거래명세서 인쇄 + 재고부족 자동조정 + 수동주문 공급가 폴백 | ✅ 완료 (2026-06-25) |
 | Phase 4 | 나머지 페이지 + Auth 도입 | 대기 |
 
 **페이지 진도: 12 / 13 구현 완료** (`/finance/pnl` 만 남음)
@@ -68,6 +69,108 @@
   - 컬럼간격 드래그 리사이저 (현재는 fixed/flex 토글만)
   - 우상단 "자동수집 OFF" + "수집/팩스" 영역 (의미 미정의)
   - 파일 자체를 서버 업로드 (현재는 클라이언트 미리보기만)
+
+---
+
+## 오늘 추가된 작업 요약 (2026-06-25, 주문내역 UI · 거래명세서 · 재고 자동조정)
+
+### 판매 > 주문내역 페이지 (Phase 3.23) — `/sales/orders`
+
+이번 세션 11건 커밋 (`8ffbece` → `b8b2c5d`).
+
+#### 주문 삭제 기능 (`8ffbece`, `c7ac9d6`)
+- `OrderListTable` 행 hover 시 `Trash2` 아이콘 표시. confirm 후 soft delete.
+- `order_items` 우선 `deleted_at = NOW()` UPDATE → `orders` UPDATE → invalidate (`orders`, `inventory-stock`).
+- 재고는 `calcCurrentStockByProduct`가 `order_items` 판매수량 차감으로 계산하므로 자동 복원 (별도 `inventory_lots` 조작 불필요).
+- 에러 핸들링: 단계별 분기 + `error.message` alert 노출. 캐시 키도 `companyId` 포함으로 정확화.
+- DB 정책: `anon UPDATE` on `orders` / `order_items` 추가 (사용자가 직접 적용 — 세션 중 RLS 거부 발생 후 보강).
+
+#### 오른쪽 패널 헤더 정리 (`8ffbece`)
+- 라인 N건 / 수량 N ea / 총액 N원 stats row 삭제.
+- 거래처명 옆에 `138,840원` 형태로 총액 표시.
+- 반품추가 / 주문추가 버튼을 헤더 우측으로 이동 (테이블 위 중복 버튼 제거).
+
+#### 인라인 추가 행 자동완성 (`8ffbece`, `4f0fb24`)
+- 기존 `<select>` → 코드/제품명 input + 드롭다운 양방향 자동완성.
+- 매칭 방식: `includes` (대소문자 무시 부분일치, prefix 아님 — 사용자 명시).
+- Enter/Tab 키보드 확정 핸들러 (`handleAutocompleteKeyDown`): 정확일치 / 단일 후보 → 즉시 적용.
+- 거래처 grade 기반 공급가 자동계산: `calcSupplyPriceByCustomerGrade(sell_price, grade, product)`.
+- 수량 input: 신규 행은 `min=1`, `value` 0일 때 빈 문자열 + `placeholder="수량"`. 기존 행은 0 명시 표시.
+- 저장 검증: `'제품을 선택해주세요'` / `'수량을 입력해주세요'` alert 2종.
+- 반품 INSERT 시 `quantity`·`amount` 음수 저장 (`calculations.ts`·OrderEntry RPC와 정합).
+- 저장 후 `orders.total_amount` 재계산 UPDATE.
+
+#### 헤더·필터·소계 정리 (`4f0fb24`)
+- 페이지 헤더 1열에 제목·기간 Segmented·날짜 picker·거래처/상태 MultiChip·엑셀·주문추가 통합 → 요약(건수/총액/순액/평균)은 2열로 분리.
+- `OrderFilterBar.tsx` 컴포넌트 사용 0건 → 파일 통째 `git rm`.
+- 우측 디테일에서 판매소계/VAT 포함분/합계 KRW 블록 + `TotalRow` 컴포넌트 + `calcSupplyAmount` import 삭제.
+- 출고처리/거래명세서/송장인쇄 액션 row 삭제 + `Truck`·`Printer` lucide import 정리.
+
+### 거래명세서 인쇄 (`24f2c02` → `dc6ca94`)
+
+#### 신규 파일 `src/components/feature/orders/InvoicePrintView.tsx`
+- 헤더 2단: 좌(거래처 귀하 / 날짜 / 안내문 / 은행계좌) | 우(공급자 테이블).
+- 공급자 박스: `rowSpan=4` + width 48px 가로쓰기 + 2컬럼 `&nbsp;` 라벨/값 단순 구조 (초기 `writingMode: vertical-rl` 깨짐 → `91f3863`에서 가로쓰기로 전환).
+- 주문 섹션 N개: "주문서" / "추가주문" 배지 + `memo` 에 "직송" 포함 시 옵션 칩 추가. 섹션 헤더에서 날짜·order id 제거 (`9551b8d`).
+- 카테고리(`products.category`) 기준 `localeCompare('ko')` 오름차순 정렬 + 변경 시점에 sub-row 삽입 (`dc6ca94`). 빈 카테고리는 헤더 없이 표시.
+- 표 컬럼: `No · 제품명 · 코드 · 수량 · 공급가 · 판매가 · 합계` + 소계. No는 섹션 내 카테고리 가로질러 연속 증가.
+- 푸터: 받는사람(이름만, 주소/전화 모두 삭제) + 그랜드 합계 (섹션 ≥ 2 일 때만 표시).
+- 공급가 계산: `computeSupplyPrice(item, customerGrade)` → `calcSupplyPriceByCustomerGrade`. grade 없거나 결과 0이면 `unit_price` 폴백.
+- 합계는 `it.amount` (DB 저장값) 그대로 사용 — 수량 × 공급가 재계산 금지.
+
+#### `OrdersPage` 인쇄 트리거
+- 헤더에 `거래명세서 (N)` 버튼 (체크 0건이면 disabled).
+- 클릭 시 `filtered.filter(checked)` → `customer_id` 그룹핑 → 각 그룹 주문 날짜 오름차순 정렬 → 거래처명순 정렬.
+- `createPortal` 로 body 직속 `.invoice-print-portal` 렌더 → setTimeout 300ms 후 `window.print()` → state 초기화.
+
+#### CSS — `src/index.css`
+- `@media print { body > #root { display: none } body > .invoice-print-portal { display: block } @page { size: A4; margin: 12mm 10mm } }`.
+- `.invoice-page-break` / `.invoice-no-break` 클래스 추가 후 빈 페이지 원인으로 판명 → 인라인 `pageBreakAfter: isLast ? 'auto' : 'always'` 로 이전 + 클래스 삭제 (`91f3863`).
+- `page-break-inside: avoid` 가 헤더·주문 섹션·합계 바 3곳에 모두 적용되어 페이지 잔여 공간 발생 시 다음 페이지로 통째 미루며 빈 페이지 생성 → 모두 제거.
+
+#### `useOrders` ORDER_SELECT 확장
+- `customer:customers(id, name, grade)` 유지 (initially `delivery_address`, `contact1` 추가했다가 받는사람 행 제거하면서 롤백).
+- `product:products(... category, sell_price, grade_a..e)` 추가 — 카테고리 그룹핑·공급가 계산용.
+
+### 재고부족 자동조정 (`17a2fbb` → `fd15a17`)
+
+#### DB 변경
+- `mochicraft_demo.order_items.original_quantity INTEGER DEFAULT NULL` 컬럼 추가 (사용자 사전 적용).
+- `insert_order` RPC 갱신 (마이그레이션 `insert_order_with_original_quantity`): `order_items` INSERT 컬럼에 `original_quantity` 포함, jsonb 매핑 `NULLIF(v_item->>'original_quantity', '')::integer`.
+
+#### 저장 시점 자동조정 (`fd15a17`) — 기존 "재고 확인" 수동 버튼 폐기
+- **OrderDetailPane.handleSave**: 신규 draft 행 중 비반품·재고부족 행 추출 → `finalQty = max(0, stock)`, `originalQty = item.quantity` → INSERT payload `original_quantity` 포함. 조정된 수량 기준 `orders.total_amount` 재계산. 누적 메시지 alert.
+- **OrderEntryPage.handleSave** (수동주문입력): RPC 호출 전 valid 행에 동일 패스. `finalQty=0` 행은 RPC에서 제외 (insert_order amount 합산 무의미). 전 품목 결품이면 저장 차단.
+- 화면 갱신: `['order-items', orderId]` + `['orders', companyId]` + `['inventory-stock', companyId]` 무효화.
+
+#### 수량 셀 표시
+- **OrderDetailPane**: 사전 조정 시 input 빨간색 + bold + tooltip `재고부족 — 현재재고 N (요청 M)`. `original_quantity != null` 이면 옆에 `~~original_quantity~~` 회색 취소선. 신규 행만 `0 → 빈문자열` 변환, 기존 행은 `0` 명시 (품절 자동조정 결과를 가시화).
+- **InvoicePrintView**: `original_quantity != null` 이면 수량 셀에 `{quantity} ~~{original_quantity}~~` (`marginLeft 4px`, `color #aaa`, `line-through`, `fontSize 0.85em`). 품절(0) 행도 거래처 안내 목적으로 그대로 출력.
+
+#### 알려진 이슈
+- `OrderDetailPane.handleSave`의 INSERT payload는 Supabase 자동생성 타입에 `original_quantity` 미반영 → 타입 단언(`as unknown as {...}`)으로 우회. `supabase gen types typescript --schema mochicraft_demo` 재실행 후 단언 제거 권장.
+- **재고 자동조정 quantity=0 INSERT 누락**: `OrderEntryPage.handleSave` 가 `itemsForRpc = adjusted.filter(a => Math.abs(a.finalQty) > 0)` 로 결품(=0) 행을 RPC에서 제외 중. `OrderDetailPane` 는 quantity=0도 INSERT (정책 불일치). 다음 세션에서 통일 결정 필요 — 0 행도 명세서에 표시해 거래처에 결품 통지하려면 INSERT 유지가 맞음.
+
+### 수동주문입력 공급가 자동계산 폴백 (`b8b2c5d`)
+
+#### 진단
+- 기존 `gradeRateOf(product, grade)`가 grade null/undefined일 때 빈 키 `grade_` 생성 → `0` 반환.
+- `calcSupplyPriceByGrade(sell_price, 0)`은 `if (!gradeRate) return 0` 조기 종료 → 공급가 0 출력.
+- 결과: grade 미설정 거래처에서 공급가가 `—` 로 표시.
+
+#### 수정
+- `import { calcSupplyPriceByGrade }` → `calcSupplyPriceByCustomerGrade` (단일 진입점).
+- 상수 `DEFAULT_CUSTOMER_GRADE = 'a'` 정의.
+- `gradeRateOf` 헬퍼 삭제. 신규 `computeSupply(product, grade)` — 내부에서 `grade ?? 'a'` 폴백 후 `calcSupplyPriceByCustomerGrade(sell_price, grade, product)` 호출.
+- 적용 위치: `applyProduct`, `handleCustomerChange`, Excel 파싱 — 모두 동일 호출로 통일.
+- DB의 `products.grade_a..grade_e` 자체가 NULL이면 폴백 의미 없음 → products 페이지에서 등급별 공급율 등록 필요.
+
+### 다음 세션 후속 작업 (사용자 명시)
+
+1. **재고 자동조정 quantity=0 INSERT 정책 통일** — `OrderEntryPage` 에서 filter 제거하여 결품 행도 INSERT 시키도록 `OrderDetailPane` 패턴으로 통일.
+2. **거래처 주문서 업로드 페이지(`/customer-order`) 재고부족 동일 표시** — 거래처 포털에서도 자동조정 + 원본수량 취소선.
+3. **추가주문 구분 표시** — `orders.is_additional` 컬럼 신설 + `InvoicePrintView` 섹션 라벨 결정 로직 보강 (현재는 customer 그룹 내 날짜순 index 기반).
+4. (완료) ~~수동주문입력 공급가 자동계산~~ — `b8b2c5d`로 완료.
 
 ---
 
