@@ -174,19 +174,20 @@ export function ReceivablesPage() {
   const { data: summaries = [], isLoading, error } =
     useReceivablesSummary(companyId);
 
+  const now = new Date();
   const [drilldownEntity, setDrilldownEntity] =
     useState<ReceivableSummary | null>(null);
   const [paymentTarget, setPaymentTarget] =
     useState<ReceivableSummary | null>(null);
 
-  // 필터: 미수금 양수만 / 0 또는 음수까지 / 그룹만
-  const [filter, setFilter] = useState<'positive' | 'all' | 'group'>('positive');
+  // 필터: 미수금 양수만 / 전체 / 그룹만. 기본은 '전체'.
+  const [filter, setFilter] = useState<'positive' | 'all' | 'group'>('all');
 
-  // 뷰 모드: 테이블 / 카드 (localStorage 유지)
+  // 뷰 모드: 테이블 / 카드 (localStorage 유지). 기본은 '카드'.
   const [viewMode, setViewMode] = useState<'table' | 'card'>(() => {
-    if (typeof window === 'undefined') return 'table';
+    if (typeof window === 'undefined') return 'card';
     const saved = window.localStorage.getItem('receivables-view');
-    return saved === 'card' ? 'card' : 'table';
+    return saved === 'table' ? 'table' : 'card';
   });
 
   const changeViewMode = (mode: 'table' | 'card') => {
@@ -198,18 +199,93 @@ export function ReceivablesPage() {
     }
   };
 
+  // ───── 카드 상태(정산대기/연체) 계산용 데이터 ─────
+  const ordersForReconQuery = useOrdersForReconciliation();
+  const txForReconQuery = useBankTransactions(now.getFullYear(), null);
+  const splitsForReconQuery = useBankTransactionSplits();
+
+  const customerGroupMapQuery = useQuery<Array<{ id: string; group_id: string | null }>>({
+    queryKey: ['receivables-customer-group-map', companyId],
+    enabled: Boolean(companyId),
+    queryFn: async () =>
+      fetchAllRows<{ id: string; group_id: string | null }>(() =>
+        supabase
+          .from('customers')
+          .select('id, group_id')
+          .eq('company_id', companyId!)
+          .is('deleted_at', null),
+      ),
+    staleTime: 60_000,
+  });
+
+  // entity_key → 정산대기/연체 합계. ReconciliationTab 과 동일 로직 (현재 연도 기준).
+  const { pendingByEntity, overdueByEntity } = useMemo(() => {
+    const pending = new Map<string, number>();
+    const overdue = new Map<string, number>();
+    const customers = customerGroupMapQuery.data ?? [];
+    const orders = ordersForReconQuery.data ?? [];
+    const transactions = txForReconQuery.data ?? [];
+    const splits = splitsForReconQuery.data ?? [];
+
+    if (customers.length === 0 || orders.length === 0) {
+      return { pendingByEntity: pending, overdueByEntity: overdue };
+    }
+
+    // customer_id → entity_key (group_id 있으면 'group:...', 없으면 'customer:...')
+    const entityKeyByCustomer = new Map<string, string>();
+    for (const c of customers) {
+      entityKeyByCustomer.set(
+        c.id,
+        c.group_id ? `group:${c.group_id}` : `customer:${c.id}`,
+      );
+    }
+
+    const recon = calcMonthlyReconciliation(
+      orders,
+      transactions.map((t) => ({
+        id: t.id,
+        customer_id: t.customer_id,
+        transaction_date: t.transaction_date.slice(0, 10),
+        amount: t.amount,
+        match_status: t.match_status,
+        target_sales_month: t.target_sales_month,
+      })),
+      splits,
+      new Date(),
+      PAYMENT_TOLERANCE_AMOUNT,
+    );
+
+    for (const r of recon) {
+      const key = entityKeyByCustomer.get(r.customer_id);
+      if (!key) continue;
+      if (r.status === '정산대기') {
+        pending.set(key, (pending.get(key) ?? 0) + r.difference);
+      } else if (r.status === '연체') {
+        overdue.set(key, (overdue.get(key) ?? 0) + r.difference);
+      }
+    }
+
+    return { pendingByEntity: pending, overdueByEntity: overdue };
+  }, [
+    customerGroupMapQuery.data,
+    ordersForReconQuery.data,
+    txForReconQuery.data,
+    splitsForReconQuery.data,
+  ]);
+
   const filtered = useMemo(() => {
     if (filter === 'all') return summaries;
     if (filter === 'group') return summaries.filter((s) => s.is_group);
     return summaries.filter((s) => s.outstanding > 0);
   }, [summaries, filter]);
 
+  // 총 미수금: 음수(초과입금) 거래처는 제외하고 양수만 합산 (실제 미수 잔액).
   const totals = useMemo(() => {
     return summaries.reduce(
       (acc, s) => ({
         billed: acc.billed + s.total_billed,
         paid: acc.paid + s.total_paid,
-        outstanding: acc.outstanding + s.outstanding,
+        outstanding: acc.outstanding + Math.max(0, s.outstanding),
       }),
       { billed: 0, paid: 0, outstanding: 0 },
     );
@@ -331,6 +407,8 @@ export function ReceivablesPage() {
         ) : viewMode === 'card' ? (
           <ReceivablesCardGrid
             rows={filtered}
+            pendingByEntity={pendingByEntity}
+            overdueByEntity={overdueByEntity}
             onCardClick={setDrilldownEntity}
             onPaymentClick={setPaymentTarget}
           />
@@ -530,12 +608,9 @@ function ReceivableRow({
   onRowClick: (e: ReceivableSummary) => void;
   onPaymentClick: (e: ReceivableSummary) => void;
 }) {
-  const outstandingColor =
-    row.outstanding > 0
-      ? 'var(--danger)'
-      : row.outstanding < 0
-        ? 'var(--info, #2563eb)'
-        : 'var(--success, #16a34a)';
+  // 음수(초과입금) 는 ₩0 회색으로 표시
+  const receivable = Math.max(0, row.outstanding);
+  const outstandingColor = receivable > 0 ? 'var(--danger)' : 'var(--ink-3)';
 
   return (
     <tr
@@ -587,7 +662,7 @@ function ReceivableRow({
           fontWeight: 600,
         }}
       >
-        ₩{fmtWon(row.outstanding)}
+        ₩{fmtWon(receivable)}
       </td>
       <td style={{ ...tdStyle('right'), ...numStyle }}>
         {row.monthly_deduction > 0 ? (
@@ -742,10 +817,14 @@ function ToggleBtn({
 
 function ReceivablesCardGrid({
   rows,
+  pendingByEntity,
+  overdueByEntity,
   onCardClick,
   onPaymentClick,
 }: {
   rows: ReceivableSummary[];
+  pendingByEntity: Map<string, number>;
+  overdueByEntity: Map<string, number>;
   onCardClick: (e: ReceivableSummary) => void;
   onPaymentClick: (e: ReceivableSummary) => void;
 }) {
@@ -761,6 +840,8 @@ function ReceivablesCardGrid({
         <ReceivableCard
           key={r.entity_key}
           item={r}
+          pendingAmount={pendingByEntity.get(r.entity_key) ?? 0}
+          overdueAmount={overdueByEntity.get(r.entity_key) ?? 0}
           onClick={() => onCardClick(r)}
           onPayment={(e) => {
             e.stopPropagation();
@@ -772,29 +853,43 @@ function ReceivablesCardGrid({
   );
 }
 
+// 카드 상태 색상 토큰 (var() 우선, 미정의 시 hex fallback)
+const COLOR_DANGER = 'var(--danger, #dc2626)';
+const COLOR_AMBER = 'var(--warning, #d97706)';
+const COLOR_AMBER_BORDER = 'var(--warning-border, #fbbf24)';
+const COLOR_SUCCESS = 'var(--success, #16a34a)';
+
 function ReceivableCard({
   item,
+  pendingAmount,
+  overdueAmount,
   onClick,
   onPayment,
 }: {
   item: ReceivableSummary;
+  pendingAmount: number;
+  overdueAmount: number;
   onClick: () => void;
   onPayment: (e: React.MouseEvent) => void;
 }) {
-  const isOverdue = item.outstanding > 0;
-  const isCredit = item.outstanding < 0;
+  // 음수 outstanding 은 0으로 클램프 (초과입금은 미수금으로 노출하지 않음).
+  const receivable = Math.max(0, item.outstanding);
+  const hasReceivable = receivable > 0;
+  const hasPending = pendingAmount > 0;
 
-  const outstandingColor = isCredit
-    ? 'var(--info, #2563eb)'
-    : isOverdue
-      ? 'var(--danger)'
-      : 'var(--success, #16a34a)';
-
-  const dotColor = isCredit
-    ? 'var(--info, #2563eb)'
-    : isOverdue
-      ? 'var(--danger)'
-      : 'var(--success, #16a34a)';
+  // 카드 색상 3단계: 미수금(빨강) → 정산대기만(주황) → 정상(기본+초록 dot)
+  let borderColor = 'var(--line)';
+  let dotColor: string = COLOR_SUCCESS;
+  let dotLabel = '정산완료';
+  if (hasReceivable) {
+    borderColor = COLOR_DANGER;
+    dotColor = COLOR_DANGER;
+    dotLabel = '미수금 발생';
+  } else if (hasPending) {
+    borderColor = COLOR_AMBER_BORDER;
+    dotColor = COLOR_AMBER;
+    dotLabel = '정산대기';
+  }
 
   return (
     <div
@@ -809,7 +904,7 @@ function ReceivableCard({
       }}
       style={{
         background: 'var(--surface)',
-        border: '1px solid var(--line)',
+        border: `1px solid ${borderColor}`,
         borderRadius: 12,
         padding: 14,
         cursor: 'pointer',
@@ -820,11 +915,9 @@ function ReceivableCard({
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.boxShadow = 'var(--shadow-md, 0 4px 12px rgba(0,0,0,.06))';
-        e.currentTarget.style.borderColor = 'var(--brand)';
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.boxShadow = 'none';
-        e.currentTarget.style.borderColor = 'var(--line)';
       }}
     >
       {/* 헤더: 이름/배지 + 상태 dot */}
@@ -871,12 +964,8 @@ function ReceivableCard({
           )}
         </div>
         <span
-          aria-label={
-            isCredit ? '초과 입금' : isOverdue ? '미수금 발생' : '정산 완료'
-          }
-          title={
-            isCredit ? '초과 입금' : isOverdue ? '미수금 발생' : '정산 완료'
-          }
+          aria-label={dotLabel}
+          title={dotLabel}
           style={{
             width: 10,
             height: 10,
@@ -888,7 +977,7 @@ function ReceivableCard({
         />
       </div>
 
-      {/* 금액 영역 */}
+      {/* 금액 영역 — 상태별 표시 항목 분기 */}
       <div
         style={{
           display: 'flex',
@@ -899,19 +988,45 @@ function ReceivableCard({
       >
         <CardRow label="청구액" value={item.total_billed} muted />
         <CardRow label="입금액" value={item.total_paid} muted />
-        <div
-          style={{
-            height: 1,
-            background: 'var(--line)',
-            margin: '2px 0',
-          }}
-        />
-        <CardRow
-          label="미수금"
-          value={item.outstanding}
-          emphasis
-          color={outstandingColor}
-        />
+        {(hasReceivable || hasPending) && (
+          <div
+            style={{
+              height: 1,
+              background: 'var(--line)',
+              margin: '2px 0',
+            }}
+          />
+        )}
+        {hasReceivable && (
+          <CardRow
+            label="미수금"
+            value={receivable}
+            emphasis
+            color={COLOR_DANGER}
+            subValue={overdueAmount > 0 && overdueAmount !== receivable ? `연체 ₩${fmtWon(overdueAmount)}` : undefined}
+          />
+        )}
+        {!hasReceivable && hasPending && (
+          <CardRow
+            label="정산대기"
+            value={pendingAmount}
+            emphasis
+            color={COLOR_AMBER}
+          />
+        )}
+        {!hasReceivable && !hasPending && (
+          <div
+            style={{
+              fontSize: 11.5,
+              color: COLOR_SUCCESS,
+              fontWeight: 500,
+              textAlign: 'right',
+              paddingTop: 2,
+            }}
+          >
+            ✓ 정산 완료
+          </div>
+        )}
       </div>
 
       {/* 푸터: 월차감 + 입금 등록 */}
@@ -962,12 +1077,14 @@ function CardRow({
   muted,
   emphasis,
   color,
+  subValue,
 }: {
   label: string;
   value: number;
   muted?: boolean;
   emphasis?: boolean;
   color?: string;
+  subValue?: string;
 }) {
   return (
     <div
@@ -985,17 +1102,32 @@ function CardRow({
       >
         {label}
       </span>
-      <span
-        className="num"
-        style={{
-          color: color ?? (muted ? 'var(--ink-2)' : 'var(--ink)'),
-          fontWeight: emphasis ? 700 : 500,
-          fontVariantNumeric: 'tabular-nums',
-          fontFamily: 'var(--font-num)',
-        }}
-      >
-        ₩{fmtWon(value)}
-      </span>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+        <span
+          className="num"
+          style={{
+            color: color ?? (muted ? 'var(--ink-2)' : 'var(--ink)'),
+            fontWeight: emphasis ? 700 : 500,
+            fontVariantNumeric: 'tabular-nums',
+            fontFamily: 'var(--font-num)',
+          }}
+        >
+          ₩{fmtWon(value)}
+        </span>
+        {subValue && (
+          <span
+            style={{
+              fontSize: 10.5,
+              color: 'var(--ink-3)',
+              fontVariantNumeric: 'tabular-nums',
+              fontFamily: 'var(--font-num)',
+              marginTop: 1,
+            }}
+          >
+            {subValue}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -1015,7 +1147,8 @@ function DrilldownModal({
   onClose: () => void;
   onOpenPayment: () => void;
 }) {
-  const [tab, setTab] = useState<DrillTab>('orders');
+  // 기본 탭: 월별 정산 (사용 빈도가 가장 높음)
+  const [tab, setTab] = useState<DrillTab>('reconciliation');
   const { companyId } = useCompany();
 
   return (
@@ -1061,11 +1194,11 @@ function DrilldownModal({
         <SummaryInline label="입금액" value={entity.total_paid} />
         <SummaryInline
           label="미수금"
-          value={entity.outstanding}
+          value={Math.max(0, entity.outstanding)}
           color={
             entity.outstanding > 0
               ? 'var(--danger)'
-              : 'var(--success, #16a34a)'
+              : 'var(--ink-3)'
           }
         />
         {entity.monthly_deduction > 0 && (
@@ -1807,11 +1940,11 @@ function PaymentModal({
               color:
                 target.outstanding > 0
                   ? 'var(--danger)'
-                  : 'var(--success, #16a34a)',
+                  : 'var(--ink-3)',
               fontVariantNumeric: 'tabular-nums',
             }}
           >
-            ₩{fmtWon(target.outstanding)}
+            ₩{fmtWon(Math.max(0, target.outstanding))}
           </div>
         </Field>
 
@@ -1932,15 +2065,19 @@ function PaymentModal({
               style={{
                 marginTop: 4,
                 color:
-                  totalApplied >= target.outstanding
+                  totalApplied >= Math.max(0, target.outstanding)
                     ? 'var(--success, #16a34a)'
                     : 'var(--ink-3)',
                 fontWeight: 500,
               }}
             >
-              {totalApplied >= target.outstanding
-                ? `미수금 완전 정산 (잔여 ₩${fmtWon(totalApplied - target.outstanding)} 초과 입금)`
-                : `미수금 잔여 ₩${fmtWon(target.outstanding - totalApplied)}`}
+              {(() => {
+                const receivable = Math.max(0, target.outstanding);
+                if (receivable === 0) return '현재 미수금이 없습니다.';
+                return totalApplied >= receivable
+                  ? `미수금 완전 정산 (잔여 ₩${fmtWon(totalApplied - receivable)} 초과 입금)`
+                  : `미수금 잔여 ₩${fmtWon(receivable - totalApplied)}`;
+              })()}
             </div>
           </div>
         )}
