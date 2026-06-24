@@ -540,20 +540,9 @@ export function OrderEntryPage() {
       }
       return { row: r, finalQty: r.quantity, originalQty: null };
     });
-    // 조정 결과 finalQty=0 인 행은 RPC에 보내지 않음 (insert_order amount 합산 무의미).
-    // 다만 사용자에게는 결품 사실을 알리기 위해 메시지는 유지.
-    const itemsForRpc = adjusted.filter((a) => Math.abs(a.finalQty) > 0);
-    if (itemsForRpc.length === 0) {
-      if (shortageMsgs.length > 0) {
-        alert(
-          '모든 품목이 결품 상태로 조정되어 저장할 수 없습니다:\n\n' +
-            shortageMsgs.join('\n'),
-        );
-      } else {
-        alert('주문 항목을 1개 이상 입력해주세요.');
-      }
-      return;
-    }
+    // 🔴 결품(finalQty=0) 행도 INSERT — OrderDetailPane 정책과 통일.
+    //    거래명세서에 `0 ~~원본수량~~` 형태로 표시되어 거래처에 결품 통지 가능.
+    const itemsForRpc = adjusted;
 
     setIsSaving(true);
     try {
