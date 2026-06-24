@@ -147,16 +147,42 @@ function isDirectShipping(memo: string | null): boolean {
   return !!memo && memo.includes('직송');
 }
 
-/** 주문 소계 = Σ(quantity × supply_price). 공급가 누락 품목은 0. */
-function calcSupplySubtotal(order: OrderDetail): number {
-  return order.items.reduce((s, it) => {
-    const sp = it.product?.supply_price ?? 0;
-    return s + it.quantity * sp;
-  }, 0);
+/**
+ * 주문 소계 = Σ(items.amount).
+ * 🟠 items.amount 는 주문 시점에 저장된 quantity × unit_price 값 → 단일 진실 원본.
+ *    products.supply_price 기반 계산(이전 calcOrderTotal) 은 supply_price=0 인 제품에서
+ *    소계가 0으로 표시되는 문제가 있어 폐기.
+ */
+function calcOrderTotal(order: OrderDetail): number {
+  return order.items.reduce((s, it) => s + (it.amount ?? 0), 0);
 }
 
 function fmtWon(v: number): string {
   return `₩${v.toLocaleString('ko-KR')}`;
+}
+
+/**
+ * 한국 표준시(KST = UTC+9) 기준 오늘의 [start, endExclusive) 범위.
+ * 브라우저 timezone 과 무관하게 동일 결과 — Vercel 환경(UTC) 에서도 KST 기준 오늘을 가져온다.
+ */
+function kstTodayRange(): { start: Date; endExclusive: Date } {
+  const kstNow = new Date(Date.now() + 9 * 3600 * 1000);
+  const todayStr = kstNow.toISOString().slice(0, 10);
+  const start = new Date(`${todayStr}T00:00:00+09:00`);
+  const endExclusive = new Date(start.getTime() + 24 * 3600 * 1000);
+  return { start, endExclusive };
+}
+
+/** KST 기준 [year, month) 월의 [start, endExclusive) 범위. month 는 1~12. */
+function kstMonthRange(
+  year: number,
+  month: number,
+): { start: Date; endExclusive: Date } {
+  const start = new Date(`${year}-${pad2(month)}-01T00:00:00+09:00`);
+  const y2 = month === 12 ? year + 1 : year;
+  const m2 = month === 12 ? 1 : month + 1;
+  const endExclusive = new Date(`${y2}-${pad2(m2)}-01T00:00:00+09:00`);
+  return { start, endExclusive };
 }
 
 export function CustomerOrderPage() {
@@ -793,24 +819,21 @@ function TodayOrders({
   fontScale: number;
 }) {
   const todayQuery = useQuery<OrderDetail[]>({
-    queryKey: ['customer-orders-today-v2', customer.customerId],
+    queryKey: ['customer-orders-today-v3', customer.customerId],
     queryFn: async () => {
-      const start = new Date();
-      start.setHours(0, 0, 0, 0);
-      const end = new Date();
-      end.setHours(23, 59, 59, 999);
+      const { start, endExclusive } = kstTodayRange();
       return fetchOrdersWithItems(
         customer.companyId,
         customer.customerId,
         start,
-        end,
+        endExclusive,
       );
     },
     staleTime: 15_000,
   });
 
   const orders = todayQuery.data ?? [];
-  const totalSum = orders.reduce((s, o) => s + calcSupplySubtotal(o), 0);
+  const totalSum = orders.reduce((s, o) => s + calcOrderTotal(o), 0);
   const baseFont = 12 * fontScale;
 
   return (
@@ -889,22 +912,21 @@ function MonthlyOrders({
   const { showToast } = useToast();
 
   const monthlyQuery = useQuery<OrderDetail[]>({
-    queryKey: ['customer-orders-monthly-v2', customer.customerId, year, month],
+    queryKey: ['customer-orders-monthly-v3', customer.customerId, year, month],
     queryFn: async () => {
-      const start = new Date(year, month - 1, 1);
-      const end = new Date(year, month, 1);
+      const { start, endExclusive } = kstMonthRange(year, month);
       return fetchOrdersWithItems(
         customer.companyId,
         customer.customerId,
         start,
-        end,
+        endExclusive,
       );
     },
     staleTime: 30_000,
   });
 
   const orders = monthlyQuery.data ?? [];
-  const monthSum = orders.reduce((s, o) => s + calcSupplySubtotal(o), 0);
+  const monthSum = orders.reduce((s, o) => s + calcOrderTotal(o), 0);
   const baseFont = 12 * fontScale;
 
   /** 날짜별로 묶고 정렬 (날짜 내림차순). */
@@ -1024,7 +1046,7 @@ function MonthlyDateCard({
   onStatement: () => void;
   baseFont: number;
 }) {
-  const totalAmount = orders.reduce((s, o) => s + calcSupplySubtotal(o), 0);
+  const totalAmount = orders.reduce((s, o) => s + calcOrderTotal(o), 0);
   const itemCount = orders.reduce((s, o) => s + o.items.length, 0);
   const hasExtra = orders.some((o) => isExtraOrder(o.memo));
   const hasDirect = orders.some((o) => isDirectShipping(o.memo));
@@ -1171,7 +1193,7 @@ function OrderCard({
   baseFont: number;
   showTime?: boolean;
 }) {
-  const subtotal = calcSupplySubtotal(order);
+  const subtotal = calcOrderTotal(order);
   const extra = isExtraOrder(order.memo);
   const direct = isDirectShipping(order.memo);
 
@@ -1249,8 +1271,10 @@ function OrderCard({
               </tr>
             ) : (
               order.items.map((it) => {
+                // 공급가 컬럼: products.supply_price (참고용 표시)
+                // 합계 컬럼: order_items.amount (주문 시점 저장된 실 금액)
                 const supplyPrice = it.product?.supply_price ?? 0;
-                const lineSum = it.quantity * supplyPrice;
+                const lineSum = it.amount ?? 0;
                 return (
                   <tr
                     key={it.id}

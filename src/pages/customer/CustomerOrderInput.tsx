@@ -142,6 +142,15 @@ export function CustomerOrderInput({
         0,
       );
 
+      // 🟡 dogfooding 디버그 — Phase 2 Auth 도입 시 제거 권장.
+      // eslint-disable-next-line no-console
+      console.log('[customer-order.submit]', {
+        company_id: customer.companyId,
+        customer_id: customer.customerId,
+        itemCount: items.length,
+        totalAmount,
+      });
+
       // 1) customer_order_uploads — 거래처 포털 자체 이력 (items JSON 포함)
       const { error: uploadErr } = await supabase
         .from('customer_order_uploads')
@@ -152,6 +161,8 @@ export function CustomerOrderInput({
           items,
           status: 'pending',
         });
+      // eslint-disable-next-line no-console
+      console.log('[customer-order.uploads]', { uploadErr });
       if (uploadErr) throw uploadErr;
 
       // 2) orders 헤더 — OPS 대시보드 주문내역과 연동
@@ -170,6 +181,8 @@ export function CustomerOrderInput({
         })
         .select('id')
         .single();
+      // eslint-disable-next-line no-console
+      console.log('[customer-order.order]', { order, orderErr });
       if (orderErr || !order) throw orderErr ?? new Error('주문 생성 실패');
 
       // 3) order_items — 실제 컬럼명은 unit_price/amount (sell_price/supply_price 아님)
@@ -185,6 +198,11 @@ export function CustomerOrderInput({
       const { error: itemsErr } = await supabase
         .from('order_items')
         .insert(orderItemsPayload);
+      // eslint-disable-next-line no-console
+      console.log('[customer-order.items]', {
+        itemsErr,
+        count: orderItemsPayload.length,
+      });
       if (itemsErr) throw itemsErr;
 
       showToast({
