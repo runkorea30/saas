@@ -68,9 +68,12 @@ export type Database = {
           deleted_at: string | null
           depositor_name: string | null
           description: string | null
+          exclude_reason: string | null
           id: string
           is_excluded: boolean
           match_status: string
+          match_type: string | null
+          moved_to_monthly: boolean
           transaction_date: string
           type: string
           updated_at: string
@@ -83,9 +86,12 @@ export type Database = {
           deleted_at?: string | null
           depositor_name?: string | null
           description?: string | null
+          exclude_reason?: string | null
           id?: string
           is_excluded?: boolean
           match_status?: string
+          match_type?: string | null
+          moved_to_monthly?: boolean
           transaction_date: string
           type: string
           updated_at?: string
@@ -98,9 +104,12 @@ export type Database = {
           deleted_at?: string | null
           depositor_name?: string | null
           description?: string | null
+          exclude_reason?: string | null
           id?: string
           is_excluded?: boolean
           match_status?: string
+          match_type?: string | null
+          moved_to_monthly?: boolean
           transaction_date?: string
           type?: string
           updated_at?: string
@@ -118,6 +127,80 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bank_mappings: {
+        Row: {
+          bank_name: string
+          company_id: string
+          created_at: string
+          customer_id: string | null
+          customer_name: string
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          bank_name: string
+          company_id: string
+          created_at?: string
+          customer_id?: string | null
+          customer_name: string
+          id?: string
+          updated_at?: string
+        }
+        Update: {
+          bank_name?: string
+          company_id?: string
+          created_at?: string
+          customer_id?: string | null
+          customer_name?: string
+          id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_mappings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_mappings_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bank_exclude_keywords: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          keyword: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          keyword: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          keyword?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_exclude_keywords_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]
@@ -328,6 +411,7 @@ export type Database = {
           is_active: boolean
           login_id: string | null
           login_password: string | null
+          match_type: string
           name: string
           settlement_cycle: string | null
           updated_at: string
@@ -347,6 +431,7 @@ export type Database = {
           is_active?: boolean
           login_id?: string | null
           login_password?: string | null
+          match_type?: string
           name: string
           settlement_cycle?: string | null
           updated_at?: string
@@ -366,6 +451,7 @@ export type Database = {
           is_active?: boolean
           login_id?: string | null
           login_password?: string | null
+          match_type?: string
           name?: string
           settlement_cycle?: string | null
           updated_at?: string
