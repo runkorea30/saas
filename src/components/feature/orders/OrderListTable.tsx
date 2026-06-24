@@ -120,36 +120,43 @@ export function OrderListTable(props: OrderListTableProps) {
   });
 
   const handleDelete = async (orderId: string) => {
-    if (!companyId) return;
     if (!window.confirm('이 주문을 삭제하면 복구할 수 없습니다. 계속하시겠습니까?')) {
       return;
     }
     setDeletingId(orderId);
     try {
       const nowIso = new Date().toISOString();
-      const { error: itemsErr } = await supabase
+
+      // 1. order_items soft delete
+      const { error: itemsError } = await supabase
         .from('order_items')
         .update({ deleted_at: nowIso })
-        .eq('company_id', companyId)
-        .eq('order_id', orderId)
-        .is('deleted_at', null);
-      if (itemsErr) throw itemsErr;
+        .eq('order_id', orderId);
 
-      const { error: orderErr } = await supabase
+      if (itemsError) {
+        console.error('order_items 삭제 오류:', itemsError);
+        alert('주문 삭제 중 오류가 발생했습니다: ' + itemsError.message);
+        return;
+      }
+
+      // 2. orders soft delete
+      const { error: orderError } = await supabase
         .from('orders')
         .update({ deleted_at: nowIso })
-        .eq('company_id', companyId)
         .eq('id', orderId);
-      if (orderErr) throw orderErr;
 
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['orders'] }),
-        queryClient.invalidateQueries({ queryKey: ['inventory-stock'] }),
-        queryClient.invalidateQueries({ queryKey: ['products'] }),
-      ]);
+      if (orderError) {
+        console.error('orders 삭제 오류:', orderError);
+        alert('주문 삭제 중 오류가 발생했습니다: ' + orderError.message);
+        return;
+      }
+
+      // 3. 캐시 무효화
+      queryClient.invalidateQueries({ queryKey: ['orders', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-stock', companyId] });
     } catch (err) {
-      console.error('주문 삭제 실패:', err);
-      alert('주문 삭제 중 오류가 발생했습니다.');
+      console.error('삭제 예외:', err);
+      alert('예기치 않은 오류가 발생했습니다.');
     } finally {
       setDeletingId(null);
     }
