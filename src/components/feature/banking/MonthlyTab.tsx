@@ -40,6 +40,7 @@ export function MonthlyTab({ orders, transactions, year }: Props) {
           transaction_date: t.transaction_date.slice(0, 10),
           amount: t.amount,
           match_status: t.match_status,
+          target_sales_month: t.target_sales_month,
         })),
       ),
     [yearOrders, transactions],

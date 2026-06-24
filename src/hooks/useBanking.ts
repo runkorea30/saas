@@ -217,6 +217,7 @@ export function useUpdateBankTransaction() {
       is_excluded?: boolean;
       exclude_reason?: string | null;
       moved_to_monthly?: boolean;
+      target_sales_month?: string | null;
     }) => {
       if (!companyId) throw new Error('회사 컨텍스트 미초기화');
 

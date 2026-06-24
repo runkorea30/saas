@@ -74,6 +74,7 @@ export type Database = {
           match_status: string
           match_type: string | null
           moved_to_monthly: boolean
+          target_sales_month: string | null
           transaction_date: string
           type: string
           updated_at: string
@@ -92,6 +93,7 @@ export type Database = {
           match_status?: string
           match_type?: string | null
           moved_to_monthly?: boolean
+          target_sales_month?: string | null
           transaction_date: string
           type: string
           updated_at?: string
@@ -110,6 +112,7 @@ export type Database = {
           match_status?: string
           match_type?: string | null
           moved_to_monthly?: boolean
+          target_sales_month?: string | null
           transaction_date?: string
           type?: string
           updated_at?: string
@@ -1548,6 +1551,7 @@ export interface BankTransaction {
   exclude_reason: string | null;
   match_type: '자동' | '수동' | '매핑' | null;
   moved_to_monthly: boolean;
+  target_sales_month: string | null;   // 'YYYY-MM' 수동 지정 매출월, null이면 자동 매칭
   deleted_at: string | null;
   created_at: string;
   updated_at: string;

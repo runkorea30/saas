@@ -767,6 +767,7 @@ export function calcMonthlyReconciliation(
     transaction_date: string;
     amount: number;
     match_status: string;
+    target_sales_month: string | null;
   }[],
   today: Date = new Date(),
 ): import('@/types/database').MonthlyReconciliation[] {
@@ -815,36 +816,41 @@ export function calcMonthlyReconciliation(
   for (const t of transactions) {
     if (!t.customer_id || t.match_status !== 'matched') continue;
 
-    const cycle = customerCycleMap.get(t.customer_id) ?? '익월';
-    const offset = cycle === '당월' ? 0 : cycle === '익월' ? 1 : 2;
-
-    // 입금월에서 offset 역산 → 추정 매출월
-    const txDate = new Date(t.transaction_date);
-    const estimatedDate = new Date(txDate.getFullYear(), txDate.getMonth() - offset, 1);
-    const estimatedSalesMonth = `${estimatedDate.getFullYear()}-${String(estimatedDate.getMonth() + 1).padStart(2, '0')}`;
-
-    // 추정 매출월의 due_date(말일) 계산
-    const dueDateStr = calcDueDate(estimatedSalesMonth, cycle);
-    const dueDate = new Date(dueDateStr);
-
-    // ±7일 오차범위 계산
-    const lowerBound = new Date(dueDate);
-    lowerBound.setDate(lowerBound.getDate() - 7);
-    const upperBound = new Date(dueDate);
-    upperBound.setDate(upperBound.getDate() + 7);
-
-    // 입금일이 due_date ±7일 이내이면 해당 매출월, 초과이면 다음/이전 매출월
     let targetSalesMonth: string;
-    if (txDate >= lowerBound && txDate <= upperBound) {
-      targetSalesMonth = estimatedSalesMonth;
-    } else if (txDate > upperBound) {
-      // 마감일보다 많이 늦게 입금 → 다음 매출월
-      const nextDate = new Date(estimatedDate.getFullYear(), estimatedDate.getMonth() + 1, 1);
-      targetSalesMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+    if (t.target_sales_month) {
+      // 사용자 수동 지정 매출월 우선 — 자동 계산 무시.
+      targetSalesMonth = t.target_sales_month;
     } else {
-      // 마감일보다 많이 일찍 입금 → 이전 매출월
-      const prevDate = new Date(estimatedDate.getFullYear(), estimatedDate.getMonth() - 1, 1);
-      targetSalesMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+      const cycle = customerCycleMap.get(t.customer_id) ?? '익월';
+      const offset = cycle === '당월' ? 0 : cycle === '익월' ? 1 : 2;
+
+      // 입금월에서 offset 역산 → 추정 매출월
+      const txDate = new Date(t.transaction_date);
+      const estimatedDate = new Date(txDate.getFullYear(), txDate.getMonth() - offset, 1);
+      const estimatedSalesMonth = `${estimatedDate.getFullYear()}-${String(estimatedDate.getMonth() + 1).padStart(2, '0')}`;
+
+      // 추정 매출월의 due_date(말일) 계산
+      const dueDateStr = calcDueDate(estimatedSalesMonth, cycle);
+      const dueDate = new Date(dueDateStr);
+
+      // ±7일 오차범위 계산
+      const lowerBound = new Date(dueDate);
+      lowerBound.setDate(lowerBound.getDate() - 7);
+      const upperBound = new Date(dueDate);
+      upperBound.setDate(upperBound.getDate() + 7);
+
+      // 입금일이 due_date ±7일 이내이면 해당 매출월, 초과이면 다음/이전 매출월
+      if (txDate >= lowerBound && txDate <= upperBound) {
+        targetSalesMonth = estimatedSalesMonth;
+      } else if (txDate > upperBound) {
+        // 마감일보다 많이 늦게 입금 → 다음 매출월
+        const nextDate = new Date(estimatedDate.getFullYear(), estimatedDate.getMonth() + 1, 1);
+        targetSalesMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+      } else {
+        // 마감일보다 많이 일찍 입금 → 이전 매출월
+        const prevDate = new Date(estimatedDate.getFullYear(), estimatedDate.getMonth() - 1, 1);
+        targetSalesMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+      }
     }
 
     const key = `${t.customer_id}__${targetSalesMonth}`;

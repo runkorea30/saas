@@ -195,6 +195,32 @@ export function LedgerTab({ transactions, mappings, excludeKeywords, customers }
     }
   };
 
+  // 매출월 select 옵션: 현재월 기준 과거 12개월 (오늘 포함, 내림차순)
+  const monthOptions = useMemo(() => {
+    const out: string[] = [];
+    const now = new Date();
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      out.push(
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      );
+    }
+    return out;
+  }, []);
+
+  const onChangeTargetMonth = (tx: BankTransaction, value: string) => {
+    updateTx.mutate(
+      { id: tx.id, target_sales_month: value || null },
+      {
+        onError: (e) =>
+          showToast({
+            kind: 'error',
+            text: `매출월 변경 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`,
+          }),
+      },
+    );
+  };
+
   const onUnmatch = (tx: BankTransaction) => {
     updateTx.mutate(
       {
@@ -294,6 +320,7 @@ export function LedgerTab({ transactions, mappings, excludeKeywords, customers }
               <th className="text-left px-3 py-2 font-medium">입금자명</th>
               <th className="text-right px-3 py-2 font-medium">입금액</th>
               <th className="text-left px-3 py-2 font-medium">거래처</th>
+              <th className="text-center px-3 py-2 font-medium">매출월</th>
               <th className="text-center px-3 py-2 font-medium">매칭상태</th>
               <th className="text-center px-3 py-2 font-medium">매칭방법</th>
               <th className="text-center px-3 py-2 font-medium">정산이동</th>
@@ -304,7 +331,7 @@ export function LedgerTab({ transactions, mappings, excludeKeywords, customers }
             {filtered.length === 0 ? (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   className="text-center py-10 text-[var(--ink-3)] text-[12.5px]"
                 >
                   표시할 거래가 없습니다.
@@ -341,6 +368,27 @@ export function LedgerTab({ transactions, mappings, excludeKeywords, customers }
                           </option>
                         ))}
                       </select>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    {tx.match_status === 'matched' ? (
+                      <select
+                        value={tx.target_sales_month ?? ''}
+                        onChange={(e) => onChangeTargetMonth(tx, e.target.value)}
+                        className={`border border-[var(--line)] rounded p-1 text-sm bg-[var(--surface)] ${
+                          tx.target_sales_month ? 'text-blue-600 font-medium' : 'text-[var(--ink-3)]'
+                        }`}
+                        style={{ minWidth: 100 }}
+                      >
+                        <option value="">자동</option>
+                        {monthOptions.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-[var(--ink-3)]">-</span>
                     )}
                   </td>
                   <td className="px-3 py-2 text-center">
