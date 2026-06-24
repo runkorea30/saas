@@ -2,40 +2,36 @@
  * 발주서 페이지 — 재고매입 > 발주서.
  *
  * 🔴 CLAUDE.md §1: company_id 는 useCompany() 에서만 (하드코딩 금지).
- * 🔴 CLAUDE.md §2: 발주 추천 수량 산식은 calculations.ts 의 `calcPurchaseOrderQty`.
- * 🔴 CLAUDE.md §5: 모든 목록 조회는 fetchAllRows 경유 (`usePurchaseOrder` 내부).
+ * 🔴 CLAUDE.md §2: 모든 계산식은 calculations.ts (`calcSalesQty3m` / `calcSalesQty1m` / `calcOrderQty`).
+ * 🔴 CLAUDE.md §5: 모든 목록 조회는 fetchAllRows 경유 (usePurchaseOrder 내부).
  *
  * 핵심 동작:
- *  - "발주서 생성" → 전 제품에 대해 calcPurchaseOrderQty(qty3m, stock) 자동 입력
- *  - "저장" → 같은 월 draft 삭제 후 purchase_orders + purchase_order_items 재insert
- *  - "초기화" → 발주수량 전부 0 (confirm 후)
- *  - "엑셀" → 발주수량>0 품목만 xlsx 다운로드
- *  - localStorage 키: mc.purchase-order.lastSaved (ISO)
+ *  - "발주서 생성" → 전 제품에 대해 calcOrderQty(qty3m, unit) 자동 입력
+ *  - "현재 카테고리 저장" → 선택된(혹은 전체) 카테고리별로 purchase_orders + items upsert
+ *      · po_number = `PO-{YYYY}-{MM}-{카테고리}` (같은 번호 있으면 DELETE 후 INSERT)
+ *      · template_id = 카테고리명 (저장 여부 추적용)
+ *  - "초기화" → 이번 달 모든 draft 발주서 삭제 + orderQty 리셋
+ *  - "엑셀" → savedCategories 의 품목만 ORDER SHEET 양식으로 다운로드
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Download, FileSpreadsheet, RefreshCw, Save } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useCompany } from '@/hooks/useCompany';
 import { usePurchaseOrder } from '@/hooks/queries/usePurchaseOrder';
 import { useToast } from '@/components/ui/Toast';
 import { supabase } from '@/lib/supabase';
-import { calcPurchaseOrderQty } from '@/utils/calculations';
+import {
+  calcOrderQty,
+  calcSalesQty1m,
+  calcSalesQty3m,
+} from '@/utils/calculations';
 import { getCategoryLabel } from '@/constants/categories';
 
-const LAST_SAVED_KEY = 'mc.purchase-order.lastSaved';
+const SAVED_QUERY_KEY = 'purchase-order-saved-categories';
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0');
-}
-
-function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  const y = d.getFullYear();
-  const m = pad2(d.getMonth() + 1);
-  const dd = pad2(d.getDate());
-  const hh = pad2(d.getHours());
-  const mm = pad2(d.getMinutes());
-  return `${y}-${m}-${dd} ${hh}:${mm}`;
 }
 
 function formatUsd(value: number): string {
@@ -45,28 +41,33 @@ function formatUsd(value: number): string {
   });
 }
 
+function formatDateStr(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
 export function PurchaseOrderPage() {
   const { companyId } = useCompany();
   const { showToast } = useToast();
-  const { products, salesMap, stockMap, categories, isLoading, error } =
-    usePurchaseOrder(companyId);
+  const queryClient = useQueryClient();
+  const {
+    products,
+    salesMap,
+    stockMap,
+    savedCategories,
+    categories,
+    isLoading,
+    error,
+  } = usePurchaseOrder(companyId);
 
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
 
-  /** product_id → 발주수량 (EA). 0 또는 없으면 빈칸. */
+  /** product_id → 발주수량 (EA). 0/없음 = 빈칸. */
   const [orderQty, setOrderQty] = useState<Map<string, number>>(new Map());
-  /** 선택된 카테고리. 빈 배열이면 전체. */
+  /** 선택된 카테고리. 빈 배열 = 전체. */
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  /** localStorage 에서 복원되는 마지막 저장 시각 (ISO). */
-  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    const saved = localStorage.getItem(LAST_SAVED_KEY);
-    if (saved) setLastSavedAt(saved);
-  }, []);
+  const [busy, setBusy] = useState(false);
 
   const filteredProducts = useMemo(() => {
     if (selectedCategories.length === 0) return products;
@@ -99,13 +100,14 @@ export function PurchaseOrderPage() {
     setOrderQty(next);
   };
 
+  /** 발주서 생성 — 모든 제품의 추천 발주수량을 자동 입력. */
   const handleGenerate = () => {
     const next = new Map<string, number>();
     for (const p of products) {
-      const qty3m = salesMap.get(p.id)?.qty_3m ?? 0;
-      const stock = stockMap.get(p.id) ?? 0;
-      const suggested = calcPurchaseOrderQty(qty3m, stock);
-      if (suggested > 0) next.set(p.id, suggested);
+      const qty6mExcl = salesMap.get(p.id) ?? 0;
+      const qty3m = calcSalesQty3m(qty6mExcl);
+      const orderQ = calcOrderQty(qty3m, p.unit);
+      if (orderQ > 0) next.set(p.id, orderQ);
     }
     setOrderQty(next);
     showToast({
@@ -114,18 +116,54 @@ export function PurchaseOrderPage() {
     });
   };
 
-  const handleReset = () => {
-    if (orderQty.size === 0) return;
-    if (!window.confirm('발주수량을 모두 0으로 초기화하시겠습니까?')) return;
-    setOrderQty(new Map());
-  };
+  /** 초기화 — 이번 달 draft 발주서 전체 삭제 + orderQty 리셋. */
+  const handleReset = async () => {
+    if (!window.confirm('발주수량을 모두 초기화하시겠습니까?')) return;
+    if (!companyId) return;
+    setBusy(true);
+    try {
+      const monthStartIso = new Date(Date.UTC(year, month - 1, 1)).toISOString();
+      const nextMonthIso = new Date(Date.UTC(year, month, 1)).toISOString();
 
-  const handleSelectSavedCategories = () => {
-    const set = new Set<string>();
-    for (const p of products) {
-      if ((orderQty.get(p.id) ?? 0) > 0 && p.category) set.add(p.category);
+      // 헤더 조회 → CASCADE 로 items 도 함께 삭제됨 (FK ON DELETE CASCADE)
+      const { data: rows, error: selErr } = await supabase
+        .from('purchase_orders')
+        .select('id')
+        .eq('company_id', companyId)
+        .eq('status', 'draft')
+        .gte('po_date', monthStartIso)
+        .lt('po_date', nextMonthIso)
+        .is('deleted_at', null);
+      if (selErr) throw selErr;
+
+      if (rows && rows.length > 0) {
+        const ids = rows.map((r) => r.id);
+        // 명시적 순서 — items 먼저, 헤더 다음 (FK 안전).
+        const { error: itemsDelErr } = await supabase
+          .from('purchase_order_items')
+          .delete()
+          .in('purchase_order_id', ids);
+        if (itemsDelErr) throw itemsDelErr;
+        const { error: hdrDelErr } = await supabase
+          .from('purchase_orders')
+          .delete()
+          .in('id', ids);
+        if (hdrDelErr) throw hdrDelErr;
+      }
+
+      setOrderQty(new Map());
+      await queryClient.invalidateQueries({
+        queryKey: [SAVED_QUERY_KEY, companyId],
+      });
+      showToast({ kind: 'success', text: '초기화 완료' });
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: e instanceof Error ? e.message : '초기화 실패',
+      });
+    } finally {
+      setBusy(false);
     }
-    setSelectedCategories(Array.from(set));
   };
 
   const toggleCategory = (cat: string) => {
@@ -134,147 +172,207 @@ export function PurchaseOrderPage() {
     );
   };
 
-  const handleSave = async () => {
+  /** 저장된 분류 전체선택 — savedCategories 의 모든 카테고리를 선택. */
+  const handleSelectSavedCategories = () => {
+    setSelectedCategories(Array.from(savedCategories));
+  };
+
+  /** 현재 카테고리 저장 — 선택된(혹은 전체) 카테고리별로 purchase_orders 행 upsert. */
+  const handleSaveCategory = async () => {
     if (!companyId) return;
-    const items = products
-      .filter((p) => (orderQty.get(p.id) ?? 0) > 0)
-      .map((p) => ({
-        product_id: p.id,
-        quantity: orderQty.get(p.id)!,
-        unit_price_usd: p.unit_price_usd != null ? Number(p.unit_price_usd) : null,
-      }));
-    if (items.length === 0) {
-      showToast({ kind: 'error', text: '발주 수량이 입력된 품목이 없습니다.' });
+    const targetCats =
+      selectedCategories.length > 0 ? selectedCategories : categories;
+    if (targetCats.length === 0) {
+      showToast({ kind: 'error', text: '저장할 카테고리가 없습니다.' });
       return;
     }
-    setSaving(true);
+    setBusy(true);
     try {
-      const poPrefix = `PO-${year}-${pad2(month)}-`;
+      const monthYY = `${year}-${pad2(month)}`;
+      let savedCount = 0;
+      const skipped: string[] = [];
 
-      // 같은 월 draft 삭제 (헤더 + items)
-      const { data: existing, error: selErr } = await supabase
-        .from('purchase_orders')
-        .select('id')
-        .eq('company_id', companyId)
-        .eq('status', 'draft')
-        .like('po_number', `${poPrefix}%`)
-        .is('deleted_at', null);
-      if (selErr) throw selErr;
+      for (const cat of targetCats) {
+        const items = products
+          .filter(
+            (p) => p.category === cat && (orderQty.get(p.id) ?? 0) > 0,
+          )
+          .map((p) => ({
+            product_id: p.id,
+            quantity: orderQty.get(p.id)!,
+            unit_price_usd:
+              p.unit_price_usd != null ? Number(p.unit_price_usd) : null,
+          }));
+        if (items.length === 0) {
+          skipped.push(cat);
+          continue;
+        }
 
-      if (existing && existing.length > 0) {
-        const ids = existing.map((r) => r.id);
-        const { error: delItemsErr } = await supabase
-          .from('purchase_order_items')
-          .delete()
-          .in('purchase_order_id', ids);
-        if (delItemsErr) throw delItemsErr;
-        const { error: delHeaderErr } = await supabase
+        const poNumber = `PO-${monthYY}-${cat}`;
+
+        // 같은 po_number 의 기존 draft 삭제 (있을 수 있음)
+        const { data: existing, error: selErr } = await supabase
           .from('purchase_orders')
-          .delete()
-          .in('id', ids);
-        if (delHeaderErr) throw delHeaderErr;
+          .select('id')
+          .eq('company_id', companyId)
+          .eq('po_number', poNumber)
+          .is('deleted_at', null);
+        if (selErr) throw selErr;
+        if (existing && existing.length > 0) {
+          const ids = existing.map((r) => r.id);
+          const { error: delItemsErr } = await supabase
+            .from('purchase_order_items')
+            .delete()
+            .in('purchase_order_id', ids);
+          if (delItemsErr) throw delItemsErr;
+          const { error: delHdrErr } = await supabase
+            .from('purchase_orders')
+            .delete()
+            .in('id', ids);
+          if (delHdrErr) throw delHdrErr;
+        }
+
+        const total = items.reduce(
+          (s, it) => s + it.quantity * (it.unit_price_usd ?? 0),
+          0,
+        );
+
+        const { data: header, error: insErr } = await supabase
+          .from('purchase_orders')
+          .insert({
+            company_id: companyId,
+            po_number: poNumber,
+            po_date: new Date().toISOString(),
+            template_id: cat,
+            currency: 'USD',
+            total_amount: total,
+            status: 'draft',
+          })
+          .select('id')
+          .single();
+        if (insErr || !header) throw insErr ?? new Error('발주서 헤더 생성 실패');
+
+        const { error: itemsErr } = await supabase
+          .from('purchase_order_items')
+          .insert(
+            items.map((it) => ({
+              purchase_order_id: header.id,
+              company_id: companyId,
+              product_id: it.product_id,
+              quantity: it.quantity,
+              unit_price_usd: it.unit_price_usd,
+            })),
+          );
+        if (itemsErr) throw itemsErr;
+
+        savedCount++;
       }
 
-      const total = items.reduce(
-        (s, it) => s + it.quantity * (it.unit_price_usd ?? 0),
-        0,
-      );
-      const poNumber = `${poPrefix}${Date.now()}`;
-
-      const { data: header, error: insErr } = await supabase
-        .from('purchase_orders')
-        .insert({
-          company_id: companyId,
-          po_number: poNumber,
-          po_date: new Date().toISOString(),
-          template_id: 'default',
-          currency: 'USD',
-          total_amount: total,
-          status: 'draft',
-        })
-        .select('id')
-        .single();
-      if (insErr || !header) throw insErr ?? new Error('발주서 헤더 생성 실패');
-
-      const { error: itemsErr } = await supabase
-        .from('purchase_order_items')
-        .insert(
-          items.map((it) => ({
-            purchase_order_id: header.id,
-            company_id: companyId,
-            product_id: it.product_id,
-            quantity: it.quantity,
-            unit_price_usd: it.unit_price_usd,
-          })),
-        );
-      if (itemsErr) throw itemsErr;
-
-      const nowIso = new Date().toISOString();
-      localStorage.setItem(LAST_SAVED_KEY, nowIso);
-      setLastSavedAt(nowIso);
-      showToast({
-        kind: 'success',
-        text: `발주서 저장 완료 (${items.length}품목 · $${formatUsd(total)})`,
+      await queryClient.invalidateQueries({
+        queryKey: [SAVED_QUERY_KEY, companyId],
       });
+
+      if (savedCount === 0) {
+        showToast({ kind: 'error', text: '저장할 품목이 없습니다.' });
+      } else {
+        const skipMsg = skipped.length > 0 ? ` (품목 0인 ${skipped.length}개 분류 건너뜀)` : '';
+        showToast({
+          kind: 'success',
+          text: `${savedCount}개 카테고리 저장 완료${skipMsg}`,
+        });
+      }
     } catch (e) {
       showToast({
         kind: 'error',
         text: e instanceof Error ? e.message : '저장 실패',
       });
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   };
 
+  /** 엑셀 다운로드 — savedCategories 의 품목만 ORDER SHEET 양식으로. */
   const handleDownloadExcel = () => {
-    const items = products.filter((p) => (orderQty.get(p.id) ?? 0) > 0);
-    if (items.length === 0) {
+    if (savedCategories.size === 0) {
+      showToast({ kind: 'error', text: '저장된 카테고리가 없습니다.' });
+      return;
+    }
+    const dateStr = formatDateStr(now);
+
+    // 카테고리 정렬 순서 유지 (categories 는 이미 정렬됨).
+    const orderedCats = categories.filter((c) => savedCategories.has(c));
+    const lines: Array<{
+      code: string;
+      name: string;
+      unit: string;
+      price: number | '';
+      qty: number;
+      amount: number;
+    }> = [];
+    for (const cat of orderedCats) {
+      for (const p of products) {
+        if (p.category !== cat) continue;
+        const qty = orderQty.get(p.id) ?? 0;
+        if (qty <= 0) continue;
+        const price = p.unit_price_usd != null ? Number(p.unit_price_usd) : 0;
+        lines.push({
+          code: p.code,
+          name: p.name,
+          unit: p.unit,
+          price: p.unit_price_usd != null ? price : '',
+          qty,
+          amount: Number((qty * price).toFixed(2)),
+        });
+      }
+    }
+    if (lines.length === 0) {
       showToast({ kind: 'error', text: '다운로드할 품목이 없습니다.' });
       return;
     }
-    const header = [
-      '코드',
-      '제품명',
-      '수입원가($)',
-      '단위',
-      '판매량(3개월)',
-      '판매량(1개월)',
-      '재고수량',
-      '발주수량',
-      '합계($)',
+
+    const aoa: (string | number)[][] = [
+      ['ORDER SHEET', '', '', '', `DATE: ${dateStr}`, ''],
+      ['RUNKOREA', '', '', '', '', ''],
+      ['ZIPCODE : 16348', '', '', '', '', ''],
+      [
+        '92, Gyeongsudaero 1081beongil, Jangangu, Suwonsi, Gyeonggido, Republic of Korea',
+        '',
+        '',
+        '',
+        '',
+        '',
+      ],
+      ['Tel :  01089811434', '', '', '', '', ''],
+      ['', '', '', '', '', ''],
+      ['CODE', 'DESCRIPTION', 'UNIT', 'PRICE', 'QTY', 'AMOUNT'],
     ];
-    const body = items.map((p) => {
-      const qty = orderQty.get(p.id) ?? 0;
-      const sales = salesMap.get(p.id) ?? { qty_3m: 0, qty_1m: 0 };
-      const stock = stockMap.get(p.id) ?? 0;
-      const usd = p.unit_price_usd != null ? Number(p.unit_price_usd) : 0;
-      return [
-        p.code,
-        p.name,
-        p.unit_price_usd != null ? Number(p.unit_price_usd) : '',
-        p.unit,
-        sales.qty_3m,
-        sales.qty_1m,
-        stock,
-        qty,
-        Number((qty * usd).toFixed(2)),
-      ];
-    });
-    const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
+    for (const it of lines) {
+      aoa.push([it.code, it.name, it.unit, it.price, it.qty, it.amount]);
+    }
+    aoa.push(['TOTAL', '', '', '', '', '']);
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols'] = [
       { wch: 14 },
       { wch: 36 },
-      { wch: 12 },
       { wch: 8 },
-      { wch: 14 },
-      { wch: 14 },
       { wch: 10 },
-      { wch: 10 },
-      { wch: 14 },
+      { wch: 8 },
+      { wch: 12 },
     ];
+
+    // TOTAL 행의 F 열에 SUM 수식 설정. 데이터 시작행 = 8 (1-based).
+    const totalRowIdx = aoa.length;
+    const dataStart = 8;
+    const dataEnd = totalRowIdx - 1;
+    ws[`F${totalRowIdx}`] = {
+      t: 'n',
+      f: `SUM(F${dataStart}:F${dataEnd})`,
+    };
+
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '발주서');
-    XLSX.writeFile(wb, `발주서_${year}년${pad2(month)}월.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, 'ORDER SHEET');
+    XLSX.writeFile(wb, `ORDER_SHEET_${dateStr}.xlsx`);
   };
 
   // ───── 렌더 ─────
@@ -290,7 +388,6 @@ export function PurchaseOrderPage() {
           margin: '0 auto',
         }}
       >
-        {/* 페이지 헤더 */}
         <header style={{ marginBottom: 14 }}>
           <div
             style={{
@@ -332,58 +429,61 @@ export function PurchaseOrderPage() {
                 paddingBottom: 4,
               }}
             >
-              <SummaryItem label="기준" value={`${year}년 ${month}월`} />
-              <SummaryItem label="판매 기간" value="최근 6개월" />
+              <SummaryItem
+                label="기준"
+                value={`${year}년 ${month}월`}
+                sub="(최근 6개월 판매 기준)"
+              />
               <SummaryItem label="발주 품목" value={`${filledCount}개`} />
               <SummaryItem
                 label="총합계 USD"
                 value={`$${formatUsd(totalUsd)}`}
                 tone="brand"
               />
-              {lastSavedAt && (
-                <SummaryItem
-                  label="마지막 저장"
-                  value={formatDateTime(lastSavedAt)}
-                />
-              )}
+              <SummaryItem
+                label="저장된 분류"
+                value={`${savedCategories.size}개`}
+                tone={savedCategories.size > 0 ? 'success' : undefined}
+              />
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
               <button
                 type="button"
                 onClick={handleDownloadExcel}
-                disabled={filledCount === 0}
+                disabled={savedCategories.size === 0 || busy}
                 className="btn-base"
                 style={{ height: 32, fontSize: 12.5 }}
-                title="발주 수량이 입력된 품목만 엑셀로 다운로드"
+                title="저장된 카테고리 품목만 ORDER SHEET 양식으로 다운로드"
               >
-                <Download size={13} /> 엑셀
+                <Download size={13} /> 엑셀 다운로드
               </button>
               <button
                 type="button"
                 onClick={handleReset}
-                disabled={orderQty.size === 0 || saving}
+                disabled={busy}
                 className="btn-base"
                 style={{ height: 32, fontSize: 12.5 }}
-                title="발주수량 전체 0으로 초기화"
+                title="이번 달 발주서 저장본 및 입력값 초기화"
               >
                 <RefreshCw size={13} /> 초기화
               </button>
               <button
                 type="button"
-                onClick={handleSave}
-                disabled={filledCount === 0 || saving}
+                onClick={handleSaveCategory}
+                disabled={filledCount === 0 || busy}
                 className="btn-base"
                 style={{ height: 32, fontSize: 12.5 }}
+                title="선택된 카테고리(없으면 전체)별로 발주서 저장"
               >
-                <Save size={13} /> {saving ? '저장 중…' : '저장'}
+                <Save size={13} /> {busy ? '저장 중…' : '현재 카테고리 저장'}
               </button>
               <button
                 type="button"
                 onClick={handleGenerate}
-                disabled={isLoading || products.length === 0}
+                disabled={isLoading || products.length === 0 || busy}
                 className="btn-base primary"
                 style={{ height: 32, fontSize: 12.5 }}
-                title="최근 3개월 판매량 기준으로 발주수량 자동 입력"
+                title="당월 제외 6개월 판매량 기반 추천 발주수량 자동 입력"
               >
                 <FileSpreadsheet size={13} /> 발주서 생성
               </button>
@@ -405,61 +505,34 @@ export function PurchaseOrderPage() {
             marginBottom: 12,
           }}
         >
-          <button
-            type="button"
+          <CategoryButton
+            label="전체"
+            isSelected={selectedCategories.length === 0}
+            isSaved={false}
             onClick={() => setSelectedCategories([])}
-            className="btn-base"
-            style={{
-              height: 28,
-              fontSize: 12,
-              background:
-                selectedCategories.length === 0
-                  ? 'var(--brand)'
-                  : 'transparent',
-              color:
-                selectedCategories.length === 0 ? '#FDFAF4' : 'var(--ink)',
-              borderColor:
-                selectedCategories.length === 0
-                  ? 'var(--brand)'
-                  : 'var(--line)',
-            }}
-          >
-            전체
-          </button>
-          {categories.map((cat) => {
-            const active = selectedCategories.includes(cat);
-            return (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => toggleCategory(cat)}
-                className="btn-base"
-                style={{
-                  height: 28,
-                  fontSize: 12,
-                  background: active ? 'var(--brand)' : 'transparent',
-                  color: active ? '#FDFAF4' : 'var(--ink)',
-                  borderColor: active ? 'var(--brand)' : 'var(--line)',
-                }}
-              >
-                {getCategoryLabel(cat)}
-              </button>
-            );
-          })}
+          />
+          {categories.map((cat) => (
+            <CategoryButton
+              key={cat}
+              label={getCategoryLabel(cat)}
+              isSelected={selectedCategories.includes(cat)}
+              isSaved={savedCategories.has(cat)}
+              onClick={() => toggleCategory(cat)}
+            />
+          ))}
           <div style={{ flex: 1 }} />
           <button
             type="button"
             onClick={handleSelectSavedCategories}
-            disabled={filledCount === 0}
+            disabled={savedCategories.size === 0}
             className="btn-base"
             style={{ height: 28, fontSize: 12 }}
-            title="발주수량이 입력된 품목이 있는 분류만 선택"
+            title="저장된 카테고리 모두 선택"
           >
             저장된 분류 전체선택
           </button>
         </div>
 
-        {/* 에러 */}
         {error && (
           <div
             style={{
@@ -541,10 +614,9 @@ export function PurchaseOrderPage() {
                 )}
                 {!isLoading &&
                   filteredProducts.map((p) => {
-                    const sales = salesMap.get(p.id) ?? {
-                      qty_3m: 0,
-                      qty_1m: 0,
-                    };
+                    const qty6mExcl = salesMap.get(p.id) ?? 0;
+                    const qty3m = calcSalesQty3m(qty6mExcl);
+                    const qty1m = calcSalesQty1m(qty3m);
                     const stock = stockMap.get(p.id) ?? 0;
                     const qty = orderQty.get(p.id) ?? 0;
                     const usd =
@@ -566,10 +638,10 @@ export function PurchaseOrderPage() {
                           {p.unit}
                         </Td>
                         <Td align="right" muted>
-                          {sales.qty_3m.toLocaleString('ko-KR')}
+                          {qty3m.toLocaleString('ko-KR')}
                         </Td>
                         <Td align="right" muted>
-                          {sales.qty_1m.toLocaleString('ko-KR')}
+                          {qty1m.toLocaleString('ko-KR')}
                         </Td>
                         <Td align="right" muted>
                           {stock.toLocaleString('ko-KR')}
@@ -639,16 +711,65 @@ export function PurchaseOrderPage() {
 
 // ───────────────────────────────────────────────────────────
 
+function CategoryButton({
+  label,
+  isSelected,
+  isSaved,
+  onClick,
+}: {
+  label: string;
+  isSelected: boolean;
+  isSaved: boolean;
+  onClick: () => void;
+}) {
+  // 우선순위: selected > saved > 기본
+  let background = 'transparent';
+  let color = 'var(--ink)';
+  let borderColor = 'var(--line)';
+  if (isSelected) {
+    background = '#6B1F2A';
+    color = '#ffffff';
+    borderColor = '#6B1F2A';
+  } else if (isSaved) {
+    background = '#DCFCE7'; // tailwind green-100
+    color = '#166534'; // green-800
+    borderColor = '#22C55E'; // green-500
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="btn-base"
+      style={{
+        height: 28,
+        fontSize: 12,
+        background,
+        color,
+        borderColor,
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 function SummaryItem({
   label,
   value,
+  sub,
   tone,
 }: {
   label: string;
   value: string;
-  tone?: 'brand';
+  sub?: string;
+  tone?: 'brand' | 'success';
 }) {
-  const color = tone === 'brand' ? 'var(--brand)' : 'var(--ink)';
+  const color =
+    tone === 'brand'
+      ? 'var(--brand)'
+      : tone === 'success'
+        ? 'var(--success)'
+        : 'var(--ink)';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <span
@@ -672,6 +793,18 @@ function SummaryItem({
         }}
       >
         {value}
+        {sub && (
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 400,
+              color: 'var(--ink-3)',
+              marginLeft: 6,
+            }}
+          >
+            {sub}
+          </span>
+        )}
       </span>
     </div>
   );
@@ -719,6 +852,7 @@ function Td({
         fontVariantNumeric: 'tabular-nums',
         whiteSpace: 'nowrap',
         borderRight: '1px solid var(--line)',
+        background: muted ? 'var(--surface-2, #fafafa)' : 'var(--surface)',
       }}
     >
       {children}

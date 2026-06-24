@@ -531,21 +531,36 @@ export async function calcOrderSuggestion(
   return map.get(productId) ?? 0;
 }
 
+// ───────────────────────────────────────────────────────────
+// 발주서 페이지용 (순수 산술, 당월 제외 6개월 윈도우 기반)
+// ───────────────────────────────────────────────────────────
+
 /**
- * 발주서 페이지용 추천 수량 (EA 단위, 순수 산술).
- * 공식: max(0, ceil(qty3m / 3 × 1.5) − stockQty)
- *
- * - `qty3m`: 최근 3개월 판매수량 합 (EA)
- * - `stockQty`: 현재 재고 수량 (EA)
- * - 반환: 추천 발주 수량 (EA). 음수면 0으로 clamp.
- *
- * 🟠 발주서 페이지 전용. 기존 `calcOrderSuggestion`(DZ, 6개월 lookback)과
- *    공식·단위가 다르므로 호출부에서 혼동 금지.
+ * 판매량(3개월) = 당월 제외 최근 6개월 판매수량 ÷ 6 × 3.
+ * 반올림된 정수 수량(EA) 반환.
  */
-export function calcPurchaseOrderQty(qty3m: number, stockQty: number): number {
-  const monthlyAvg = qty3m / 3;
-  const suggested = Math.ceil(monthlyAvg * 1.5) - stockQty;
-  return Math.max(0, suggested);
+export function calcSalesQty3m(qty6mExcludingThisMonth: number): number {
+  return Math.round((qty6mExcludingThisMonth / 6) * 3);
+}
+
+/**
+ * 판매량(1개월) = 판매량(3개월) ÷ 3.
+ * 반올림된 정수 수량(EA) 반환.
+ */
+export function calcSalesQty1m(qty3m: number): number {
+  return Math.round(qty3m / 3);
+}
+
+/**
+ * 발주서 추천 발주수량.
+ * - unit 이 'DZ'(대소문자 무관) 면 ceil(qty3m / 12) DZ
+ * - 그 외(EA 등) 면 qty3m 그대로
+ */
+export function calcOrderQty(qty3m: number, unit: string): number {
+  if (unit.toUpperCase() === 'DZ') {
+    return Math.ceil(qty3m / 12);
+  }
+  return qty3m;
 }
 
 // ───────────────────────────────────────────────────────────

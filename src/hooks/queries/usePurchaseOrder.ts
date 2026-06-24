@@ -2,25 +2,22 @@
  * 발주서 페이지 전용 통합 쿼리 훅.
  *
  * 🔴 CLAUDE.md §1: company_id 필터 필수.
- * 🔴 CLAUDE.md §2: 집계 로직은 calculations.ts 와 동일 패턴(전 회사 1회 fetch → Map).
+ * 🔴 CLAUDE.md §2: 계산식은 calculations.ts 의 calcSalesQty3m / calcSalesQty1m / calcOrderQty.
  * 🔴 CLAUDE.md §5: 모든 목록 조회는 fetchAllRows 경유.
  *
  * 제공하는 데이터:
  * - `products` : 활성 제품 목록 (is_active=true, deleted_at IS NULL)
- * - `salesMap` : product_id → { qty_3m, qty_1m } (반품 제외, 최근 3/1개월 판매수량)
+ * - `salesMap` : product_id → 당월 제외 최근 6개월 판매수량 합 (qty6mExcl)
  * - `stockMap` : product_id → 현재 재고 수량 (useInventoryStock 재활용)
- * - `categories` : 중복 제거된 분류 배열 (정렬됨)
+ * - `savedCategories` : 이번 달 draft 발주서로 저장된 카테고리 Set
+ *     (purchase_orders.template_id 컬럼을 카테고리명 저장 용도로 재활용)
+ * - `categories` : products 의 distinct 카테고리 배열 (정렬됨)
  */
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useProducts, type Product } from '@/hooks/queries/useProducts';
 import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
-
-export interface SalesAggregate {
-  qty_3m: number;
-  qty_1m: number;
-}
 
 interface SoldRow {
   product_id: string;
@@ -29,19 +26,22 @@ interface SoldRow {
 }
 
 /**
- * 최근 6개월 판매수량을 product_id 별 3개월/1개월 합계로 집계.
- * 반품(is_return=true) 제외, soft-deleted 주문 제외.
+ * 당월 제외 최근 6개월 윈도우의 product_id 별 판매수량 합.
+ * 반품(is_return=true) 제외.
+ *
+ * 윈도우: [DATE_TRUNC('month', NOW()) - INTERVAL '6 months', DATE_TRUNC('month', NOW()))
  */
-async function fetchSalesAggregate(
+async function fetchSalesQty6mExcluding(
   companyId: string,
-): Promise<Map<string, SalesAggregate>> {
+): Promise<Map<string, number>> {
   const now = new Date();
-  const sixMonthsAgo = new Date(now);
-  sixMonthsAgo.setUTCMonth(sixMonthsAgo.getUTCMonth() - 6);
-  const threeMonthsAgo = new Date(now);
-  threeMonthsAgo.setUTCMonth(threeMonthsAgo.getUTCMonth() - 3);
-  const oneMonthAgo = new Date(now);
-  oneMonthAgo.setUTCMonth(oneMonthAgo.getUTCMonth() - 1);
+  // UTC 기준 1일을 사용해 양쪽 경계를 정확히 맞춤 (정확한 월 구분이 목적).
+  const currentMonthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+  );
+  const sixMonthsBack = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 6, 1),
+  );
 
   const rows = await fetchAllRows<SoldRow>(() =>
     supabase
@@ -52,28 +52,61 @@ async function fetchSalesAggregate(
       .eq('company_id', companyId)
       .eq('is_return', false)
       .is('deleted_at', null)
-      .gte('order.order_date', sixMonthsAgo.toISOString())
-      .lt('order.order_date', now.toISOString()),
+      .gte('order.order_date', sixMonthsBack.toISOString())
+      .lt('order.order_date', currentMonthStart.toISOString()),
   );
 
-  const threeMs = threeMonthsAgo.toISOString();
-  const oneMs = oneMonthAgo.toISOString();
-  const map = new Map<string, SalesAggregate>();
+  const map = new Map<string, number>();
   for (const r of rows) {
-    const od = r.order?.order_date;
-    if (!od) continue;
-    const cur = map.get(r.product_id) ?? { qty_3m: 0, qty_1m: 0 };
-    if (od >= threeMs) cur.qty_3m += r.quantity;
-    if (od >= oneMs) cur.qty_1m += r.quantity;
-    map.set(r.product_id, cur);
+    if (!r.order?.order_date) continue;
+    map.set(r.product_id, (map.get(r.product_id) ?? 0) + r.quantity);
   }
   return map;
 }
 
+interface POTemplateRow {
+  template_id: string | null;
+}
+
+/**
+ * 이번 달 draft 발주서로 저장된 카테고리 distinct 셋.
+ * po_date 가 [이번 달 1일, 다음 달 1일) 인 status='draft' 행 기준.
+ */
+async function fetchSavedCategories(companyId: string): Promise<Set<string>> {
+  const now = new Date();
+  const currentMonthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+  );
+  const nextMonthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
+  );
+
+  const rows = await fetchAllRows<POTemplateRow>(() =>
+    supabase
+      .from('purchase_orders')
+      .select('template_id')
+      .eq('company_id', companyId)
+      .eq('status', 'draft')
+      .is('deleted_at', null)
+      .gte('po_date', currentMonthStart.toISOString())
+      .lt('po_date', nextMonthStart.toISOString()),
+  );
+
+  const set = new Set<string>();
+  for (const r of rows) {
+    if (r.template_id) set.add(r.template_id);
+  }
+  return set;
+}
+
 export interface UsePurchaseOrderResult {
   products: Product[];
-  salesMap: Map<string, SalesAggregate>;
+  /** product_id → 당월 제외 6개월 판매수량 합. */
+  salesMap: Map<string, number>;
+  /** product_id → 현재 재고 수량. */
   stockMap: Map<string, number>;
+  /** 이번 달 저장된 카테고리 셋. */
+  savedCategories: Set<string>;
   categories: string[];
   isLoading: boolean;
   error: Error | null;
@@ -84,11 +117,17 @@ export function usePurchaseOrder(
 ): UsePurchaseOrderResult {
   const productsQuery = useProducts(companyId);
   const stockQuery = useInventoryStock(companyId);
-  const salesQuery = useQuery<Map<string, SalesAggregate>>({
+  const salesQuery = useQuery<Map<string, number>>({
     queryKey: ['purchase-order-sales', companyId],
     enabled: Boolean(companyId),
-    queryFn: () => fetchSalesAggregate(companyId!),
+    queryFn: () => fetchSalesQty6mExcluding(companyId!),
     staleTime: 60_000,
+  });
+  const savedQuery = useQuery<Set<string>>({
+    queryKey: ['purchase-order-saved-categories', companyId],
+    enabled: Boolean(companyId),
+    queryFn: () => fetchSavedCategories(companyId!),
+    staleTime: 15_000,
   });
 
   const products = (productsQuery.data ?? []).filter((p) => p.is_active);
@@ -101,23 +140,26 @@ export function usePurchaseOrder(
   }
 
   const categorySet = new Set<string>();
-  for (const p of products) {
-    if (p.category) categorySet.add(p.category);
-  }
+  for (const p of products) if (p.category) categorySet.add(p.category);
   const categories = Array.from(categorySet).sort();
 
   const error =
     (productsQuery.error as Error | null) ??
     (stockQuery.error as Error | null) ??
-    (salesQuery.error as Error | null);
+    (salesQuery.error as Error | null) ??
+    (savedQuery.error as Error | null);
 
   return {
     products,
     salesMap: salesQuery.data ?? new Map(),
     stockMap,
+    savedCategories: savedQuery.data ?? new Set(),
     categories,
     isLoading:
-      productsQuery.isLoading || stockQuery.isLoading || salesQuery.isLoading,
+      productsQuery.isLoading ||
+      stockQuery.isLoading ||
+      salesQuery.isLoading ||
+      savedQuery.isLoading,
     error,
   };
 }
