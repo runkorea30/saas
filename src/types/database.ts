@@ -208,6 +208,56 @@ export type Database = {
         }
         Relationships: []
       }
+      customer_order_uploads: {
+        Row: {
+          company_id: string
+          created_at: string
+          customer_id: string
+          file_name: string | null
+          file_url: string | null
+          id: string
+          items: Json | null
+          message: string | null
+          shipping_info: Json | null
+          status: string
+          upload_type: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          customer_id: string
+          file_name?: string | null
+          file_url?: string | null
+          id?: string
+          items?: Json | null
+          message?: string | null
+          shipping_info?: Json | null
+          status?: string
+          upload_type: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          customer_id?: string
+          file_name?: string | null
+          file_url?: string | null
+          id?: string
+          items?: Json | null
+          message?: string | null
+          shipping_info?: Json | null
+          status?: string
+          upload_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_order_uploads_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_users: {
         Row: {
           company_id: string
@@ -276,6 +326,8 @@ export type Database = {
           grade: string | null
           id: string
           is_active: boolean
+          login_id: string | null
+          login_password: string | null
           name: string
           settlement_cycle: string | null
           updated_at: string
@@ -293,6 +345,8 @@ export type Database = {
           grade?: string | null
           id?: string
           is_active?: boolean
+          login_id?: string | null
+          login_password?: string | null
           name: string
           settlement_cycle?: string | null
           updated_at?: string
@@ -310,6 +364,8 @@ export type Database = {
           grade?: string | null
           id?: string
           is_active?: boolean
+          login_id?: string | null
+          login_password?: string | null
           name?: string
           settlement_cycle?: string | null
           updated_at?: string
@@ -837,6 +893,11 @@ export type Database = {
           company_id: string
           created_at: string
           deleted_at: string | null
+          grade_a: number | null
+          grade_b: number | null
+          grade_c: number | null
+          grade_d: number | null
+          grade_e: number | null
           id: string
           is_active: boolean
           name: string
@@ -854,6 +915,11 @@ export type Database = {
           company_id: string
           created_at?: string
           deleted_at?: string | null
+          grade_a?: number | null
+          grade_b?: number | null
+          grade_c?: number | null
+          grade_d?: number | null
+          grade_e?: number | null
           id?: string
           is_active?: boolean
           name: string
@@ -871,6 +937,11 @@ export type Database = {
           company_id?: string
           created_at?: string
           deleted_at?: string | null
+          grade_a?: number | null
+          grade_b?: number | null
+          grade_c?: number | null
+          grade_d?: number | null
+          grade_e?: number | null
           id?: string
           is_active?: boolean
           name?: string

@@ -20,10 +20,14 @@ import { ProductsPage } from '@/pages/inventory/ProductsPage';
 import { StockPage } from '@/pages/inventory/StockPage';
 import { ImportReceivingPage } from '@/pages/inventory/ImportReceivingPage';
 import { PurchaseOrderPage } from '@/pages/inventory/PurchaseOrderPage';
+import { CustomerOrderPage } from '@/pages/customer/CustomerOrderPage';
 
 function App() {
   return (
     <Routes>
+      {/* 거래처 전용 주문서 페이지 — OPS Shell 바깥 독립 라우트 */}
+      <Route path="/customer-order" element={<CustomerOrderPage />} />
+
       <Route element={<Shell />}>
         <Route index element={<HomePage />} />
 

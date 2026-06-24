@@ -326,6 +326,14 @@ ProductListTable에서 `Check` 컴포넌트(`orders/primitives.tsx`)를 신규 i
   - `GRANT SELECT, INSERT, UPDATE, DELETE ON mochicraft_demo.purchase_order_items TO anon`
   - `GRANT SELECT, INSERT, UPDATE, DELETE ON mochicraft_demo.purchase_orders TO anon`
   - 롤백 시 테이블도 제거: `DROP TABLE mochicraft_demo.purchase_order_items;`
+- **거래처 주문서 포털 추가** (Phase 3.15 — `customer_order_portal_phase_3_14` 마이그레이션):
+  - `mochicraft_demo.customers.login_id varchar` 컬럼 추가 (NULL 허용) — 롤백: `ALTER TABLE mochicraft_demo.customers DROP COLUMN login_id;`
+  - `mochicraft_demo.customers.login_password varchar` 컬럼 추가 (평문, dogfooding 전용) — 롤백: `ALTER TABLE mochicraft_demo.customers DROP COLUMN login_password;`
+  - `idx_customers_login_id_unique` 부분 UNIQUE 인덱스 (company_id, login_id) — 롤백: `DROP INDEX mochicraft_demo.idx_customers_login_id_unique;`
+  - `mochicraft_demo.customer_order_uploads` 테이블 — 롤백: `DROP TABLE mochicraft_demo.customer_order_uploads CASCADE;`
+  - `anon_all_customer_order_uploads` 정책 (anon ALL USING true) — 롤백: `DROP POLICY "anon_all_customer_order_uploads" ON mochicraft_demo.customer_order_uploads;`
+  - `GRANT SELECT, INSERT ON mochicraft_demo.customer_order_uploads TO anon`
+  - 🟠 Phase 2 Auth 도입 시 `customer_users.password_hash` 로 인증 이관 + 위 컬럼/정책 모두 회수
 
 ### 원복 SQL
 ```sql
