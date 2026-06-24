@@ -30,6 +30,16 @@ import { getCategoryLabel } from '@/constants/categories';
 
 const SAVED_QUERY_KEY = 'purchase-order-saved-categories';
 
+/**
+ * "저장된 분류 전체선택" 의 가상 단일-선택 sentinel.
+ *
+ * 🟠 카테고리 필터는 단일 선택(`selectedCategory: string | null`) 모델이지만,
+ *    "저장된 분류 전체선택" 버튼은 사용자 요구상 그대로 유지해야 한다.
+ *    실제 카테고리 이름과 충돌하지 않는 sentinel 한 값으로 표현해
+ *    상태 자체는 단일 string 으로 유지한다.
+ */
+const SAVED_ALL_FILTER = '__SAVED_ALL__';
+
 function pad2(n: number): string {
   return String(n).padStart(2, '0');
 }
@@ -65,15 +75,22 @@ export function PurchaseOrderPage() {
 
   /** product_id → 발주수량 (EA). 0/없음 = 빈칸. */
   const [orderQty, setOrderQty] = useState<Map<string, number>>(new Map());
-  /** 선택된 카테고리. 빈 배열 = 전체. */
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  /**
+   * 선택된 카테고리 (단일 선택).
+   * - `null` : 전체
+   * - `SAVED_ALL_FILTER` : 저장된 분류 전체선택 모드 (가상)
+   * - 그 외 : 해당 카테고리 단일
+   */
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const filteredProducts = useMemo(() => {
-    if (selectedCategories.length === 0) return products;
-    const set = new Set(selectedCategories);
-    return products.filter((p) => set.has(p.category));
-  }, [products, selectedCategories]);
+    if (selectedCategory === null) return products;
+    if (selectedCategory === SAVED_ALL_FILTER) {
+      return products.filter((p) => savedCategories.has(p.category));
+    }
+    return products.filter((p) => p.category === selectedCategory);
+  }, [products, selectedCategory, savedCategories]);
 
   const totalUsd = useMemo(() => {
     let sum = 0;
@@ -166,22 +183,26 @@ export function PurchaseOrderPage() {
     }
   };
 
-  const toggleCategory = (cat: string) => {
-    setSelectedCategories((prev) =>
-      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat],
-    );
+  /** 카테고리 단일 선택 — 클릭한 카테고리만 활성화. */
+  const handleCategoryClick = (cat: string) => {
+    setSelectedCategory(cat);
   };
 
-  /** 저장된 분류 전체선택 — savedCategories 의 모든 카테고리를 선택. */
+  /** 저장된 분류 전체선택 — 가상 sentinel 로 표시 (단일 선택 모델 유지). */
   const handleSelectSavedCategories = () => {
-    setSelectedCategories(Array.from(savedCategories));
+    if (savedCategories.size === 0) return;
+    setSelectedCategory(SAVED_ALL_FILTER);
   };
 
-  /** 현재 카테고리 저장 — 선택된(혹은 전체) 카테고리별로 purchase_orders 행 upsert. */
+  /** 현재 카테고리 저장 — 선택 상태에 따라 대상 카테고리 결정. */
   const handleSaveCategory = async () => {
     if (!companyId) return;
     const targetCats =
-      selectedCategories.length > 0 ? selectedCategories : categories;
+      selectedCategory === null
+        ? categories
+        : selectedCategory === SAVED_ALL_FILTER
+          ? Array.from(savedCategories)
+          : [selectedCategory];
     if (targetCats.length === 0) {
       showToast({ kind: 'error', text: '저장할 카테고리가 없습니다.' });
       return;
@@ -507,17 +528,17 @@ export function PurchaseOrderPage() {
         >
           <CategoryButton
             label="전체"
-            isSelected={selectedCategories.length === 0}
+            isSelected={selectedCategory === null}
             isSaved={false}
-            onClick={() => setSelectedCategories([])}
+            onClick={() => setSelectedCategory(null)}
           />
           {categories.map((cat) => (
             <CategoryButton
               key={cat}
               label={getCategoryLabel(cat)}
-              isSelected={selectedCategories.includes(cat)}
+              isSelected={selectedCategory === cat}
               isSaved={savedCategories.has(cat)}
-              onClick={() => toggleCategory(cat)}
+              onClick={() => handleCategoryClick(cat)}
             />
           ))}
           <div style={{ flex: 1 }} />
