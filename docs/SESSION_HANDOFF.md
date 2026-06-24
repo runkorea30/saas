@@ -72,12 +72,13 @@
   - 컬럼간격 드래그 리사이저 (현재는 fixed/flex 토글만)
   - 우상단 "자동수집 OFF" + "수집/팩스" 영역 (의미 미정의)
   - 파일 자체를 서버 업로드 (현재는 클라이언트 미리보기만)
-- **청구서 페이지 후속** (Phase 3.25 완료 후 사용자 명시):
-  - 브라우저 실 확인 — 알파문구 거래처 + 데이터 있는 월 선택 → 미리보기/인쇄 동작 확인
-  - 이메일 발송 기능 구현 (발송 방식 미결정 — Supabase Edge Function + 이메일 서비스 고려)
-  - 서버사이드 PDF 생성 후 이메일 첨부 발송 (이전 결정사항)
-  - 발송 기록 DB 저장 (발송 일시, 수신자, 상태)
-  - 매월 3일 자동 발송 스케줄 (pg_cron 또는 Edge Function cron)
+- **청구서 페이지 후속** (Phase 3.25 + 수정 2건 완료 후 사용자 명시):
+  - [x] ~~알파문구 종합청구서 엑셀 다운로드 기능 구현~~ — `fa7fd7d` 로 완료 (단일 거래처/지점 기준 1행 종합청구서)
+  - [ ] 브라우저 실 확인 — 알파문구 거래처 + 데이터 있는 월 선택 → 미리보기/인쇄/엑셀 다운로드 동작 확인 (사용자 진행 예정)
+  - [ ] 이메일 발송 기능 구현 (발송 방식 미결정 — Supabase Edge Function + 이메일 서비스 고려)
+  - [ ] 서버사이드 PDF 생성 후 이메일 첨부 발송 (이전 결정사항)
+  - [ ] 발송 기록 DB 저장 (발송 일시, 수신자, 상태)
+  - [ ] 매월 3일 자동 발송 스케줄 (pg_cron 또는 Edge Function cron)
 
 ---
 
@@ -127,6 +128,44 @@
 - `npx tsc --noEmit` → 0 errors.
 - `npm run build` → 성공 (5.80s, 1757 modules).
 - 브라우저 실 확인은 사용자가 진행 예정 (위 "청구서 페이지 후속" 항목).
+
+### Phase 3.25 후속 패치 (2026-06-25 추가, `890c1ff` → `fa7fd7d`, 범위 `2b1d864..fa7fd7d`)
+
+청구서 페이지 수정 2건 — 3건 커밋.
+
+#### `890c1ff` — 청구서 테이블 컬럼 순서 변경
+- **BillingPrintView** thead/tbody 컬럼 순서: `No | 제품명 | 코드 | …` → **`No | 코드 | 제품명 | 수량 | 공급가 | 판매가 | 합계`**.
+- 스타일(thCenter/thLeft) 함수는 그대로, 컬럼 자리만 스왑.
+
+#### `57863df` — 알파문구 종합청구서 엑셀 생성 유틸 신설
+- **신규 파일** `src/utils/generateAlphaBillingExcel.ts` (+191줄).
+- `import * as XLSX from 'xlsx'` 정적 import — 기존 7개 파일과 동일 패턴.
+- 14열 aoa 그리드로 원본 양식 재현 (xlrd 분석 기반).
+- 시트 구조 (총 13행):
+  1. row0 제목 `종   합   청   구   서`
+  2. row1 접수일자 `접 수 일 자 :   {nextYear}년    {nextMonth}월  3 일                      ( {month}  )월분`
+  3. row2 헤더 (사업장명/건수/청구금액/반품금액/D/C/기타공제/결제액/비고)
+  4. row3~ 지점 데이터 (단일 거래처 = 단일 row)
+  5. 합계 행
+  6. 회사정보 (런코리아/양시혁/대표/010-8981-1434)
+  7. 특이사항 + 입고상품명("엔젤러스")
+  8. 자금팀 헤더 + 팀장/주임/사원 3행 + 마지막 인사문
+- `!cols` 열 너비 14개 (원본 xlrd width 단위 / 256 ≈ 문자 수 근사 변환).
+- 파일명: `알파문구_종합청구서_{year}년{month}월.xlsx`.
+
+#### `fa7fd7d` — BillingPage 종합청구서 다운로드 버튼 추가
+- `Download` 아이콘 + `import { generateAlphaBillingExcel }`.
+- 버튼 위치: 이메일 ↔ 인쇄 사이. `isAlpha === true` 일 때만 노출.
+- **집계 로직 변경**: spec 의 `o.total_amount ?? 0` 은 `useBillingOrders` SELECT 에 `total_amount` 컬럼 미포함이라 항상 0 → `order_items.amount` 기반 분리 집계로 변경.
+  - 청구금액 = `is_return=false` 항목 amount 합
+  - 반품금액 = `is_return=true` 항목 amount **절대값** 합 (DB 저장값이 음수일 수 있음을 가정)
+  - 결제액 = 청구금액 − 반품금액
+- 단일 거래처(=한 지점) 기준 `branches: [{ branchName, count, totalAmount, returnAmount, settlementAmount }]` 1행 전달.
+
+#### 검증
+- `npx tsc --noEmit` → 0 errors.
+- `npm run build` → 성공 (5.57s, 1758 modules).
+- 브라우저 실 확인은 사용자가 진행 예정 (실제 알파문구 거래처 데이터로 다운로드된 엑셀 양식 비교).
 
 ---
 
