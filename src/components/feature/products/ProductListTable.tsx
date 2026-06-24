@@ -154,6 +154,9 @@ export function ProductListTable({
           products.map((p) => {
             const stockVal = stockByProduct?.get(p.id)?.current;
             const isRowChecked = !!checked[p.id];
+            const inactive = p.is_active === false;
+            const baseBg = inactive ? '#F9F7F6' : 'var(--surface)';
+            const hoverBg = inactive ? '#F3EFEC' : 'var(--surface-2)';
             return (
               <div
                 key={p.id}
@@ -164,16 +167,15 @@ export function ProductListTable({
                   gap: ROW_GAP_PX,
                   padding: `11px ${ROW_PADDING_X_PX}px`,
                   borderBottom: '1px solid var(--line)',
-                  background: 'var(--surface)',
+                  background: baseBg,
+                  opacity: inactive ? 0.6 : 1,
                   transition: 'background .1s',
                 }}
                 onMouseEnter={(e) =>
-                  ((e.currentTarget as HTMLDivElement).style.background =
-                    'var(--surface-2)')
+                  ((e.currentTarget as HTMLDivElement).style.background = hoverBg)
                 }
                 onMouseLeave={(e) =>
-                  ((e.currentTarget as HTMLDivElement).style.background =
-                    'var(--surface)')
+                  ((e.currentTarget as HTMLDivElement).style.background = baseBg)
                 }
               >
                 {/* 체크박스 셀 */}
@@ -195,7 +197,19 @@ export function ProductListTable({
 
                 <CellText value={p.code} numeric muted />
 
-                <CellText value={p.name} bold ink="ink" />
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    minWidth: 0,
+                  }}
+                >
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <CellText value={p.name} bold ink="ink" />
+                  </div>
+                  {inactive && <HiddenBadge />}
+                </div>
 
                 <CellText value={p.unit} small muted />
 
@@ -398,6 +412,27 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+function HiddenBadge() {
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        padding: '1px 6px',
+        borderRadius: 999,
+        background: '#fef3c7',
+        color: '#d97706',
+        border: '1px solid #fcd34d',
+        fontWeight: 500,
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+      }}
+      title="거래처 포털에 노출되지 않습니다"
+    >
+      노출금지
+    </span>
   );
 }
 

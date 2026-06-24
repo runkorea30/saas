@@ -9,10 +9,11 @@
  * 🟠 Phase A: 2분할 제거 → 전체 폭. 편집/삭제 진입점은 행 마지막 컬럼 아이콘 버튼.
  *    상세 펼침(Phase B), 컬럼 커스터마이징(Phase C)은 별도 PR.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Download, Plus, Trash2 } from 'lucide-react';
+import { Download, Plus } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import type { Database } from '@/types/database';
 import { useCompany } from '@/hooks/useCompany';
 import {
   useProducts,
@@ -49,6 +50,19 @@ export function ProductsPage() {
   const deleteMut = useDeleteProduct(companyId);
   const queryClient = useQueryClient();
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+
+  // ───── 일괄수정 ─────
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [isBulkEditing, setIsBulkEditing] = useState(false);
+  const [bulkEditFields, setBulkEditFields] = useState({
+    category: '',
+    unit: '',
+    unit_price_usd: '',
+    sell_price: '',
+  });
+
+  // ───── 노출 토글 (is_active) ─────
+  const [isTogglingActive, setIsTogglingActive] = useState(false);
 
   // ───── 필터 상태 ─────
   const [query, setQuery] = useState('');
@@ -262,6 +276,116 @@ export function ProductsPage() {
     }
   };
 
+  /** 일괄수정 — 입력된 필드만 UPDATE. 빈 입력은 변경하지 않음. */
+  const handleBulkEdit = async () => {
+    if (selectedCount === 0 || !companyId || isBulkEditing) return;
+    const ids = Object.keys(checked);
+
+    type ProductUpdate = Database['mochicraft_demo']['Tables']['products']['Update'];
+    const updateData: ProductUpdate = {};
+    if (bulkEditFields.category.trim()) {
+      updateData.category = bulkEditFields.category.trim();
+    }
+    if (bulkEditFields.unit.trim()) {
+      updateData.unit = bulkEditFields.unit.trim();
+    }
+    if (bulkEditFields.unit_price_usd.trim()) {
+      const v = parseFloat(bulkEditFields.unit_price_usd);
+      if (Number.isFinite(v)) updateData.unit_price_usd = v;
+    }
+    if (bulkEditFields.sell_price.trim()) {
+      const v = parseInt(bulkEditFields.sell_price, 10);
+      if (Number.isFinite(v)) updateData.sell_price = v;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      showToast({
+        kind: 'error',
+        text: '수정할 항목을 1개 이상 입력해주세요.',
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `선택한 ${ids.length}개 제품의 정보를 일괄 수정하시겠습니까?`,
+    );
+    if (!confirmed) return;
+
+    setIsBulkEditing(true);
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update(updateData)
+        .in('id', ids)
+        .eq('company_id', companyId)
+        .is('deleted_at', null);
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ['products', companyId] });
+      setChecked({});
+      setBulkEditOpen(false);
+      setBulkEditFields({
+        category: '',
+        unit: '',
+        unit_price_usd: '',
+        sell_price: '',
+      });
+      showToast({
+        kind: 'success',
+        text: `${ids.length}개 제품을 수정했습니다`,
+      });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[products.bulk-edit]', e);
+      showToast({
+        kind: 'error',
+        text: e instanceof Error ? e.message : '수정 중 오류가 발생했습니다.',
+      });
+    } finally {
+      setIsBulkEditing(false);
+    }
+  };
+
+  /** is_active 일괄 토글 — true=노출, false=노출금지. */
+  const setBulkActive = async (active: boolean) => {
+    if (selectedCount === 0 || !companyId || isTogglingActive) return;
+    const ids = Object.keys(checked);
+    const confirmed = active
+      ? window.confirm(
+          `선택한 ${ids.length}개 제품을 거래처에 다시 노출하시겠습니까?`,
+        )
+      : window.confirm(
+          `선택한 ${ids.length}개 제품을 거래처에 노출하지 않도록 설정하시겠습니까?\n\n주문 불가, 품절/재고부족 목록에도 표시되지 않습니다.`,
+        );
+    if (!confirmed) return;
+    setIsTogglingActive(true);
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({ is_active: active })
+        .in('id', ids)
+        .eq('company_id', companyId)
+        .is('deleted_at', null);
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ['products', companyId] });
+      setChecked({});
+      showToast({
+        kind: 'success',
+        text: active
+          ? `${ids.length}개 제품을 노출 활성화했습니다`
+          : `${ids.length}개 제품을 노출금지로 설정했습니다`,
+      });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[products.toggle-active]', e);
+      showToast({
+        kind: 'error',
+        text: e instanceof Error ? e.message : '설정 중 오류가 발생했습니다.',
+      });
+    } finally {
+      setIsTogglingActive(false);
+    }
+  };
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <main
@@ -326,32 +450,97 @@ export function ProductsPage() {
                 value={`${summary.categories}종`}
               />
             </div>
-            <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               {selectedCount > 0 && (
-                <button
-                  type="button"
-                  onClick={handleBulkDelete}
-                  disabled={isBulkDeleting}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    height: 32,
-                    padding: '0 14px',
-                    borderRadius: 6,
-                    fontSize: 12.5,
-                    fontWeight: 500,
-                    border: '1.5px solid #ef4444',
-                    background: isBulkDeleting ? '#fef2f2' : '#FFFFFF',
-                    color: '#ef4444',
-                    cursor: isBulkDeleting ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  <Trash2 size={13} />
-                  {isBulkDeleting
-                    ? '삭제 중…'
-                    : `선택 삭제 (${selectedCount})`}
-                </button>
+                <>
+                  <span style={{ fontSize: 12, color: 'var(--ink-3)', marginRight: 2 }}>
+                    {selectedCount}개 선택
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setBulkEditOpen(true)}
+                    disabled={isBulkEditing}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      height: 30,
+                      padding: '0 12px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: '1.5px solid #6B1F2A',
+                      background: '#FFFFFF',
+                      color: '#6B1F2A',
+                      cursor: isBulkEditing ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    ✏️ 일괄수정
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBulkActive(false)}
+                    disabled={isTogglingActive}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      height: 30,
+                      padding: '0 12px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: '1.5px solid #f59e0b',
+                      background: '#FFFFFF',
+                      color: '#f59e0b',
+                      cursor: isTogglingActive ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    🚫 노출금지
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBulkActive(true)}
+                    disabled={isTogglingActive}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      height: 30,
+                      padding: '0 12px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: '1.5px solid #22c55e',
+                      background: '#FFFFFF',
+                      color: '#22c55e',
+                      cursor: isTogglingActive ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    ✅ 노출
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleBulkDelete}
+                    disabled={isBulkDeleting}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      height: 30,
+                      padding: '0 12px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: '1.5px solid #ef4444',
+                      background: isBulkDeleting ? '#fef2f2' : '#FFFFFF',
+                      color: '#ef4444',
+                      cursor: isBulkDeleting ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    🗑 {isBulkDeleting ? '삭제 중…' : '삭제'}
+                  </button>
+                </>
               )}
               <button
                 type="button"
@@ -437,6 +626,120 @@ export function ProductsPage() {
         )}
       </Modal>
 
+      {/* 일괄수정 모달 */}
+      <Modal
+        open={bulkEditOpen}
+        onClose={() => {
+          if (isBulkEditing) return;
+          setBulkEditOpen(false);
+        }}
+        title="일괄 수정"
+        width={400}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: 0 }}>
+            {selectedCount}개 제품 · 입력한 항목만 변경됩니다
+          </p>
+
+          <BulkEditField label="분류">
+            <input
+              type="text"
+              value={bulkEditFields.category}
+              onChange={(e) =>
+                setBulkEditFields((p) => ({ ...p, category: e.target.value }))
+              }
+              placeholder="변경할 분류명 입력"
+              style={bulkEditInputStyle}
+            />
+          </BulkEditField>
+
+          <BulkEditField label="단위">
+            <select
+              value={bulkEditFields.unit}
+              onChange={(e) =>
+                setBulkEditFields((p) => ({ ...p, unit: e.target.value }))
+              }
+              style={{ ...bulkEditInputStyle, background: '#FFFFFF' }}
+            >
+              <option value="">변경 안 함</option>
+              <option value="EA">EA</option>
+              <option value="DZ">DZ</option>
+              <option value="SET">SET</option>
+              <option value="BOX">BOX</option>
+            </select>
+          </BulkEditField>
+
+          <BulkEditField label="USD 단가">
+            <input
+              type="number"
+              step="0.01"
+              value={bulkEditFields.unit_price_usd}
+              onChange={(e) =>
+                setBulkEditFields((p) => ({
+                  ...p,
+                  unit_price_usd: e.target.value,
+                }))
+              }
+              placeholder="예: 21.06"
+              style={bulkEditInputStyle}
+            />
+          </BulkEditField>
+
+          <BulkEditField label="판매가 (원)">
+            <input
+              type="number"
+              value={bulkEditFields.sell_price}
+              onChange={(e) =>
+                setBulkEditFields((p) => ({
+                  ...p,
+                  sell_price: e.target.value,
+                }))
+              }
+              placeholder="예: 8700"
+              style={bulkEditInputStyle}
+            />
+          </BulkEditField>
+
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              justifyContent: 'flex-end',
+              marginTop: 4,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setBulkEditOpen(false)}
+              disabled={isBulkEditing}
+              className="btn-base"
+              style={{ height: 32, fontSize: 12.5 }}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkEdit}
+              disabled={isBulkEditing}
+              style={{
+                height: 32,
+                padding: '0 16px',
+                borderRadius: 6,
+                fontSize: 12.5,
+                fontWeight: 600,
+                border: 'none',
+                background: '#6B1F2A',
+                color: '#FFFFFF',
+                cursor: isBulkEditing ? 'not-allowed' : 'pointer',
+                opacity: isBulkEditing ? 0.6 : 1,
+              }}
+            >
+              {isBulkEditing ? '수정 중…' : '수정하기'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       {/* 삭제 확인 */}
       <ConfirmDialog
         open={deleteTarget !== null}
@@ -499,6 +802,43 @@ function SummaryItem({
       >
         {value}
       </span>
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────
+// 일괄수정 모달용 헬퍼
+
+const bulkEditInputStyle: CSSProperties = {
+  width: '100%',
+  border: '1px solid var(--line-strong)',
+  borderRadius: 6,
+  padding: '8px 10px',
+  fontSize: 13,
+  outline: 'none',
+  boxSizing: 'border-box',
+};
+
+function BulkEditField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label
+        style={{
+          fontSize: 12,
+          color: 'var(--ink-3)',
+          display: 'block',
+          marginBottom: 4,
+        }}
+      >
+        {label}
+      </label>
+      {children}
     </div>
   );
 }
