@@ -443,6 +443,47 @@ export type Database = {
           },
         ]
       }
+      customer_groups: {
+        Row: {
+          billing_name: string
+          company_id: string
+          created_at: string
+          deduction_note: string | null
+          id: string
+          monthly_deduction: number
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          billing_name: string
+          company_id: string
+          created_at?: string
+          deduction_note?: string | null
+          id?: string
+          monthly_deduction?: number
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          billing_name?: string
+          company_id?: string
+          created_at?: string
+          deduction_note?: string | null
+          id?: string
+          monthly_deduction?: number
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_groups_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customers: {
         Row: {
           bank_aliases: string | null
@@ -455,6 +496,7 @@ export type Database = {
           delivery_address: string | null
           email: string | null
           grade: string | null
+          group_id: string | null
           id: string
           is_active: boolean
           login_id: string | null
@@ -475,6 +517,7 @@ export type Database = {
           delivery_address?: string | null
           email?: string | null
           grade?: string | null
+          group_id?: string | null
           id?: string
           is_active?: boolean
           login_id?: string | null
@@ -495,6 +538,7 @@ export type Database = {
           delivery_address?: string | null
           email?: string | null
           grade?: string | null
+          group_id?: string | null
           id?: string
           is_active?: boolean
           login_id?: string | null
@@ -517,6 +561,74 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customers_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "customer_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      group_payments: {
+        Row: {
+          amount: number
+          company_id: string
+          created_at: string
+          customer_id: string | null
+          deduction_applied: number
+          group_id: string | null
+          id: string
+          note: string | null
+          paid_at: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          company_id: string
+          created_at?: string
+          customer_id?: string | null
+          deduction_applied?: number
+          group_id?: string | null
+          id?: string
+          note?: string | null
+          paid_at: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          company_id?: string
+          created_at?: string
+          customer_id?: string | null
+          deduction_applied?: number
+          group_id?: string | null
+          id?: string
+          note?: string | null
+          paid_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_payments_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_payments_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_payments_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "customer_groups"
             referencedColumns: ["id"]
           },
         ]

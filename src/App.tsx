@@ -17,6 +17,7 @@ import { OrdersPage } from '@/pages/sales/OrdersPage';
 import { OrderEntryPage } from '@/pages/sales/OrderEntryPage';
 import { SalesAnalysisPage } from '@/pages/sales/SalesAnalysisPage';
 import { CustomersPage } from '@/pages/settings/CustomersPage';
+import { CustomerGroupsPage } from '@/pages/settings/CustomerGroupsPage';
 import { ProductsPage } from '@/pages/inventory/ProductsPage';
 import { StockPage } from '@/pages/inventory/StockPage';
 import { ImportReceivingPage } from '@/pages/inventory/ImportReceivingPage';
@@ -61,6 +62,7 @@ function App() {
         <Route path="settings">
           <Route index element={<Navigate to="/settings/customers" replace />} />
           <Route path="customers" element={<CustomersPage />} />
+          <Route path="customer-groups" element={<CustomerGroupsPage />} />
         </Route>
 
         {/* 레거시 /orders → /sales/orders */}
