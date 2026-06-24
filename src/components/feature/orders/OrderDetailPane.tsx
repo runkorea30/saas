@@ -15,7 +15,7 @@ import {
   StatusBadge,
   fmtDateTime,
 } from './primitives';
-import { calcSupplyAmount, calcSupplyPriceByGrade } from '@/utils/calculations';
+import { calcSupplyAmount } from '@/utils/calculations';
 import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
 import { useOrderItems, type OrderItemRow } from '@/hooks/queries/useOrderItems';
@@ -407,7 +407,6 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                   <th className="text-left py-2 px-2 font-medium text-[var(--ink-3)] w-20">코드</th>
                   <th className="text-left py-2 px-2 font-medium text-[var(--ink-3)]">제품명</th>
                   <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-14">수량</th>
-                  <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">판매가</th>
                   <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">공급가</th>
                   <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">합계</th>
                 </tr>
@@ -421,20 +420,9 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                   const rowAmount = editMode
                     ? (item as OrderItemDraft).quantity * item.unit_price
                     : (item as OrderItemRow).amount;
-                  // 거래처 등급(A~E)별 제품 공급율로 공급가 계산.
-                  const gradeKey = (
-                    `grade_${(order.customer?.grade ?? '').toLowerCase()}` as
-                      | 'grade_a'
-                      | 'grade_b'
-                      | 'grade_c'
-                      | 'grade_d'
-                      | 'grade_e'
-                  );
-                  const gradeRate =
-                    gradeKey in item
-                      ? ((item as OrderItemRow | OrderItemDraft)[gradeKey] ?? 0)
-                      : 0;
-                  const supplyPrice = calcSupplyPriceByGrade(item.unit_price, gradeRate);
+                  // 🟠 거래처 포털 INSERT 정책: unit_price = 공급가.
+                  //    OPS 수동주문입력 INSERT 정책: unit_price = 판매가.
+                  //    혼재 가능하나 dogfooding 단계에서는 unit_price 를 공급가로 표시.
 
                   return (
                     <tr
@@ -484,9 +472,6 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                       <td className="py-1.5 px-2 text-right font-num">
                         {item.unit_price.toLocaleString()}
                       </td>
-                      <td className="py-1.5 px-2 text-right font-num">
-                        {supplyPrice.toLocaleString()}
-                      </td>
                       <td className="py-1.5 px-2 text-right font-num font-medium">
                         {rowAmount.toLocaleString()}
                       </td>
@@ -497,7 +482,7 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
               <tfoot>
                 <tr className="border-t-2 border-[var(--line-strong)]">
                   <td
-                    colSpan={5}
+                    colSpan={4}
                     className="py-2 px-2 text-right text-xs font-medium text-[var(--ink-2)]"
                   >
                     합계
