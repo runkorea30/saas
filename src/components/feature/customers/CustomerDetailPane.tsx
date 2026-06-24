@@ -185,55 +185,85 @@ export function CustomerDetailPane({
       </div>
 
       {/* 세금계산서 발행 정보 */}
-      <div
-        style={{
-          padding: '14px 20px',
-          borderBottom: '1px solid var(--line)',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'baseline',
-            gap: 8,
-            marginBottom: 10,
-            flexWrap: 'wrap',
-          }}
-        >
-          <SectionTitle>세금계산서 발행 정보</SectionTitle>
-          {customer.group_id && (
-            <span
+      {(() => {
+        // 그룹 소속 거래처: customer_groups의 정보 우선 사용.
+        // 독립 거래처: customers 자체 컬럼 사용.
+        const inGroup = Boolean(customer.group_id && customer.customer_groups);
+        const taxInfo = inGroup ? customer.customer_groups : customer;
+        const groupName = customer.customer_groups?.name ?? null;
+        return (
+          <div
+            style={{
+              padding: '14px 20px',
+              borderBottom: '1px solid var(--line)',
+            }}
+          >
+            <div
               style={{
-                fontSize: 11,
-                color: 'var(--brand)',
-                fontWeight: 500,
-                fontFamily: 'var(--font-kr)',
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 8,
+                marginBottom: 10,
+                flexWrap: 'wrap',
               }}
             >
-              (그룹 대표 업체로 발행)
-            </span>
-          )}
-        </div>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'auto 1fr',
-            gap: '6px 14px',
-            fontSize: 12.5,
-          }}
-        >
-          <InfoRow
-            label="사업자등록번호"
-            value={customer.business_registration_number}
-            numeric={Boolean(customer.business_registration_number)}
-          />
-          <InfoRow label="대표자명" value={customer.ceo_name} />
-          <InfoRow label="사업자 주소" value={customer.business_address} />
-          <InfoRow label="업태" value={customer.business_type} />
-          <InfoRow label="종목" value={customer.business_category} />
-          <InfoRow label="세금계산서 이메일" value={customer.tax_email} />
-        </div>
-      </div>
+              <SectionTitle>세금계산서 발행 정보</SectionTitle>
+              {inGroup && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--brand)',
+                    fontWeight: 500,
+                    fontFamily: 'var(--font-kr)',
+                  }}
+                >
+                  {groupName
+                    ? `${groupName} 그룹 대표 업체로 발행`
+                    : '그룹 대표 업체로 발행'}
+                </span>
+              )}
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'auto 1fr',
+                gap: '6px 14px',
+                fontSize: 12.5,
+              }}
+            >
+              {inGroup && (
+                <InfoRow
+                  label="발행 업체명"
+                  value={customer.customer_groups?.billing_name ?? null}
+                />
+              )}
+              <InfoRow
+                label="사업자등록번호"
+                value={taxInfo?.business_registration_number ?? null}
+                numeric={Boolean(taxInfo?.business_registration_number)}
+              />
+              {inGroup && customer.customer_groups?.sub_business_number && (
+                <InfoRow
+                  label="종사업장번호"
+                  value={customer.customer_groups.sub_business_number}
+                  numeric
+                />
+              )}
+              <InfoRow label="대표자명" value={taxInfo?.ceo_name ?? null} />
+              <InfoRow
+                label="사업자 주소"
+                value={taxInfo?.business_address ?? null}
+              />
+              <InfoRow label="업태" value={taxInfo?.business_type ?? null} />
+              <InfoRow label="종목" value={taxInfo?.business_category ?? null} />
+              <InfoRow
+                label="세금계산서 이메일"
+                value={taxInfo?.tax_email ?? null}
+              />
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 편집 모달 — 닫혔다 다시 열릴 때 폼 재초기화를 위해 conditional render */}
       {isEditing && (

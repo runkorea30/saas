@@ -457,6 +457,7 @@ export type Database = {
           id: string
           monthly_deduction: number
           name: string
+          sub_business_number: string | null
           tax_email: string | null
           updated_at: string
         }
@@ -473,6 +474,7 @@ export type Database = {
           id?: string
           monthly_deduction?: number
           name: string
+          sub_business_number?: string | null
           tax_email?: string | null
           updated_at?: string
         }
@@ -489,6 +491,7 @@ export type Database = {
           id?: string
           monthly_deduction?: number
           name?: string
+          sub_business_number?: string | null
           tax_email?: string | null
           updated_at?: string
         }

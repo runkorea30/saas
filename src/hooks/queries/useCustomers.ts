@@ -24,6 +24,19 @@ export interface CustomerBusinessRef {
   business_number: string;
 }
 
+/** 거래처가 속한 그룹의 세금계산서 발행 정보 (조인 결과). */
+export interface CustomerGroupRef {
+  name: string;
+  billing_name: string;
+  business_registration_number: string | null;
+  sub_business_number: string | null;
+  ceo_name: string | null;
+  business_address: string | null;
+  business_type: string | null;
+  business_category: string | null;
+  tax_email: string | null;
+}
+
 export interface Customer {
   id: string;
   name: string;
@@ -45,6 +58,8 @@ export interface Customer {
   business_category: string | null;
   tax_email: string | null;
   business: CustomerBusinessRef | null;
+  /** 그룹 소속 거래처일 때만 조인 결과. group_id IS NULL 이면 null. */
+  customer_groups: CustomerGroupRef | null;
 }
 
 export interface CustomerOrderItem {
@@ -74,7 +89,12 @@ const CUSTOMER_SELECT = `
   settlement_cycle, bank_aliases, is_active, created_at, group_id,
   business_registration_number, ceo_name,
   business_address, business_type, business_category, tax_email,
-  business:businesses ( id, name, business_number )
+  business:businesses ( id, name, business_number ),
+  customer_groups (
+    name, billing_name,
+    business_registration_number, sub_business_number, ceo_name,
+    business_address, business_type, business_category, tax_email
+  )
 `;
 
 export function useCustomers(companyId: string | null) {
