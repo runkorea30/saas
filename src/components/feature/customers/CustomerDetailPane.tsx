@@ -161,6 +161,64 @@ export function CustomerDetailPane({
         </div>
       </div>
 
+      {/* 세금계산서 발행 정보 */}
+      <div
+        style={{
+          padding: '14px 20px',
+          borderBottom: '1px solid var(--line)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'baseline',
+            gap: 8,
+            marginBottom: 10,
+            flexWrap: 'wrap',
+          }}
+        >
+          <SectionTitle>세금계산서 발행 정보</SectionTitle>
+          {customer.group_id && (
+            <span
+              style={{
+                fontSize: 11,
+                color: 'var(--brand)',
+                fontWeight: 500,
+                fontFamily: 'var(--font-kr)',
+              }}
+            >
+              (그룹 대표 업체로 발행)
+            </span>
+          )}
+        </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'auto 1fr',
+            gap: '6px 14px',
+            fontSize: 12.5,
+          }}
+        >
+          <InfoRow
+            label="사업자등록번호"
+            value={customer.business_registration_number}
+            numeric={Boolean(customer.business_registration_number)}
+          />
+          {customer.sub_business_number && (
+            <InfoRow
+              label="종사업장번호"
+              value={customer.sub_business_number}
+              numeric
+            />
+          )}
+          <InfoRow label="대표자명" value={customer.ceo_name} />
+          <InfoRow label="사업자 주소" value={customer.business_address} />
+          <InfoRow label="업태" value={customer.business_type} />
+          <InfoRow label="종목" value={customer.business_category} />
+          <InfoRow label="세금계산서 이메일" value={customer.tax_email} />
+        </div>
+      </div>
+
       {/* 최근 주문 이력 */}
       <div style={{ padding: '14px 20px' }}>
         <SectionTitle>최근 주문 이력</SectionTitle>

@@ -40,6 +40,13 @@ interface EditingState {
   billing_name: string;
   monthly_deduction: string; // 입력 편의를 위해 string 으로 보관, 저장 시 number 변환
   deduction_note: string;
+  // 세금계산서 발행 정보
+  business_registration_number: string;
+  ceo_name: string;
+  business_address: string;
+  business_type: string;
+  business_category: string;
+  tax_email: string;
   selectedMemberIds: Set<string>;
 }
 
@@ -49,8 +56,22 @@ const emptyEditing = (): EditingState => ({
   billing_name: '',
   monthly_deduction: '',
   deduction_note: '',
+  business_registration_number: '',
+  ceo_name: '',
+  business_address: '',
+  business_type: '',
+  business_category: '',
+  tax_email: '',
   selectedMemberIds: new Set(),
 });
+
+/** 사업자등록번호 자동 하이픈 포맷 (000-00-00000). */
+function formatBizNo(value: string): string {
+  const digits = value.replace(/\D/g, '').slice(0, 10);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 5) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+}
 
 // ───────────────────────────────────────────────────────────
 // 쿼리: 그룹 + 멤버 동시 로딩
@@ -69,7 +90,10 @@ function useGroupsWithMembers(companyId: string | null) {
           supabase
             .from('customer_groups')
             .select(
-              'id, company_id, name, billing_name, monthly_deduction, deduction_note, created_at, updated_at',
+              `id, company_id, name, billing_name, monthly_deduction, deduction_note,
+               business_registration_number, ceo_name, business_address,
+               business_type, business_category, tax_email,
+               created_at, updated_at`,
             )
             .eq('company_id', companyId!),
         ),
@@ -132,6 +156,13 @@ export function CustomerGroupsPage() {
         billing_name: state.billing_name.trim(),
         monthly_deduction: Number(state.monthly_deduction) || 0,
         deduction_note: state.deduction_note.trim() || null,
+        business_registration_number:
+          state.business_registration_number.trim() || null,
+        ceo_name: state.ceo_name.trim() || null,
+        business_address: state.business_address.trim() || null,
+        business_type: state.business_type.trim() || null,
+        business_category: state.business_category.trim() || null,
+        tax_email: state.tax_email.trim() || null,
       };
 
       let savedId: string;
@@ -237,6 +268,12 @@ export function CustomerGroupsPage() {
       billing_name: group.billing_name,
       monthly_deduction: String(group.monthly_deduction || ''),
       deduction_note: group.deduction_note ?? '',
+      business_registration_number: group.business_registration_number ?? '',
+      ceo_name: group.ceo_name ?? '',
+      business_address: group.business_address ?? '',
+      business_type: group.business_type ?? '',
+      business_category: group.business_category ?? '',
+      tax_email: group.tax_email ?? '',
       selectedMemberIds: new Set(group.members.map((m) => m.id)),
     });
   };
@@ -705,6 +742,127 @@ function GroupEditModal({
             style={{ ...inputStyle, resize: 'vertical', minHeight: 56 }}
           />
         </Field>
+
+        {/* ───── 세금계산서 발행 정보 ───── */}
+        <div
+          style={{
+            borderTop: '1px solid var(--line)',
+            paddingTop: 14,
+            marginTop: 2,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: 'var(--ink-3)',
+              fontFamily: 'var(--font-num)',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              marginBottom: 10,
+            }}
+          >
+            세금계산서 발행 정보
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 12,
+            }}
+          >
+            <Field label="사업자등록번호">
+              <input
+                type="text"
+                inputMode="numeric"
+                value={state.business_registration_number}
+                onChange={(e) =>
+                  onChange({
+                    ...state,
+                    business_registration_number: formatBizNo(e.target.value),
+                  })
+                }
+                placeholder="000-00-00000"
+                disabled={busy}
+                style={inputStyle}
+              />
+            </Field>
+
+            <Field label="대표자명">
+              <input
+                type="text"
+                value={state.ceo_name}
+                onChange={(e) =>
+                  onChange({ ...state, ceo_name: e.target.value })
+                }
+                disabled={busy}
+                style={inputStyle}
+              />
+            </Field>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <Field label="사업자 주소">
+              <input
+                type="text"
+                value={state.business_address}
+                onChange={(e) =>
+                  onChange({ ...state, business_address: e.target.value })
+                }
+                disabled={busy}
+                style={inputStyle}
+              />
+            </Field>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 12,
+              marginTop: 12,
+            }}
+          >
+            <Field label="업태">
+              <input
+                type="text"
+                value={state.business_type}
+                onChange={(e) =>
+                  onChange({ ...state, business_type: e.target.value })
+                }
+                disabled={busy}
+                style={inputStyle}
+              />
+            </Field>
+
+            <Field label="종목">
+              <input
+                type="text"
+                value={state.business_category}
+                onChange={(e) =>
+                  onChange({ ...state, business_category: e.target.value })
+                }
+                disabled={busy}
+                style={inputStyle}
+              />
+            </Field>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <Field label="세금계산서 이메일">
+              <input
+                type="email"
+                value={state.tax_email}
+                onChange={(e) =>
+                  onChange({ ...state, tax_email: e.target.value })
+                }
+                placeholder="tax@example.com"
+                disabled={busy}
+                style={inputStyle}
+              />
+            </Field>
+          </div>
+        </div>
 
         <Field label={`소속 거래처 (${state.selectedMemberIds.size}곳 선택)`}>
           <input

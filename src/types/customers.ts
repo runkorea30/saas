@@ -15,6 +15,13 @@ export interface CustomerGroup {
   billing_name: string;
   monthly_deduction: number;
   deduction_note: string | null;
+  // 세금계산서 발행 정보 (그룹 대표)
+  business_registration_number: string | null;
+  ceo_name: string | null;
+  business_address: string | null;
+  business_type: string | null;
+  business_category: string | null;
+  tax_email: string | null;
   created_at: string;
   updated_at: string;
 }

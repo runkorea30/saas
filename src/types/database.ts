@@ -446,32 +446,50 @@ export type Database = {
       customer_groups: {
         Row: {
           billing_name: string
+          business_address: string | null
+          business_category: string | null
+          business_registration_number: string | null
+          business_type: string | null
+          ceo_name: string | null
           company_id: string
           created_at: string
           deduction_note: string | null
           id: string
           monthly_deduction: number
           name: string
+          tax_email: string | null
           updated_at: string
         }
         Insert: {
           billing_name: string
+          business_address?: string | null
+          business_category?: string | null
+          business_registration_number?: string | null
+          business_type?: string | null
+          ceo_name?: string | null
           company_id: string
           created_at?: string
           deduction_note?: string | null
           id?: string
           monthly_deduction?: number
           name: string
+          tax_email?: string | null
           updated_at?: string
         }
         Update: {
           billing_name?: string
+          business_address?: string | null
+          business_category?: string | null
+          business_registration_number?: string | null
+          business_type?: string | null
+          ceo_name?: string | null
           company_id?: string
           created_at?: string
           deduction_note?: string | null
           id?: string
           monthly_deduction?: number
           name?: string
+          tax_email?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -487,7 +505,12 @@ export type Database = {
       customers: {
         Row: {
           bank_aliases: string | null
+          business_address: string | null
+          business_category: string | null
           business_id: string | null
+          business_registration_number: string | null
+          business_type: string | null
+          ceo_name: string | null
           company_id: string
           contact1: string | null
           contact2: string | null
@@ -504,11 +527,18 @@ export type Database = {
           match_type: string
           name: string
           settlement_cycle: string | null
+          sub_business_number: string | null
+          tax_email: string | null
           updated_at: string
         }
         Insert: {
           bank_aliases?: string | null
+          business_address?: string | null
+          business_category?: string | null
           business_id?: string | null
+          business_registration_number?: string | null
+          business_type?: string | null
+          ceo_name?: string | null
           company_id: string
           contact1?: string | null
           contact2?: string | null
@@ -525,11 +555,18 @@ export type Database = {
           match_type?: string
           name: string
           settlement_cycle?: string | null
+          sub_business_number?: string | null
+          tax_email?: string | null
           updated_at?: string
         }
         Update: {
           bank_aliases?: string | null
+          business_address?: string | null
+          business_category?: string | null
           business_id?: string | null
+          business_registration_number?: string | null
+          business_type?: string | null
+          ceo_name?: string | null
           company_id?: string
           contact1?: string | null
           contact2?: string | null
@@ -546,6 +583,8 @@ export type Database = {
           match_type?: string
           name?: string
           settlement_cycle?: string | null
+          sub_business_number?: string | null
+          tax_email?: string | null
           updated_at?: string
         }
         Relationships: [

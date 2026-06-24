@@ -36,6 +36,15 @@ export interface Customer {
   bank_aliases: string | null;
   is_active: boolean;
   created_at: string;
+  group_id: string | null;
+  // 세금계산서 발행 정보 (거래처별 override)
+  business_registration_number: string | null;
+  sub_business_number: string | null;
+  ceo_name: string | null;
+  business_address: string | null;
+  business_type: string | null;
+  business_category: string | null;
+  tax_email: string | null;
   business: CustomerBusinessRef | null;
 }
 
@@ -63,7 +72,9 @@ export interface CustomerOrder {
 
 const CUSTOMER_SELECT = `
   id, name, grade, contact1, contact2, email, delivery_address,
-  settlement_cycle, bank_aliases, is_active, created_at,
+  settlement_cycle, bank_aliases, is_active, created_at, group_id,
+  business_registration_number, sub_business_number, ceo_name,
+  business_address, business_type, business_category, tax_email,
   business:businesses ( id, name, business_number )
 `;
 
