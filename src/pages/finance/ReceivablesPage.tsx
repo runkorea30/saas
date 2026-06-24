@@ -180,8 +180,8 @@ export function ReceivablesPage() {
   const [paymentTarget, setPaymentTarget] =
     useState<ReceivableSummary | null>(null);
 
-  // 필터: 미수금 양수만 / 전체 / 그룹만. 기본은 '전체'.
-  const [filter, setFilter] = useState<'positive' | 'all' | 'group'>('all');
+  // 필터: 미수금 있음 / 정산대기만 / 그룹만 / 전체. 기본은 '전체'.
+  const [filter, setFilter] = useState<'positive' | 'pending' | 'group' | 'all'>('all');
 
   // 뷰 모드: 테이블 / 카드 (localStorage 유지). 기본은 '카드'.
   const [viewMode, setViewMode] = useState<'table' | 'card'>(() => {
@@ -281,11 +281,18 @@ export function ReceivablesPage() {
     now,
   ]);
 
+  // 필터링 기준은 outstanding(DB) 아닌 월별 계산 결과(overdue/pending) 사용.
   const filtered = useMemo(() => {
     if (filter === 'all') return summaries;
     if (filter === 'group') return summaries.filter((s) => s.is_group);
-    return summaries.filter((s) => s.outstanding > 0);
-  }, [summaries, filter]);
+    return summaries.filter((s) => {
+      const overdue = overdueByEntity.get(s.entity_key) ?? 0;
+      const pending = pendingByEntity.get(s.entity_key) ?? 0;
+      if (filter === 'positive') return overdue > 0;
+      if (filter === 'pending') return pending > 0 && overdue === 0;
+      return true;
+    });
+  }, [summaries, filter, overdueByEntity, pendingByEntity]);
 
   // 총 미수금/정산대기: outstanding 원본이 아닌 월별 계산 기준 합계 사용.
   //   - 미수금(연체)  = sum of overdueByEntity values
@@ -361,6 +368,12 @@ export function ReceivablesPage() {
                 onClick={() => setFilter('positive')}
               >
                 미수금 있음
+              </FilterPill>
+              <FilterPill
+                active={filter === 'pending'}
+                onClick={() => setFilter('pending')}
+              >
+                정산대기
               </FilterPill>
               <FilterPill
                 active={filter === 'group'}
@@ -917,7 +930,6 @@ function ReceivablesCardGrid({
 // 카드 상태 색상 토큰 (var() 우선, 미정의 시 hex fallback)
 const COLOR_DANGER = 'var(--danger, #dc2626)';
 const COLOR_AMBER = 'var(--warning, #d97706)';
-const COLOR_AMBER_BORDER = 'var(--warning-border, #fbbf24)';
 const COLOR_SUCCESS = 'var(--success, #16a34a)';
 
 function ReceivableCard({
@@ -939,16 +951,16 @@ function ReceivableCard({
   const hasReceivable = overdueAmount > 0;
   const hasPending = pendingAmount > 0;
 
-  // 카드 색상 3단계: 미수금(빨강) → 정산대기만(주황) → 정상(기본+초록 dot)
-  let borderColor = 'var(--line)';
+  // 카드 상태 표시: 테두리 대신 배경색 사용 (red-50 / amber-50 / surface)
+  let bgColor = 'var(--surface)';
   let dotColor: string = COLOR_SUCCESS;
   let dotLabel = '정산완료';
   if (hasReceivable) {
-    borderColor = COLOR_DANGER;
+    bgColor = 'var(--danger-wash, #fef2f2)';
     dotColor = COLOR_DANGER;
     dotLabel = '미수금 발생';
   } else if (hasPending) {
-    borderColor = COLOR_AMBER_BORDER;
+    bgColor = 'var(--warning-wash, #fffbeb)';
     dotColor = COLOR_AMBER;
     dotLabel = '정산대기';
   }
@@ -965,15 +977,15 @@ function ReceivableCard({
         }
       }}
       style={{
-        background: 'var(--surface)',
-        border: `1px solid ${borderColor}`,
+        background: bgColor,
+        border: '1px solid var(--line)',
         borderRadius: 12,
         padding: 14,
         cursor: 'pointer',
         display: 'flex',
         flexDirection: 'column',
         gap: 12,
-        transition: 'box-shadow .15s, border-color .15s',
+        transition: 'box-shadow .15s',
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.boxShadow = 'var(--shadow-md, 0 4px 12px rgba(0,0,0,.06))';
