@@ -44,63 +44,99 @@ const emptyShipping = (): ShippingRow => ({
   memo: '',
 });
 
-/** orders + item count 조합 — 우측 패널 표시 행. */
-interface OrderRowWithCount {
+// ───────────────────────────────────────────────────────────
+// 주문 내역 데이터 모델
+// ───────────────────────────────────────────────────────────
+
+interface OrderProduct {
+  code: string;
+  name: string;
+  supply_price: number;
+}
+
+interface OrderItemDetail {
+  id: string;
+  quantity: number;
+  unit_price: number;
+  amount: number;
+  is_return: boolean;
+  product: OrderProduct | null;
+}
+
+interface OrderDetail {
   id: string;
   order_date: string;
   total_amount: number;
+  memo: string | null;
   status: string;
-  itemCount: number;
+  items: OrderItemDetail[];
 }
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0');
 }
 
+function formatDateKey(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function formatHM(iso: string): string {
+  const d = new Date(iso);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
 /**
- * 주어진 기간 [start, end) 의 거래처 주문을 orders + order_items 조합으로 반환.
- * item count 는 별도 select 로 집계(중첩 count select 의 형변환 복잡도 회피).
+ * 거래처 주문 + 품목 + 제품 정보 단일 select.
+ *
+ * 🟡 orders 에는 shipping_info 컬럼이 없고, order_items 에는 supply_price 컬럼이 없다.
+ *    → 직송/추가주문 구분은 memo 텍스트 기반, 공급가는 products.supply_price 폴백.
  */
-async function fetchOrdersWithItemCount(
+async function fetchOrdersWithItems(
   companyId: string,
   customerId: string,
   start: Date,
   end: Date,
-): Promise<OrderRowWithCount[]> {
-  const { data: orders, error: oErr } = await supabase
+): Promise<OrderDetail[]> {
+  const { data, error } = await supabase
     .from('orders')
-    .select('id, order_date, total_amount, status')
+    .select(
+      `id, order_date, total_amount, memo, status,
+       items:order_items (
+         id, quantity, unit_price, amount, is_return,
+         product:products ( code, name, supply_price )
+       )`,
+    )
     .eq('company_id', companyId)
     .eq('customer_id', customerId)
     .gte('order_date', start.toISOString())
     .lt('order_date', end.toISOString())
     .is('deleted_at', null)
     .order('order_date', { ascending: false });
-  if (oErr) throw oErr;
-  const rows = orders ?? [];
-  if (rows.length === 0) return [];
-
-  const ids = rows.map((o) => o.id);
-  const { data: items, error: iErr } = await supabase
-    .from('order_items')
-    .select('order_id')
-    .in('order_id', ids)
-    .is('deleted_at', null);
-  if (iErr) throw iErr;
-  const countMap = new Map<string, number>();
-  for (const it of items ?? []) {
-    countMap.set(it.order_id, (countMap.get(it.order_id) ?? 0) + 1);
-  }
-  return rows.map((o) => ({ ...o, itemCount: countMap.get(o.id) ?? 0 }));
+  if (error) throw error;
+  return (data ?? []) as unknown as OrderDetail[];
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  draft: '대기',
-  confirmed: '확정',
-  shipped: '출고',
-  done: '완료',
-  canceled: '취소',
-};
+// 주문 분류 — memo 텍스트 기반 dogfooding 컨벤션
+function isExtraOrder(memo: string | null): boolean {
+  return !!memo && memo.includes('추가');
+}
+
+function isDirectShipping(memo: string | null): boolean {
+  return !!memo && memo.includes('직송');
+}
+
+/** 주문 소계 = Σ(quantity × supply_price). 공급가 누락 품목은 0. */
+function calcSupplySubtotal(order: OrderDetail): number {
+  return order.items.reduce((s, it) => {
+    const sp = it.product?.supply_price ?? 0;
+    return s + it.quantity * sp;
+  }, 0);
+}
+
+function fmtWon(v: number): string {
+  return `₩${v.toLocaleString('ko-KR')}`;
+}
 
 export function CustomerOrderPage() {
   const { customer, isLoading, logout } = useCustomerAuth();
@@ -167,17 +203,37 @@ function CustomerOrderShell({
           maxWidth: 1280,
           margin: '0 auto',
           padding: 20,
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) 360px',
+          display: 'flex',
+          flexDirection: 'column',
           gap: 16,
         }}
       >
-        <LeftPanel
-          customer={customer}
-          fontScale={fontScale}
-          onOpenInput={() => setMode('input')}
-        />
-        <RightPanel customer={customer} fontScale={fontScale} />
+        {/* 상단: 좌측 입력 폼 + 우측 공지사항 */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr) 360px',
+            gap: 16,
+          }}
+        >
+          <LeftPanel
+            customer={customer}
+            fontScale={fontScale}
+            onOpenInput={() => setMode('input')}
+          />
+          <NoticePanel fontScale={fontScale} />
+        </div>
+        {/* 하단: 오늘 (좌) + 월별 (우) */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 16,
+          }}
+        >
+          <TodayOrders customer={customer} fontScale={fontScale} />
+          <MonthlyOrders customer={customer} fontScale={fontScale} />
+        </div>
       </main>
     </div>
   );
@@ -681,25 +737,35 @@ function LeftPanel({
 
 // ───────────────────────────────────────────────────────────
 
-function RightPanel({
+function NoticePanel({ fontScale }: { fontScale: number }) {
+  const baseFont = 12 * fontScale;
+  return (
+    <Card title="공지사항">
+      <div style={{ fontSize: baseFont, color: '#44403C', lineHeight: 1.55 }}>
+        평일 오후 4시 이후 접수된 주문은 다음 영업일에 출고됩니다.<br />
+        긴급 건은 담당자에게 연락 바랍니다.
+      </div>
+    </Card>
+  );
+}
+
+// ───────────────────────────────────────────────────────────
+
+function TodayOrders({
   customer,
   fontScale,
 }: {
   customer: CustomerSession;
   fontScale: number;
 }) {
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
-
-  const todayQuery = useQuery<OrderRowWithCount[]>({
-    queryKey: ['customer-orders-today', customer.customerId],
+  const todayQuery = useQuery<OrderDetail[]>({
+    queryKey: ['customer-orders-today-v2', customer.customerId],
     queryFn: async () => {
       const start = new Date();
       start.setHours(0, 0, 0, 0);
-      const end = new Date(start);
-      end.setDate(end.getDate() + 1);
-      return fetchOrdersWithItemCount(
+      const end = new Date();
+      end.setHours(23, 59, 59, 999);
+      return fetchOrdersWithItems(
         customer.companyId,
         customer.customerId,
         start,
@@ -709,12 +775,91 @@ function RightPanel({
     staleTime: 15_000,
   });
 
-  const monthlyQuery = useQuery<OrderRowWithCount[]>({
-    queryKey: ['customer-orders-monthly', customer.customerId, year, month],
+  const orders = todayQuery.data ?? [];
+  const totalSum = orders.reduce((s, o) => s + calcSupplySubtotal(o), 0);
+  const baseFont = 12 * fontScale;
+
+  return (
+    <section
+      style={{
+        background: '#FFFFFF',
+        border: '1px solid #E5E7EB',
+        borderRadius: 10,
+        padding: 16,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+        }}
+      >
+        <h3
+          style={{
+            margin: 0,
+            fontSize: 15,
+            fontWeight: 600,
+            color: '#1C1917',
+          }}
+        >
+          오늘 주문 내역
+        </h3>
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: '#1F2937',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          총 {fmtWon(totalSum)}
+        </span>
+      </div>
+
+      {todayQuery.isLoading ? (
+        <div style={{ fontSize: baseFont, color: '#6B7280', textAlign: 'center', padding: '24px 0' }}>
+          불러오는 중…
+        </div>
+      ) : orders.length === 0 ? (
+        <div style={{ fontSize: baseFont, color: '#9CA3AF', textAlign: 'center', padding: '32px 0' }}>
+          오늘 주문내역이 없습니다
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {orders.map((o) => (
+            <OrderCard key={o.id} order={o} baseFont={baseFont} showTime />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ───────────────────────────────────────────────────────────
+
+function MonthlyOrders({
+  customer,
+  fontScale,
+}: {
+  customer: CustomerSession;
+  fontScale: number;
+}) {
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [expandedDate, setExpandedDate] = useState<string | null>(null);
+  const { showToast } = useToast();
+
+  const monthlyQuery = useQuery<OrderDetail[]>({
+    queryKey: ['customer-orders-monthly-v2', customer.customerId, year, month],
     queryFn: async () => {
       const start = new Date(year, month - 1, 1);
       const end = new Date(year, month, 1);
-      return fetchOrdersWithItemCount(
+      return fetchOrdersWithItems(
         customer.companyId,
         customer.customerId,
         start,
@@ -724,29 +869,54 @@ function RightPanel({
     staleTime: 30_000,
   });
 
+  const orders = monthlyQuery.data ?? [];
+  const monthSum = orders.reduce((s, o) => s + calcSupplySubtotal(o), 0);
   const baseFont = 12 * fontScale;
 
+  /** 날짜별로 묶고 정렬 (날짜 내림차순). */
+  const dateGroups = (() => {
+    const map = new Map<string, OrderDetail[]>();
+    for (const o of orders) {
+      const key = formatDateKey(o.order_date);
+      const cur = map.get(key) ?? [];
+      cur.push(o);
+      map.set(key, cur);
+    }
+    return Array.from(map.entries()).sort((a, b) => (a[0] < b[0] ? 1 : -1));
+  })();
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <Card title="공지사항">
-        <div style={{ fontSize: baseFont, color: '#44403C', lineHeight: 1.55 }}>
-          평일 오후 4시 이후 접수된 주문은 다음 영업일에 출고됩니다.<br />
-          긴급 건은 담당자에게 연락 바랍니다.
-        </div>
-      </Card>
-
-      <Card title="오늘 주문 내역">
-        <OrderList
-          rows={todayQuery.data ?? []}
-          isLoading={todayQuery.isLoading}
-          baseFont={baseFont}
-          emptyText="오늘 등록한 주문이 없습니다."
-          showTime
-        />
-      </Card>
-
-      <Card title="월별 주문 내역">
-        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+    <section
+      style={{
+        background: '#FFFFFF',
+        border: '1px solid #E5E7EB',
+        borderRadius: 10,
+        padding: 16,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          flexWrap: 'wrap',
+        }}
+      >
+        <h3
+          style={{
+            margin: 0,
+            fontSize: 15,
+            fontWeight: 600,
+            color: '#1C1917',
+          }}
+        >
+          주문 내역 총 {fmtWon(monthSum)}
+        </h3>
+        <div style={{ display: 'flex', gap: 6 }}>
           <select
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
@@ -770,94 +940,382 @@ function RightPanel({
             ))}
           </select>
         </div>
-        <OrderList
-          rows={monthlyQuery.data ?? []}
-          isLoading={monthlyQuery.isLoading}
-          baseFont={baseFont}
-          emptyText="등록된 주문이 없습니다."
-        />
-      </Card>
+      </div>
+
+      {monthlyQuery.isLoading ? (
+        <div style={{ fontSize: baseFont, color: '#6B7280', textAlign: 'center', padding: '24px 0' }}>
+          불러오는 중…
+        </div>
+      ) : dateGroups.length === 0 ? (
+        <div style={{ fontSize: baseFont, color: '#9CA3AF', textAlign: 'center', padding: '32px 0' }}>
+          등록된 주문이 없습니다
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {dateGroups.map(([date, group]) => (
+            <MonthlyDateCard
+              key={date}
+              date={date}
+              orders={group}
+              expanded={expandedDate === date}
+              onToggle={() =>
+                setExpandedDate(expandedDate === date ? null : date)
+              }
+              onStatement={() =>
+                showToast({ kind: 'info', text: '명세서 기능 준비 중입니다.' })
+              }
+              baseFont={baseFont}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ───────────────────────────────────────────────────────────
+
+function MonthlyDateCard({
+  date,
+  orders,
+  expanded,
+  onToggle,
+  onStatement,
+  baseFont,
+}: {
+  date: string;
+  orders: OrderDetail[];
+  expanded: boolean;
+  onToggle: () => void;
+  onStatement: () => void;
+  baseFont: number;
+}) {
+  const totalAmount = orders.reduce((s, o) => s + calcSupplySubtotal(o), 0);
+  const itemCount = orders.reduce((s, o) => s + o.items.length, 0);
+  const hasExtra = orders.some((o) => isExtraOrder(o.memo));
+  const hasDirect = orders.some((o) => isDirectShipping(o.memo));
+
+  const regular: OrderDetail[] = [];
+  const extra: OrderDetail[] = [];
+  for (const o of orders) {
+    if (isExtraOrder(o.memo)) extra.push(o);
+    else regular.push(o);
+  }
+
+  return (
+    <div
+      style={{
+        border: '1px solid #E5E7EB',
+        borderRadius: 8,
+        overflow: 'hidden',
+        background: '#FFFFFF',
+      }}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          width: '100%',
+          padding: '10px 12px',
+          background: expanded ? '#F9FAFB' : '#FFFFFF',
+          border: 'none',
+          textAlign: 'left',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontSize: baseFont + 1,
+        }}
+      >
+        <span style={{ fontWeight: 600, color: '#1C1917' }}>{date}</span>
+        {hasExtra && <Badge kind="extra" />}
+        {hasDirect && <Badge kind="direct" />}
+        <span style={{ flex: 1 }} />
+        <span style={{ color: '#6B7280' }}>{orders.length}건</span>
+        <span
+          style={{
+            fontWeight: 600,
+            color: '#1F2937',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {fmtWon(totalAmount)}
+        </span>
+        <span
+          role="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onStatement();
+          }}
+          style={{
+            ...secondaryBtn,
+            height: 26,
+            padding: '0 10px',
+            fontSize: 11,
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+          }}
+        >
+          명세서
+        </span>
+      </button>
+      {expanded && (
+        <div
+          style={{
+            padding: 12,
+            borderTop: '1px solid #E5E7EB',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+            background: '#FAFAF9',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: '#6B7280',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            품목 합 {itemCount}건
+          </div>
+          {regular.length > 0 && (
+            <OrderGroupSection title="주문" orders={regular} baseFont={baseFont} />
+          )}
+          {extra.length > 0 && (
+            <OrderGroupSection
+              title="추가주문"
+              orders={extra}
+              baseFont={baseFont}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OrderGroupSection({
+  title,
+  orders,
+  baseFont,
+}: {
+  title: '주문' | '추가주문';
+  orders: OrderDetail[];
+  baseFont: number;
+}) {
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: '#374151',
+          marginBottom: 6,
+        }}
+      >
+        {title}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {orders.map((o) => (
+          <OrderCard key={o.id} order={o} baseFont={baseFont} showTime />
+        ))}
+      </div>
     </div>
   );
 }
 
 // ───────────────────────────────────────────────────────────
 
-function OrderList({
-  rows,
-  isLoading,
+function OrderCard({
+  order,
   baseFont,
-  emptyText,
   showTime,
 }: {
-  rows: OrderRowWithCount[];
-  isLoading: boolean;
+  order: OrderDetail;
   baseFont: number;
-  emptyText: string;
   showTime?: boolean;
 }) {
-  if (isLoading) {
-    return <div style={{ fontSize: baseFont, color: '#78716C' }}>불러오는 중…</div>;
-  }
-  if (rows.length === 0) {
-    return <div style={{ fontSize: baseFont, color: '#78716C' }}>{emptyText}</div>;
-  }
+  const subtotal = calcSupplySubtotal(order);
+  const extra = isExtraOrder(order.memo);
+  const direct = isDirectShipping(order.memo);
+
   return (
-    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-      {rows.map((r) => {
-        const d = new Date(r.order_date);
-        const datePart = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-        const timePart = showTime
-          ? d.toLocaleTimeString('ko-KR', {
-              hour: '2-digit',
-              minute: '2-digit',
-            })
-          : null;
-        return (
-          <li
-            key={r.id}
-            style={{
-              padding: '8px 0',
-              borderBottom: '1px solid #F5F5F4',
-              fontSize: baseFont,
-              color: '#1C1917',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: 8,
-              }}
-            >
-              <span>
-                {datePart}
-                {timePart && (
-                  <span style={{ color: '#78716C', marginLeft: 6 }}>
-                    {timePart}
-                  </span>
-                )}
-              </span>
-              <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {r.total_amount.toLocaleString('ko-KR')}원
-              </span>
-            </div>
-            <div
-              style={{
-                fontSize: 11,
-                color: '#78716C',
-                marginTop: 2,
-                display: 'flex',
-                justifyContent: 'space-between',
-              }}
-            >
-              <span>품목 {r.itemCount}건</span>
-              <span>{STATUS_LABEL[r.status] ?? r.status}</span>
-            </div>
-          </li>
-        );
-      })}
-    </ul>
+    <div
+      style={{
+        border: '1px solid #E5E7EB',
+        borderRadius: 8,
+        background: '#FFFFFF',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          padding: '8px 10px',
+          background: '#FAFAF9',
+          borderBottom: '1px solid #F3F4F6',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          flexWrap: 'wrap',
+          fontSize: baseFont,
+        }}
+      >
+        <Badge kind={extra ? 'extra' : 'regular'} />
+        {direct && <Badge kind="direct" />}
+        {showTime && (
+          <span style={{ color: '#6B7280', fontVariantNumeric: 'tabular-nums' }}>
+            {formatHM(order.order_date)}
+          </span>
+        )}
+        <span style={{ color: '#6B7280' }}>{order.items.length}건</span>
+        <span style={{ flex: 1 }} />
+        <span
+          style={{
+            fontWeight: 600,
+            color: '#1F2937',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          소계 {fmtWon(subtotal)}
+        </span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table
+          style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            fontSize: baseFont,
+          }}
+        >
+          <thead>
+            <tr style={{ background: '#FFFFFF' }}>
+              <ItemTh align="left">코드</ItemTh>
+              <ItemTh align="left">제품명</ItemTh>
+              <ItemTh align="right">수량</ItemTh>
+              <ItemTh align="right">공급가</ItemTh>
+              <ItemTh align="right">합계</ItemTh>
+            </tr>
+          </thead>
+          <tbody>
+            {order.items.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={5}
+                  style={{
+                    padding: 12,
+                    textAlign: 'center',
+                    color: '#9CA3AF',
+                    fontSize: baseFont - 1,
+                  }}
+                >
+                  품목이 없습니다
+                </td>
+              </tr>
+            ) : (
+              order.items.map((it) => {
+                const supplyPrice = it.product?.supply_price ?? 0;
+                const lineSum = it.quantity * supplyPrice;
+                return (
+                  <tr
+                    key={it.id}
+                    style={{ borderTop: '1px solid #F3F4F6' }}
+                  >
+                    <ItemTd align="left">
+                      <span style={{ fontFamily: 'var(--font-num)' }}>
+                        {it.product?.code ?? '—'}
+                      </span>
+                    </ItemTd>
+                    <ItemTd align="left">{it.product?.name ?? '(삭제됨)'}</ItemTd>
+                    <ItemTd align="right">
+                      {it.quantity.toLocaleString('ko-KR')}
+                    </ItemTd>
+                    <ItemTd align="right">
+                      {supplyPrice > 0
+                        ? supplyPrice.toLocaleString('ko-KR')
+                        : '—'}
+                    </ItemTd>
+                    <ItemTd align="right">
+                      {lineSum > 0 ? fmtWon(lineSum) : '—'}
+                    </ItemTd>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function Badge({ kind }: { kind: 'regular' | 'extra' | 'direct' }) {
+  const styles: Record<string, { bg: string; fg: string; label: string }> = {
+    regular: { bg: '#DCFCE7', fg: '#15803D', label: '주문' },
+    extra: { bg: '#FEF3C7', fg: '#A16207', label: '추가주문' },
+    direct: { bg: '#DBEAFE', fg: '#1D4ED8', label: '직송' },
+  };
+  const s = styles[kind];
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '2px 8px',
+        borderRadius: 999,
+        background: s.bg,
+        color: s.fg,
+        fontSize: 11,
+        fontWeight: 600,
+      }}
+    >
+      {s.label}
+    </span>
+  );
+}
+
+function ItemTh({
+  children,
+  align = 'center',
+}: {
+  children: React.ReactNode;
+  align?: 'left' | 'center' | 'right';
+}) {
+  return (
+    <th
+      style={{
+        padding: '6px 10px',
+        fontSize: 11,
+        fontWeight: 600,
+        color: '#6B7280',
+        textAlign: align,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {children}
+    </th>
+  );
+}
+
+function ItemTd({
+  children,
+  align = 'center',
+}: {
+  children: React.ReactNode;
+  align?: 'left' | 'center' | 'right';
+}) {
+  return (
+    <td
+      style={{
+        padding: '6px 10px',
+        color: '#1F2937',
+        textAlign: align,
+        whiteSpace: 'nowrap',
+        fontVariantNumeric: 'tabular-nums',
+      }}
+    >
+      {children}
+    </td>
   );
 }
 
