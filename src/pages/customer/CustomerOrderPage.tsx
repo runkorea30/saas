@@ -154,7 +154,12 @@ const CREDIT_LABEL = '신용';
 interface OrderProduct {
   code: string;
   name: string;
-  supply_price: number;
+  sell_price: number;
+  grade_a: number | null;
+  grade_b: number | null;
+  grade_c: number | null;
+  grade_d: number | null;
+  grade_e: number | null;
 }
 
 interface OrderItemDetail {
@@ -207,7 +212,7 @@ async function fetchOrdersWithItems(
       `id, order_date, total_amount, memo, status,
        items:order_items (
          id, quantity, unit_price, amount, is_return,
-         product:products ( code, name, supply_price )
+         product:products ( code, name, sell_price, grade_a, grade_b, grade_c, grade_d, grade_e )
        )`,
     )
     .eq('company_id', companyId)
@@ -1117,7 +1122,13 @@ function TodayOrders({
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {orders.map((o) => (
-            <OrderCard key={o.id} order={o} baseFont={baseFont} showTime />
+            <OrderCard
+              key={o.id}
+              order={o}
+              baseFont={baseFont}
+              showTime
+              customer={customer}
+            />
           ))}
         </div>
       )}
@@ -1250,6 +1261,7 @@ function MonthlyOrders({
                 showToast({ kind: 'info', text: '명세서 기능 준비 중입니다.' })
               }
               baseFont={baseFont}
+              customer={customer}
             />
           ))}
         </div>
@@ -1267,6 +1279,7 @@ function MonthlyDateCard({
   onToggle,
   onStatement,
   baseFont,
+  customer,
 }: {
   date: string;
   orders: OrderDetail[];
@@ -1274,6 +1287,7 @@ function MonthlyDateCard({
   onToggle: () => void;
   onStatement: () => void;
   baseFont: number;
+  customer: CustomerSession;
 }) {
   const totalAmount = orders.reduce((s, o) => s + calcOrderTotal(o), 0);
   const itemCount = orders.reduce((s, o) => s + o.items.length, 0);
@@ -1366,13 +1380,19 @@ function MonthlyDateCard({
             품목 합 {itemCount}건
           </div>
           {regular.length > 0 && (
-            <OrderGroupSection title="주문" orders={regular} baseFont={baseFont} />
+            <OrderGroupSection
+              title="주문"
+              orders={regular}
+              baseFont={baseFont}
+              customer={customer}
+            />
           )}
           {extra.length > 0 && (
             <OrderGroupSection
               title="추가주문"
               orders={extra}
               baseFont={baseFont}
+              customer={customer}
             />
           )}
         </div>
@@ -1385,10 +1405,12 @@ function OrderGroupSection({
   title,
   orders,
   baseFont,
+  customer,
 }: {
   title: '주문' | '추가주문';
   orders: OrderDetail[];
   baseFont: number;
+  customer: CustomerSession;
 }) {
   return (
     <div>
@@ -1404,7 +1426,13 @@ function OrderGroupSection({
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {orders.map((o) => (
-          <OrderCard key={o.id} order={o} baseFont={baseFont} showTime />
+          <OrderCard
+            key={o.id}
+            order={o}
+            baseFont={baseFont}
+            showTime
+            customer={customer}
+          />
         ))}
       </div>
     </div>
@@ -1417,10 +1445,12 @@ function OrderCard({
   order,
   baseFont,
   showTime,
+  customer,
 }: {
   order: OrderDetail;
   baseFont: number;
   showTime?: boolean;
+  customer: CustomerSession;
 }) {
   const subtotal = calcOrderTotal(order);
   const extra = isExtraOrder(order.memo);
@@ -1500,9 +1530,15 @@ function OrderCard({
               </tr>
             ) : (
               order.items.map((it) => {
-                // 공급가 컬럼: products.supply_price (참고용 표시)
-                // 합계 컬럼: order_items.amount (주문 시점 저장된 실 금액)
-                const supplyPrice = it.product?.supply_price ?? 0;
+                // 공급가 = grade 기반 계산 (products.supply_price 는 0 이라 사용 불가)
+                // 합계 = order_items.amount (주문 시점 저장값)
+                const supplyPrice = it.product
+                  ? calcSupplyPriceByCustomerGrade(
+                      it.product.sell_price,
+                      customer.grade,
+                      it.product,
+                    )
+                  : 0;
                 const lineSum = it.amount ?? 0;
                 return (
                   <tr
