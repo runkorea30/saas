@@ -1445,3 +1445,74 @@ export const Constants = {
     Enums: {},
   },
 } as const
+
+// ── 은행거래 / 미수금 ──────────────────────────────
+
+export interface BankTransaction {
+  id: string;
+  company_id: string;
+  customer_id: string | null;
+  transaction_date: string;         // 'YYYY-MM-DD'
+  amount: number;
+  type: 'deposit' | 'withdraw';
+  depositor_name: string | null;
+  description: string | null;
+  match_status: 'matched' | 'unmatched' | 'excluded';
+  is_excluded: boolean;
+  exclude_reason: string | null;
+  match_type: '자동' | '수동' | '매핑' | null;
+  moved_to_monthly: boolean;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+  // 쿼리 시 JOIN 확장
+  customer?: {
+    id: string;
+    name: string;
+    payment_cycle: '당월' | '익월' | '2개월';
+    match_type: 'monthly' | 'daily';
+  };
+}
+
+export interface BankMapping {
+  id: string;
+  company_id: string;
+  bank_name: string;
+  customer_id: string | null;
+  customer_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BankExcludeKeyword {
+  id: string;
+  company_id: string;
+  keyword: string;
+  created_at: string;
+}
+
+export interface MonthlyReconciliation {
+  customer_id: string;
+  customer_name: string;
+  payment_cycle: '당월' | '익월' | '2개월';
+  month: string;                    // 'YYYY-MM'
+  due_date: string;                 // 정산 마감일
+  sales_total: number;
+  deposit_total: number;
+  difference: number;               // sales_total - deposit_total
+  is_overdue: boolean;
+  status: '정산완료' | '정산대기' | '연체';
+}
+
+export interface ReceivableCard {
+  customer_id: string;
+  customer_name: string;
+  payment_cycle: '당월' | '익월' | '2개월';
+  total_sales: number;
+  total_deposit: number;
+  pending_amount: number;           // due_date 안 된 미수
+  overdue_amount: number;           // due_date 지난 연체
+  last_deposit_date: string | null;
+  badge: '위험' | '경고' | '정상';
+  monthly_detail: MonthlyReconciliation[];
+}
