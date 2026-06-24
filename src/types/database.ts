@@ -134,6 +134,51 @@ export type Database = {
           },
         ]
       }
+      bank_transaction_splits: {
+        Row: {
+          amount: number
+          bank_transaction_id: string
+          company_id: string
+          created_at: string
+          id: string
+          memo: string | null
+          target_sales_month: string
+        }
+        Insert: {
+          amount: number
+          bank_transaction_id: string
+          company_id: string
+          created_at?: string
+          id?: string
+          memo?: string | null
+          target_sales_month: string
+        }
+        Update: {
+          amount?: number
+          bank_transaction_id?: string
+          company_id?: string
+          created_at?: string
+          id?: string
+          memo?: string | null
+          target_sales_month?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_transaction_splits_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_transaction_splits_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bank_mappings: {
         Row: {
           bank_name: string
@@ -1578,6 +1623,16 @@ export interface BankExcludeKeyword {
   id: string;
   company_id: string;
   keyword: string;
+  created_at: string;
+}
+
+export interface BankTransactionSplit {
+  id: string;
+  company_id: string;
+  bank_transaction_id: string;
+  target_sales_month: string;       // 'YYYY-MM'
+  amount: number;                   // 귀속 금액
+  memo: string | null;
   created_at: string;
 }
 

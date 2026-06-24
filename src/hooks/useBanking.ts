@@ -13,6 +13,7 @@ import type {
   BankTransaction,
   BankMapping,
   BankExcludeKeyword,
+  BankTransactionSplit,
 } from '@/types/database';
 
 // ── useBankTransactions ──────────────────────────────────────────────
@@ -321,6 +322,73 @@ export function useAddBankExcludeKeyword() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bank-exclude-keywords', companyId] });
+    },
+  });
+}
+
+// ── useBankTransactionSplits ─────────────────────────────────────────
+// 회사 전체 분할 행 조회. LedgerTab/MonthlyTab/ReceivablesPage 공통 입력.
+export function useBankTransactionSplits() {
+  const { companyId } = useCompany();
+
+  return useQuery({
+    queryKey: ['bank-transaction-splits', companyId],
+    enabled: Boolean(companyId),
+    queryFn: async () => {
+      const rows = await fetchAllRows<BankTransactionSplit>(() =>
+        supabase
+          .from('bank_transaction_splits')
+          .select('*')
+          .eq('company_id', companyId!)
+          .returns<BankTransactionSplit[]>(),
+      );
+      return rows;
+    },
+  });
+}
+
+// ── useUpsertBankTransactionSplits ───────────────────────────────────
+// 한 transaction의 분할을 통째로 교체 (기존 분할 DELETE → 새 INSERT).
+// splits 가 빈 배열이면 분할 해제 (DELETE만 수행).
+export function useUpsertBankTransactionSplits() {
+  const { companyId } = useCompany();
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      bankTransactionId,
+      splits,
+    }: {
+      bankTransactionId: string;
+      splits: { target_sales_month: string; amount: number; memo?: string }[];
+    }) => {
+      if (!companyId) throw new Error('회사 컨텍스트 미초기화');
+
+      const { error: delError } = await supabase
+        .from('bank_transaction_splits')
+        .delete()
+        .eq('bank_transaction_id', bankTransactionId)
+        .eq('company_id', companyId);
+      if (delError) throw delError;
+
+      if (splits.length === 0) return;
+
+      const { error: insError } = await supabase
+        .from('bank_transaction_splits')
+        .insert(
+          splits.map((s) => ({
+            bank_transaction_id: bankTransactionId,
+            company_id: companyId,
+            target_sales_month: s.target_sales_month,
+            amount: s.amount,
+            memo: s.memo ?? null,
+          })),
+        );
+      if (insError) throw insError;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['bank-transaction-splits', companyId] });
+      qc.invalidateQueries({ queryKey: ['bank-transactions', companyId] });
     },
   });
 }

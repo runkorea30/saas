@@ -10,6 +10,7 @@ import { useMemo, useState } from 'react';
 import {
   useBankTransactions,
   useOrdersForReconciliation,
+  useBankTransactionSplits,
 } from '@/hooks/useBanking';
 import {
   calcMonthlyReconciliation,
@@ -17,6 +18,7 @@ import {
 } from '@/utils/calculations';
 import { Modal } from '@/components/ui/Modal';
 import { fmtWon } from '@/components/feature/orders/primitives';
+import { PAYMENT_TOLERANCE_AMOUNT } from '@/constants/banking';
 import type { ReceivableCard, MonthlyReconciliation } from '@/types/database';
 
 type BadgeFilter = 'all' | '위험' | '경고' | '정상';
@@ -30,9 +32,11 @@ export function ReceivablesPage() {
 
   const ordersQuery = useOrdersForReconciliation();
   const txQuery = useBankTransactions(year, null);
+  const splitsQuery = useBankTransactionSplits();
 
   const orders = ordersQuery.data ?? [];
   const transactions = txQuery.data ?? [];
+  const splits = splitsQuery.data ?? [];
 
   // 거래처별 최근 입금일 (전체 거래에서 max(transaction_date))
   const lastDepositDates = useMemo(() => {
@@ -51,15 +55,19 @@ export function ReceivablesPage() {
     const recon = calcMonthlyReconciliation(
       orders.filter((o) => o.order_date.startsWith(`${year}-`)),
       transactions.map((t) => ({
+        id: t.id,
         customer_id: t.customer_id,
         transaction_date: t.transaction_date.slice(0, 10),
         amount: t.amount,
         match_status: t.match_status,
         target_sales_month: t.target_sales_month,
       })),
+      splits,
+      new Date(),
+      PAYMENT_TOLERANCE_AMOUNT,
     );
     return calcReceivableCards(recon, lastDepositDates);
-  }, [orders, transactions, lastDepositDates, year]);
+  }, [orders, transactions, splits, lastDepositDates, year]);
 
   const filteredCards = useMemo(() => {
     if (badgeFilter === 'all') return cards;

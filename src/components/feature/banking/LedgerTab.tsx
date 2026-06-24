@@ -6,8 +6,8 @@
  * - 행별 거래처 select / 매칭상태 / 매출월 / 제외/매칭해제 액션.
  *   (정산이동 컬럼은 UI에서 숨김. DB 컬럼 moved_to_monthly 는 유지.)
  */
-import { useMemo, useRef, useState } from 'react';
-import { Upload, Search } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Upload, Search, Plus, Trash2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
@@ -15,6 +15,8 @@ import {
   useAddBankTransactions,
   useUpdateBankTransaction,
   useAddBankExcludeKeyword,
+  useBankTransactionSplits,
+  useUpsertBankTransactionSplits,
 } from '@/hooks/useBanking';
 import { parseKBBank, applyAutoMatch, type MatchedBankRow } from '@/utils/bankParser';
 import { fmtWon } from '@/components/feature/orders/primitives';
@@ -22,6 +24,7 @@ import type {
   BankTransaction,
   BankMapping,
   BankExcludeKeyword,
+  BankTransactionSplit,
 } from '@/types/database';
 
 type StatusFilter = 'all' | 'matched' | 'unmatched' | 'excluded';
@@ -38,6 +41,8 @@ export function LedgerTab({ transactions, mappings, excludeKeywords, customers }
   const addTxs = useAddBankTransactions();
   const updateTx = useUpdateBankTransaction();
   const addKeyword = useAddBankExcludeKeyword();
+  const { data: splits = [] } = useBankTransactionSplits();
+  const upsertSplits = useUpsertBankTransactionSplits();
 
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -54,6 +59,20 @@ export function LedgerTab({ transactions, mappings, excludeKeywords, customers }
 
   // 제외 후 키워드 등록 확인 모달
   const [keywordConfirm, setKeywordConfirm] = useState<string | null>(null);
+
+  // 분할 모달
+  const [splitTarget, setSplitTarget] = useState<BankTransaction | null>(null);
+
+  // bank_transaction_id → splits[] 맵 (행별 표시용)
+  const splitsByTx = useMemo(() => {
+    const m = new Map<string, BankTransactionSplit[]>();
+    for (const sp of splits) {
+      const arr = m.get(sp.bank_transaction_id) ?? [];
+      arr.push(sp);
+      m.set(sp.bank_transaction_id, arr);
+    }
+    return m;
+  }, [splits]);
 
   // ───── 파일 업로드 ─────
   const onPickFile = () => fileInputRef.current?.click();
@@ -395,13 +414,31 @@ export function LedgerTab({ transactions, mappings, excludeKeywords, customers }
                       </button>
                     )}
                     {tx.match_status === 'matched' && (
-                      <button
-                        type="button"
-                        onClick={() => onUnmatch(tx)}
-                        className="text-[11.5px] text-[var(--ink-3)] hover:text-[var(--ink)] hover:underline"
-                      >
-                        매칭해제
-                      </button>
+                      <div className="flex items-center gap-2 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setSplitTarget(tx)}
+                          className={`text-[11.5px] hover:underline ${
+                            (splitsByTx.get(tx.id)?.length ?? 0) > 0
+                              ? 'text-blue-600 font-medium'
+                              : 'text-[var(--ink-3)] hover:text-[var(--ink)]'
+                          }`}
+                          title={
+                            (splitsByTx.get(tx.id)?.length ?? 0) > 0
+                              ? `분할 ${splitsByTx.get(tx.id)!.length}건`
+                              : '입금 분할'
+                          }
+                        >
+                          분할{(splitsByTx.get(tx.id)?.length ?? 0) > 0 && ` (${splitsByTx.get(tx.id)!.length})`}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onUnmatch(tx)}
+                          className="text-[11.5px] text-[var(--ink-3)] hover:text-[var(--ink)] hover:underline"
+                        >
+                          매칭해제
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -479,6 +516,37 @@ export function LedgerTab({ transactions, mappings, excludeKeywords, customers }
         confirmLabel="추가"
         onConfirm={confirmAddKeyword}
         busy={addKeyword.isPending}
+      />
+
+      {/* 입금 분할 모달 */}
+      <SplitModal
+        target={splitTarget}
+        initialSplits={splitTarget ? splitsByTx.get(splitTarget.id) ?? [] : []}
+        monthOptions={monthOptions}
+        busy={upsertSplits.isPending}
+        onClose={() => (upsertSplits.isPending ? undefined : setSplitTarget(null))}
+        onSave={async (rows) => {
+          if (!splitTarget) return;
+          try {
+            await upsertSplits.mutateAsync({
+              bankTransactionId: splitTarget.id,
+              splits: rows,
+            });
+            setSplitTarget(null);
+            showToast({
+              kind: 'success',
+              text:
+                rows.length === 0
+                  ? '분할 해제 완료'
+                  : `분할 ${rows.length}건 저장 완료`,
+            });
+          } catch (err) {
+            showToast({
+              kind: 'error',
+              text: `분할 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+            });
+          }
+        }}
       />
     </div>
   );
@@ -603,6 +671,233 @@ function UploadPreviewModal({ rows, saving, onClose, onSave }: PreviewProps) {
             })}
           </tbody>
         </table>
+      </div>
+    </Modal>
+  );
+}
+
+// ───────────────────────────────────────────────────────────
+// 입금 분할 모달
+
+interface SplitDraft {
+  target_sales_month: string;
+  amount: number;
+  memo: string;
+}
+
+interface SplitModalProps {
+  target: BankTransaction | null;
+  initialSplits: BankTransactionSplit[];
+  monthOptions: string[];
+  busy: boolean;
+  onClose: () => void;
+  onSave: (splits: { target_sales_month: string; amount: number; memo?: string }[]) => void;
+}
+
+function SplitModal({
+  target,
+  initialSplits,
+  monthOptions,
+  busy,
+  onClose,
+  onSave,
+}: SplitModalProps) {
+  const [drafts, setDrafts] = useState<SplitDraft[]>([]);
+
+  // target 변경 시 드래프트 초기화 (기존 분할이 있으면 그대로, 없으면 빈 행 1개)
+  useEffect(() => {
+    if (!target) {
+      setDrafts([]);
+      return;
+    }
+    if (initialSplits.length > 0) {
+      setDrafts(
+        initialSplits.map((s) => ({
+          target_sales_month: s.target_sales_month,
+          amount: s.amount,
+          memo: s.memo ?? '',
+        })),
+      );
+    } else {
+      setDrafts([
+        { target_sales_month: monthOptions[0] ?? '', amount: target.amount, memo: '' },
+      ]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target?.id]);
+
+  const original = target?.amount ?? 0;
+  const total = drafts.reduce((s, d) => s + (Number.isFinite(d.amount) ? d.amount : 0), 0);
+  const diff = original - total;
+  const canSave =
+    !busy &&
+    drafts.length > 0 &&
+    diff === 0 &&
+    drafts.every((d) => d.target_sales_month && d.amount > 0);
+
+  const addRow = () => {
+    setDrafts((rows) => [
+      ...rows,
+      {
+        target_sales_month: monthOptions[0] ?? '',
+        amount: Math.max(0, diff),
+        memo: '',
+      },
+    ]);
+  };
+
+  const updateRow = (i: number, patch: Partial<SplitDraft>) => {
+    setDrafts((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  };
+
+  const removeRow = (i: number) => {
+    setDrafts((rows) => rows.filter((_, idx) => idx !== i));
+  };
+
+  const onClickSave = () => {
+    onSave(
+      drafts.map((d) => ({
+        target_sales_month: d.target_sales_month,
+        amount: d.amount,
+        memo: d.memo.trim() || undefined,
+      })),
+    );
+  };
+
+  const onClickRelease = () => {
+    // 분할 해제 — 빈 배열 저장으로 기존 분할 모두 삭제
+    onSave([]);
+  };
+
+  return (
+    <Modal
+      open={target !== null}
+      onClose={onClose}
+      title={
+        target
+          ? `입금 분할 — ${target.depositor_name ?? '—'} ₩${fmtWon(target.amount)}`
+          : ''
+      }
+      width={620}
+      footer={
+        <>
+          {initialSplits.length > 0 && (
+            <button
+              type="button"
+              className="btn-base"
+              style={{ height: 32, fontSize: 12.5, color: 'var(--danger)' }}
+              onClick={onClickRelease}
+              disabled={busy}
+            >
+              분할 해제
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn-base"
+            style={{ height: 32, fontSize: 12.5 }}
+            onClick={onClose}
+            disabled={busy}
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            className="btn-base primary"
+            style={{ height: 32, fontSize: 12.5 }}
+            onClick={onClickSave}
+            disabled={!canSave}
+          >
+            {busy ? '저장 중…' : '저장'}
+          </button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-2">
+        {drafts.map((d, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <select
+              value={d.target_sales_month}
+              onChange={(e) => updateRow(i, { target_sales_month: e.target.value })}
+              className="border border-[var(--line)] rounded-md text-[12.5px] bg-[var(--surface)]"
+              style={{ height: 30, padding: '0 8px', minWidth: 110 }}
+            >
+              {monthOptions.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              value={Number.isFinite(d.amount) ? d.amount : ''}
+              onChange={(e) => updateRow(i, { amount: Number(e.target.value) })}
+              placeholder="금액"
+              className="border border-[var(--line)] rounded-md text-[12.5px] num text-right bg-[var(--surface)]"
+              style={{ height: 30, padding: '0 10px', width: 140 }}
+            />
+            <input
+              type="text"
+              value={d.memo}
+              onChange={(e) => updateRow(i, { memo: e.target.value })}
+              placeholder="메모 (선택)"
+              className="flex-1 border border-[var(--line)] rounded-md text-[12.5px] bg-[var(--surface)]"
+              style={{ height: 30, padding: '0 10px' }}
+            />
+            <button
+              type="button"
+              onClick={() => removeRow(i)}
+              className="text-[var(--ink-3)] hover:text-[var(--danger)]"
+              title="삭제"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+
+        <button
+          type="button"
+          onClick={addRow}
+          className="self-start inline-flex items-center gap-1 text-[11.5px] text-[var(--ink-2)] hover:text-[var(--ink)] mt-1"
+        >
+          <Plus size={12} /> 행 추가
+        </button>
+
+        <div
+          className="mt-2 rounded-md border border-[var(--line)] text-[12.5px]"
+          style={{ background: 'var(--surface-2)' }}
+        >
+          <div className="grid grid-cols-3 px-3 py-2 gap-3">
+            <div>
+              <div className="text-[10.5px] text-[var(--ink-3)] uppercase">원본</div>
+              <div className="num font-medium">₩{fmtWon(original)}</div>
+            </div>
+            <div>
+              <div className="text-[10.5px] text-[var(--ink-3)] uppercase">합계</div>
+              <div className="num font-medium">₩{fmtWon(total)}</div>
+            </div>
+            <div>
+              <div className="text-[10.5px] text-[var(--ink-3)] uppercase">차이</div>
+              <div
+                className={`num font-medium ${
+                  diff === 0
+                    ? 'text-green-600'
+                    : diff > 0
+                      ? 'text-red-600'
+                      : 'text-blue-600'
+                }`}
+              >
+                ₩{fmtWon(diff)}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {diff !== 0 && (
+          <p className="text-[11.5px] text-[var(--ink-3)] mt-1">
+            합계가 원본과 일치해야 저장할 수 있습니다.
+          </p>
+        )}
       </div>
     </Modal>
   );

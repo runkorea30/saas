@@ -13,12 +13,14 @@ import {
   useBankMappings,
   useBankExcludeKeywords,
   useOrdersForReconciliation,
+  useBankTransactionSplits,
 } from '@/hooks/useBanking';
 import { useCustomers } from '@/hooks/queries/useCustomers';
 import {
   calcMonthlyReconciliation,
   calcReceivableCards,
 } from '@/utils/calculations';
+import { PAYMENT_TOLERANCE_AMOUNT } from '@/constants/banking';
 import { fmtWon } from '@/components/feature/orders/primitives';
 import { LedgerTab } from '@/components/feature/banking/LedgerTab';
 import { MonthlyTab } from '@/components/feature/banking/MonthlyTab';
@@ -39,6 +41,7 @@ export function BankingPage() {
   const mappingsQuery = useBankMappings();
   const keywordsQuery = useBankExcludeKeywords();
   const ordersQuery = useOrdersForReconciliation();
+  const splitsQuery = useBankTransactionSplits();
   const customersQuery = useCustomers(companyId);
 
   const transactions = txQuery.data ?? [];
@@ -46,6 +49,7 @@ export function BankingPage() {
   const mappings = mappingsQuery.data ?? [];
   const excludeKeywords = keywordsQuery.data ?? [];
   const orders = ordersQuery.data ?? [];
+  const splits = splitsQuery.data ?? [];
   const customers = useMemo(
     () =>
       (customersQuery.data ?? []).map((c) => ({
@@ -76,15 +80,20 @@ export function BankingPage() {
     const recon = calcMonthlyReconciliation(
       orders.filter((o) => o.order_date.startsWith(`${year}-`)),
       txAll.map((t) => ({
+        id: t.id,
         customer_id: t.customer_id,
         transaction_date: t.transaction_date.slice(0, 10),
         amount: t.amount,
         match_status: t.match_status,
+        target_sales_month: t.target_sales_month,
       })),
+      splits,
+      new Date(),
+      PAYMENT_TOLERANCE_AMOUNT,
     );
     const cards = calcReceivableCards(recon, new Map());
     return cards.reduce((s, c) => s + c.overdue_amount, 0);
-  }, [orders, txAll, year]);
+  }, [orders, txAll, splits, year]);
 
   const yearOptions: number[] = [];
   for (let y = 2024; y <= now.getFullYear(); y++) yearOptions.push(y);

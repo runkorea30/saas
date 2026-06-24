@@ -7,6 +7,8 @@
 import { useMemo, useState } from 'react';
 import { calcMonthlyReconciliation } from '@/utils/calculations';
 import { fmtWon } from '@/components/feature/orders/primitives';
+import { useBankTransactionSplits } from '@/hooks/useBanking';
+import { PAYMENT_TOLERANCE_AMOUNT } from '@/constants/banking';
 import type { BankTransaction, MonthlyReconciliation } from '@/types/database';
 
 interface OrderRow {
@@ -25,6 +27,7 @@ interface Props {
 
 export function MonthlyTab({ orders, transactions, year }: Props) {
   const [customerFilter, setCustomerFilter] = useState<string>('');
+  const { data: splits = [] } = useBankTransactionSplits();
 
   const yearOrders = useMemo(
     () => orders.filter((o) => o.order_date.startsWith(`${year}-`)),
@@ -36,14 +39,18 @@ export function MonthlyTab({ orders, transactions, year }: Props) {
       calcMonthlyReconciliation(
         yearOrders,
         transactions.map((t) => ({
+          id: t.id,
           customer_id: t.customer_id,
           transaction_date: t.transaction_date.slice(0, 10),
           amount: t.amount,
           match_status: t.match_status,
           target_sales_month: t.target_sales_month,
         })),
+        splits,
+        new Date(),
+        PAYMENT_TOLERANCE_AMOUNT,
       ),
-    [yearOrders, transactions],
+    [yearOrders, transactions, splits],
   );
 
   const customers = useMemo(() => {

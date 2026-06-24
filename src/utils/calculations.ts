@@ -763,13 +763,20 @@ export function calcMonthlyReconciliation(
     total_amount: number;
   }[],
   transactions: {
+    id: string;
     customer_id: string | null;
     transaction_date: string;
     amount: number;
     match_status: string;
     target_sales_month: string | null;
   }[],
+  splits: {
+    bank_transaction_id: string;
+    target_sales_month: string;
+    amount: number;
+  }[] = [],
   today: Date = new Date(),
+  toleranceAmount: number = 0,
 ): import('@/types/database').MonthlyReconciliation[] {
   type Cycle = '당월' | '익월' | '2개월';
 
@@ -826,20 +833,46 @@ export function calcMonthlyReconciliation(
     windowMap.set(key, { start: windowStart, end: windowEnd });
   }
 
+  // bank_transaction_id → splits[] 맵
+  const splitsMap = new Map<string, typeof splits>();
+  for (const sp of splits) {
+    const arr = splitsMap.get(sp.bank_transaction_id) ?? [];
+    arr.push(sp);
+    splitsMap.set(sp.bank_transaction_id, arr);
+  }
+
+  const pushDeposit = (key: string, amount: number, date: string) => {
+    const existing = depositMap.get(key) ?? { amount: 0, dates: [] };
+    existing.amount += amount;
+    if (!existing.dates.includes(date)) existing.dates.push(date);
+    depositMap.set(key, existing);
+  };
+
   for (const t of transactions) {
     if (!t.customer_id || t.match_status !== 'matched') continue;
 
     const txDate = new Date(t.transaction_date);
 
+    // 분할 귀속 우선 (target_sales_month / 자동 매칭보다 강함)
+    const txSplits = splitsMap.get(t.id);
+    if (txSplits && txSplits.length > 0) {
+      for (const sp of txSplits) {
+        pushDeposit(
+          `${t.customer_id}__${sp.target_sales_month}`,
+          sp.amount,
+          t.transaction_date,
+        );
+      }
+      continue;
+    }
+
     // target_sales_month 수동 지정 우선
     if (t.target_sales_month) {
-      const key = `${t.customer_id}__${t.target_sales_month}`;
-      const existing = depositMap.get(key) ?? { amount: 0, dates: [] };
-      existing.amount += t.amount;
-      if (!existing.dates.includes(t.transaction_date)) {
-        existing.dates.push(t.transaction_date);
-      }
-      depositMap.set(key, existing);
+      pushDeposit(
+        `${t.customer_id}__${t.target_sales_month}`,
+        t.amount,
+        t.transaction_date,
+      );
       continue;
     }
 
@@ -847,12 +880,7 @@ export function calcMonthlyReconciliation(
     for (const [key, window] of windowMap) {
       if (!key.startsWith(`${t.customer_id}__`)) continue;
       if (txDate >= window.start && txDate <= window.end) {
-        const existing = depositMap.get(key) ?? { amount: 0, dates: [] };
-        existing.amount += t.amount;
-        if (!existing.dates.includes(t.transaction_date)) {
-          existing.dates.push(t.transaction_date);
-        }
-        depositMap.set(key, existing);
+        pushDeposit(key, t.amount, t.transaction_date);
         break;
       }
     }
@@ -866,9 +894,18 @@ export function calcMonthlyReconciliation(
     const deposit_dates = slot ? [...slot.dates].sort() : [];
     const difference = s.sales_total - deposit_total;
     const due_date = calcDueDate(s.month, s.settlement_cycle);
-    const is_overdue = difference > 0 && new Date(due_date) < today;
+    // 허용 오차 적용:
+    //   |차액| ≤ tolerance 면 정산완료 (십원 절사 등 소액 흡수)
+    //   초과입금(difference < 0)도 정산완료
+    //   그 외 difference > 0 이고 due_date 지났으면 연체
+    const effectiveDifference = Math.abs(difference);
+    const is_overdue =
+      effectiveDifference > toleranceAmount &&
+      difference > 0 &&
+      new Date(due_date) < today;
     const status =
-      difference <= 0 ? '정산완료'
+      effectiveDifference <= toleranceAmount ? '정산완료'
+      : difference < 0 ? '정산완료'
       : is_overdue ? '연체'
       : '정산대기';
 
