@@ -23,9 +23,11 @@
 | Phase 3.14 | 발주서 페이지 (`/inventory/purchase-orders`) — `calcOrderSuggestion` 기반 | ✅ 완료 (2026-06-24) |
 | Phase 3.15 | 거래처 주문서 포털 (`/customer-order`) — 거래처 로그인 + 주문서 업로드 | ✅ 완료 (2026-06-24) |
 | Phase 3.16 | 주문내역 UI 개선 + 단위 일괄정리 + Vercel 배포 | ✅ 완료 (2026-06-24) |
+| Phase 3.17 | 은행거래 페이지 (`/finance/banking`) — 3탭 (입출금장부/월별정산/매칭설정) + KB엑셀 파싱 + 자동매칭 | ✅ 완료 (2026-06-24) |
+| Phase 3.18 | 미수금 관리 페이지 (`/finance/receivables`) — 카드형 현황 + 월별 상세 모달 | ✅ 완료 (2026-06-24) |
 | Phase 4 | 나머지 페이지 + Auth 도입 | 대기 |
 
-**페이지 진도: 9 / 13 구현 완료**
+**페이지 진도: 11 / 13 구현 완료**
 
 - `/` — 홈 대시보드 (KPI + Today + Chart + Timeline)
 - `/sales/orders` — 주문내역 (필터/목록/상세 split, 상세에서 수정/저장/반품추가/주문추가)
@@ -36,19 +38,22 @@
 - `/inventory/purchase` — 수입/매입 Phase 1 + Phase 2 (수동 입력·입고확정 + PDF/XLSX 자동 파싱)
 - `/inventory/purchase-orders` — 발주서 (계산식 기반 발주량 추천 + DZ 반올림 + 카테고리 단일선택)
 - `/customer-order` — 거래처 주문서 포털 (로그인 + 주문서 업로드 + 직송정보 + 월별 주문내역)
-- 나머지 4 경로는 전부 `<PlaceholderPage />` 상태
+- `/finance/banking` — 은행거래 (KB엑셀 업로드, 자동매칭, 월별정산, 매핑설정)
+- `/finance/receivables` — 미수금 관리 (카드형 현황, 월별 누적미수금, 연체일수)
+- 나머지 2 경로 (`/finance/tax-invoices`, `/finance/pnl`) 는 `<PlaceholderPage />` 상태
 
 **배포**: https://saas-beta-pied.vercel.app (Vercel 자동 배포, GitHub push)
 
 ---
 
-## 후속 PR 로드맵 (2026-06-24 갱신)
+## 후속 PR 로드맵 (2026-06-24 갱신, 은행거래/미수금 완료 후)
 
 - **다음 후보 (택1)**:
-  - **매출분석 페이지 심화** — 월별/일별/제품별 1차 구현 후 차트·필터·CSV 내보내기 보강
+  - **세금계산서** (`/finance/tax-invoices`) — 발행/조회
+  - **손익계산서** (`/finance/pnl`) — `calcCostOfSales` 선행 필요 (FIFO 로트 소비)
+  - **거래처 편집 UI** — CustomerDetailPane 인라인/모달 편집 (정산주기·입금매칭 포함)
   - **송장대장** (`/sales/invoices`)
-  - **미수금** (`/finance/receivables`)
-  - **은행거래** (`/finance/banking`) — 입금 매칭
+  - **매출분석 페이지 심화** — 차트·필터·CSV 내보내기 보강
 - **PR 2 (예정)**: Products 엑셀 업로드 — XLSX 템플릿, 프리뷰, 일괄 추가
 - **PR 3 (예정)**: Products 일괄 수정 — 체크된 행의 판매가/공급가/USD 등 동시 변경. PR 1.5 (#4) 의 체크박스 컬럼이 이 PR을 위한 사전 준비
 - **Phase B (예정)**: Products 행 클릭 상세 펼침
@@ -61,6 +66,48 @@
 ---
 
 ## 오늘 추가된 작업 요약 (2026-06-24)
+
+### 은행거래 페이지 (Phase 3.17) — `/finance/banking`
+3탭 구조: 입출금 장부 / 월별 정산 / 매칭 설정.
+- **DB 스키마 (3회 마이그레이션)**:
+  - `bank_transactions` 컬럼 3종 추가: `exclude_reason TEXT`, `match_type VARCHAR CHECK (IN '자동','수동','매핑')`, `moved_to_monthly BOOLEAN DEFAULT false`
+  - `bank_transactions` UNIQUE 제약: `(company_id, transaction_date, depositor_name, amount)` — 동일 파일 재업로드 시 중복 자동 skip
+  - `customers.match_type VARCHAR DEFAULT 'monthly' CHECK (IN 'monthly','daily')` — 디엔에스만 daily 로 마이그레이션됨
+  - 신규 테이블 `bank_mappings` (id, company_id, bank_name UNIQUE per company, customer_id FK SET NULL, customer_name)
+  - 신규 테이블 `bank_exclude_keywords` (id, company_id, keyword UNIQUE per company)
+  - v1 (`hhgicytfzmikuavgbgov`) → OPS 데이터 마이그레이션: 48 거래 / 11 매핑 / 7 키워드
+- **TS 유틸 신규**:
+  - `src/utils/bankParser.ts` — `parseKBBank(file)` (SheetJS cp949, 헤더 자동 탐색, 입금액>0 행만) + `applyAutoMatch(rows, mappings, keywords, customers)` (3단계 우선순위: 제외키워드 → bank_mappings → fuzzy 거래처명)
+  - `src/utils/calculations.ts` 추가 함수: `calcDueDate(month, cycle)`, `calcMonthlyReconciliation(orders, txs)`, `calcReceivableCards(recon, lastDepositDates)`
+- **훅 (`src/hooks/useBanking.ts`)**:
+  - 조회 4종: `useBankTransactions(year, month)` · `useBankMappings()` · `useBankExcludeKeywords()` · `useOrdersForReconciliation()`
+  - mutation 6종: `useAdd/UpdateBankTransaction(s)` · `useAdd/DeleteBankMapping` · `useAdd/DeleteBankExcludeKeyword`
+  - ⚠️ DB 컬럼 `settlement_cycle` ↔ TS 타입 `payment_cycle` rename 처리는 useBankTransactions / useOrdersForReconciliation 내부에서 흡수
+- **페이지 (`src/pages/finance/BankingPage.tsx` + `src/components/feature/banking/`)**:
+  - KPI 3개: 이번기간 입금 / 미매칭 건수 / 전체 미수 잔액(연체)
+  - **탭1 입출금 장부**: KB엑셀 업로드 → parseKBBank → applyAutoMatch → 미리보기 모달(자동매칭=green/제외=gray strike-through/미매칭=amber) → 일괄 저장 → 중복 N건 안내 toast. 행별 거래처 인라인 select (즉시 matched), [제외] 사유 입력 → 키워드 자동 등록 확인 다이얼로그, [매칭해제]
+  - **탭2 월별 정산**: 거래처×월 정산 테이블 + 차액 색상(미수=red/초과=blue/완료=green) + 합계 행
+  - **탭3 매칭 설정**: 자동매핑 룰 CRUD (인라인 새 행 추가) + 제외 키워드 칩 CRUD
+
+### 미수금 관리 페이지 (Phase 3.18) — `/finance/receivables`
+- **데이터**: `useOrdersForReconciliation()` + `useBankTransactions(year, null)` → `calcMonthlyReconciliation` → `calcReceivableCards`
+- **레이아웃**: 반응형 카드 그리드 (`auto-fill, minmax(260px, 1fr)`), 위험 → 경고 → 정상 순 정렬
+- **카드**: 거래처명 + 배지(위험 red / 경고 yellow / 정상 green) + 연체금액(또는 '잔액 없음') + 총매출/정산대기/최근입금 3행
+- **상세 모달**: 카드 클릭 → 매출월 / 매출합계 / 정산마감일 / 입금합계 / 잔액 / 누적미수금 / 상태 / 연체일수 + 합계 행
+- 누적미수금은 difference 누계 (음수는 0으로 클램프)
+- 연체일수 = is_overdue 시 `(오늘 - due_date)` 일수, 아니면 '-'
+
+### 신규 DB 객체 (모두 §5 rollback 목록에 기록)
+- 테이블: `mochicraft_demo.bank_mappings` · `mochicraft_demo.bank_exclude_keywords`
+- 컬럼: `bank_transactions.exclude_reason` · `.match_type` · `.moved_to_monthly`
+- 컬럼: `customers.match_type`
+- 제약: `bank_transactions` UNIQUE `(company_id, transaction_date, depositor_name, amount)`
+- 정책: `anon_all_bank_transactions` · `anon_all_bank_mappings` · `anon_all_bank_exclude_keywords`
+- 로컬 마이그레이션 파일: `supabase/migrations/20260624000000_banking_schema_and_v1_seed.sql`
+
+### TS 타입 보강 (`src/types/database.ts`)
+- `Database` 제네릭 타입에 `bank_transactions` 신규 3컬럼 + `bank_mappings` + `bank_exclude_keywords` 테이블 정의 + `customers.match_type` 컬럼 수동 추가.
+- 첫 `npm run build` 시 TS2769 다발로 실패 → 위 패치 적용 후 빌드 성공.
 
 ### 발주서 페이지 (Phase 3.14) — `/inventory/purchase-orders`
 - 신규 페이지 `PurchaseOrderPage` — `calcOrderSuggestion(companyId, productId)` 기반 추천 발주량 계산 (과거 6개월 판매 → 3개월치 → DZ).
@@ -396,6 +443,19 @@ ProductListTable에서 `Check` 컴포넌트(`orders/primitives.tsx`)를 신규 i
   - `anon_all_customer_order_uploads` 정책 (anon ALL USING true) — 롤백: `DROP POLICY "anon_all_customer_order_uploads" ON mochicraft_demo.customer_order_uploads;`
   - `GRANT SELECT, INSERT ON mochicraft_demo.customer_order_uploads TO anon`
   - 🟠 Phase 2 Auth 도입 시 `customer_users.password_hash` 로 인증 이관 + 위 컬럼/정책 모두 회수
+- **은행거래/미수금 추가** (Phase 3.17~3.18 — `20260624000000_banking_schema_and_v1_seed.sql`):
+  - `bank_transactions.exclude_reason TEXT` — 롤백: `ALTER TABLE mochicraft_demo.bank_transactions DROP COLUMN exclude_reason;`
+  - `bank_transactions.match_type VARCHAR CHECK (자동/수동/매핑)` — 롤백: `ALTER TABLE mochicraft_demo.bank_transactions DROP COLUMN match_type;`
+  - `bank_transactions.moved_to_monthly BOOLEAN NOT NULL DEFAULT false` — 롤백: `ALTER TABLE mochicraft_demo.bank_transactions DROP COLUMN moved_to_monthly;`
+  - `bank_transactions` UNIQUE `(company_id, transaction_date, depositor_name, amount)` — 롤백: `ALTER TABLE mochicraft_demo.bank_transactions DROP CONSTRAINT uq_bank_tx_date_depositor_amount;`
+  - `customers.match_type VARCHAR NOT NULL DEFAULT 'monthly' CHECK (monthly/daily)` — 롤백: `ALTER TABLE mochicraft_demo.customers DROP COLUMN match_type;`
+  - `customers.settlement_cycle` CHECK `(당월/익월/2개월)` 제약 + DEFAULT '익월' 적용 — 롤백: `ALTER TABLE mochicraft_demo.customers DROP CONSTRAINT customers_settlement_cycle_check; ALTER TABLE mochicraft_demo.customers ALTER COLUMN settlement_cycle DROP DEFAULT;`
+  - `mochicraft_demo.bank_mappings` 테이블 — 롤백: `DROP TABLE mochicraft_demo.bank_mappings;`
+  - `mochicraft_demo.bank_exclude_keywords` 테이블 — 롤백: `DROP TABLE mochicraft_demo.bank_exclude_keywords;`
+  - `anon_all_bank_transactions` / `anon_all_bank_mappings` / `anon_all_bank_exclude_keywords` 정책 (모두 anon ALL USING true) — 일반 `_dev_anon_select` 일괄 DROP 스크립트와 별도 회수 필요
+  - `GRANT SELECT, INSERT, UPDATE, DELETE ON bank_transactions/bank_mappings TO anon`
+  - `GRANT SELECT, INSERT, DELETE ON bank_exclude_keywords TO anon`
+  - v1 → OPS 데이터 (bank_transactions 48 / mappings 11 / keywords 7) 는 일회성 INSERT 라 별도 롤백 불필요 (`DELETE FROM ... WHERE company_id = '...'` 로 일괄 제거 가능)
 
 ### 원복 SQL
 ```sql
@@ -543,6 +603,20 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 - src/utils/inventory.ts 는 수입/매입 계산 전용으로 이미 사용 중 — 주문용은 다른 파일로 분리 (예: `src/utils/ordering.ts`) 또는 기존 파일에 네임스페이스 추가
 - 기존 orders/order_items/inventory_* 테이블 truncate
 
+## 🟠 알려진 이슈 — Supabase 타입 재생성 한계 (2026-06-24)
+
+- **Supabase MCP `generate_typescript_types` 는 `public` 스키마만 반환** — 본 프로젝트의 `mochicraft_demo` 스키마는 미지원.
+- 결과: DB 스키마 변경 (테이블/컬럼 추가) 시 `src/types/database.ts` 의 `Database` 제네릭을 **수동 패치 필요**.
+- 미패치 상태로 `npm run build` (`tsc -b`) 시 TS2769 다발로 실패.
+- 회피: 새 테이블/컬럼 마이그레이션 직후 동일 세션에서 `src/types/database.ts` 의 `mochicraft_demo.Tables` 블록에 Row/Insert/Update 3종을 직접 추가.
+- 🟡 단순 `npx tsc --noEmit` 만 돌리면 통과해버림(루트 `tsconfig.json` 이 `files: []` 라 아무것도 포함 안 함). **반드시 `npm run build` 또는 `npx tsc -b --noEmit` 로 검증**.
+
+## ⏸ 보류 항목 (2026-06-24)
+
+- **거래처 정산주기/입금매칭 필드 편집 UI** — 현재 `CustomerDetailPane` 은 read-only. 정산주기(`settlement_cycle`) / 입금매칭(`match_type`) 편집은 인라인 select 또는 별도 편집 모달 신설 필요. 비활성 상태인 "거래처 추가" 모달과 함께 일괄 신설 권장. 별도 세션에서 처리.
+
+---
+
 ## 🔴 미해결 이슈 — 리사이저 (2026-04-24)
 
 ### Split 리사이저 회귀
@@ -612,17 +686,28 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 
 ## 7. 다음 세션 진입점
 
-### (권장) 매출분석 페이지 — 월별/일별/제품별
-- 경로: `/sales/analytics` (또는 `/finance/sales-analytics`)
-- 1차 베이스(`5853096` 매출분석 페이지 구현) 위에 차트·필터·CSV 내보내기 보강.
-- 참고 계산식: `calcMonthlySales`, `calcDailySales`, `calcApproxProfitMargin` 이미 `src/utils/calculations.ts` 에 존재.
-- TODO 후보:
-  - 기간(월/일) 토글 + 시작·종료 날짜 범위
-  - 거래처/카테고리/제품 다중 필터
-  - Recharts 라인/막대 차트
-  - 제품별 매출 Top N 테이블
-  - CSV 내보내기 (`fmtMoney` 통일)
+### (권장) 남은 재무 페이지 — 세금계산서 + 손익계산서
+- `/finance/tax-invoices` — 세금계산서 발행/조회. `mochicraft_demo.tax_invoices` 테이블 기존 존재 (조회만 필요 시 그대로, 발행 플로우는 별도 RPC 설계).
+- `/finance/pnl` — 손익계산서. **`calcCostOfSales` 선행 구현 필요** (FIFO 로트 소비 로직 — `inventory_lots.remaining_quantity` × `cost_krw` 차감 누적).
 
+### (권장 직후) 브라우저 검증 — Phase 3.17~3.18
+- 은행거래 / 미수금 페이지가 코드상 완료되었으나 **브라우저 검증 미수행**. 다음 세션 진입 시:
+  - KB 엑셀 업로드 → 미리보기 모달 → 저장 → 중복 검증
+  - 거래처 인라인 select, 제외 → 키워드 자동 등록 confirm
+  - 월별 정산표 합계/색상
+  - 매핑/키워드 CRUD
+  - 미수금 카드 정렬 + 상세 모달 누적미수금/연체일수 계산
+- 확인된 버그가 있으면 우선 수정.
+
+### (권장 직후) 거래처 편집 UI
+- `CustomerDetailPane` read-only → 인라인 편집 또는 편집 모달 신설.
+- 필수 필드: `settlement_cycle` (당월/익월/2개월) · `match_type` (monthly/daily) · contact1/2 / email / 등급 / 별칭 / 활성 여부.
+- 비활성 상태인 "거래처 추가" 모달도 같이 신설 권장.
+- `useUpdateCustomer` / `useCreateCustomer` mutation 훅 신설 필요.
+
+### ~~(완료) 매출분석 페이지~~ ✅ Phase 매출분석 (`5853096`)
+### ~~(완료) 은행거래~~ ✅ Phase 3.17 (2026-06-24)
+### ~~(완료) 미수금 관리~~ ✅ Phase 3.18 (2026-06-24)
 ### ~~(완료) 수입/매입 Phase 2~~ ✅ Phase 3.13 (2026-06-23)
 ### ~~(완료) 발주서 페이지~~ ✅ Phase 3.14 (2026-06-24)
 ### ~~(완료) 거래처 주문서 포털~~ ✅ Phase 3.15 (2026-06-24)
@@ -632,8 +717,6 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 
 ### 후속 페이지 (우선순위 무관)
 - `/sales/invoices` — 송장대장
-- `/finance/receivables` — 미수금
-- `/finance/banking` — 은행거래 (입금 매칭)
 - `/finance/tax-invoices` — 세금계산서 발행
 - `/finance/pnl` — 손익계산서 (`calcCostOfSales` 선행 필요)
 
@@ -642,6 +725,10 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 - `koreanSort` · `getCategoryLabel` / `CATEGORY_OPTIONS`
 - `fetchAllRows` · `useCompany()` · `calcCurrentStockByProduct`
 - **신규 (Phase 3.9)**: `src/utils/inventory.ts` 순수 계산 9종 (`normalizeSourceCode` · `computeAdjustedQuantityDefault` · `computeSourceUnitPriceUsd` · `computeUnitPriceUsd` · `computeShippingAllocationUsd` · `computeCostKrw` · `computeLineTotalKrw` · `computeInvoiceActualTotalUsd` · `hasSignificantTotalDiff`)
+- **신규 (Phase 3.17~3.18)**:
+  - `src/utils/bankParser.ts` — `parseKBBank(file)` · `applyAutoMatch(rows, mappings, keywords, customers)` · `ParsedBankRow` / `MatchedBankRow`
+  - `src/utils/calculations.ts` — `calcDueDate` · `calcMonthlyReconciliation` · `calcReceivableCards`
+  - `src/hooks/useBanking.ts` — 조회 4 + mutation 6 = 10 훅
 
 ### 옵션 — Auth 우선
 - Supabase Auth + memberships 도입
@@ -660,9 +747,14 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 - 커밋 컨벤션: `@bkit "<message>"` 패턴 (사용자가 지시할 때만 커밋/푸시)
 - dev 서버 재시작: `Ctrl+C` 후 `npm run dev` (포트 점유 시 다음 포트로)
 - DB 수정 시 MochiCraft 브라우저 탭 닫아둘 것 (열려 있으면 프론트가 덮어쓸 가능성)
-- 타입체크: `npx tsc --noEmit` (커밋 전 필수)
+- 타입체크: `npx tsc --noEmit` (커밋 전 필수) — **단, 루트 tsconfig.json 이 files:[] 라 이걸로는 미감지. `npm run build` 로 검증할 것**
 
-### 최근 커밋 (2026-06-24 세션)
+### 최근 커밋 (2026-06-24 세션 후반 — 은행거래/미수금)
+- `7516bae` feat(banking): 은행거래/미수금 페이지 구현 (3탭 + 카드형 현황)
+- `541f415` feat(banking): 파서/계산/훅 — KB엑셀 파싱, 자동매칭, 미수금 계산
+- `118e1f8` feat(banking): DB 스키마 + TS 타입 — bank_mappings/exclude_keywords/payment_cycle
+
+### 이전 커밋 (2026-06-24 세션 전반)
 - `5853096` feat: 매출분석 페이지 구현 (월별/일별/제품별)
 - `2f64b8e` fix: 주문상세 판매가 컬럼 복원 (sell_price 조회 추가)
 - `311d2cf` feat: 주문내역 UI 개선 (헤더축소/필터한줄/수량인라인편집)
