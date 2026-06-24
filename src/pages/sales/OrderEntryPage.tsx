@@ -232,7 +232,7 @@ export function OrderEntryPage() {
                 product_name: product.name,
                 unit_price: product.sell_price,
                 supply_price: supplyPrice,
-                amount: r.quantity * product.sell_price,
+                amount: r.quantity * supplyPrice,
                 is_return: isReturnMode,
                 codeError: false,
                 nameError: false,
@@ -928,7 +928,7 @@ export function OrderEntryPage() {
                                   ? {
                                       ...r,
                                       quantity: safe,
-                                      amount: safe * r.unit_price,
+                                      amount: safe * r.supply_price,
                                     }
                                   : r,
                               ),
