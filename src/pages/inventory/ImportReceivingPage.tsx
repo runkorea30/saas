@@ -41,6 +41,7 @@ import { ImportHeaderForm } from '@/components/feature/import/ImportHeaderForm';
 import { ImportSummaryBar } from '@/components/feature/import/ImportSummaryBar';
 import { ImportRowsTable } from '@/components/feature/import/ImportRowsTable';
 import { InvoiceUploadCard } from '@/components/feature/import/InvoiceUploadCard';
+import { parseInvoicePDF } from '@/utils/invoiceParser';
 
 // ───────────────────────────────────────────────────────────
 
@@ -103,6 +104,7 @@ export function ImportReceivingPage() {
   const [noticeProducts, setNoticeProducts] = useState<ImportNoticeProduct[]>([]);
   const [noticeProductInput, setNoticeProductInput] = useState('');
   const [noticeSaving, setNoticeSaving] = useState(false);
+  const [noticeParsingPdf, setNoticeParsingPdf] = useState(false);
 
   // company 로드/갱신 시 폼 초기값 동기화.
   useEffect(() => {
@@ -320,6 +322,64 @@ export function ImportReceivingPage() {
     }
     setNoticeProducts((prev) => [...prev, { code: found.code, name: found.name }]);
     setNoticeProductInput('');
+  };
+
+  /**
+   * 인보이스 PDF 업로드 → Claude 파싱 → products.code 매칭 → 안내 제품 목록 추가.
+   * 🟠 parseInvoicePDF 는 item_code 에서 이미 하이픈을 제거해 반환한다.
+   * 🟡 이미 추가된 제품은 건너뛰고, 매칭 실패 코드는 토스트로 안내.
+   */
+  const handleNoticePdfUpload = async (file: File) => {
+    if (!/\.pdf$/i.test(file.name)) {
+      showToast({ kind: 'error', text: 'PDF 파일만 업로드 가능합니다.' });
+      return;
+    }
+    setNoticeParsingPdf(true);
+    try {
+      const parsed = await parseInvoicePDF(file);
+      const matched: ImportNoticeProduct[] = [];
+      const unmatched: string[] = [];
+      const seen = new Set(noticeProducts.map((p) => p.code));
+
+      for (const row of parsed.rows) {
+        const code = row.item_code.trim();
+        if (!code) continue;
+        const product = products.find(
+          (p) => p.code.toUpperCase() === code.toUpperCase(),
+        );
+        if (!product) {
+          unmatched.push(code);
+          continue;
+        }
+        if (seen.has(product.code)) continue;
+        seen.add(product.code);
+        matched.push({ code: product.code, name: product.name });
+      }
+
+      if (matched.length > 0) {
+        setNoticeProducts((prev) => [...prev, ...matched]);
+      }
+
+      const parts: string[] = [`${matched.length}개 제품 추가됨`];
+      if (unmatched.length > 0) {
+        const sample = unmatched.slice(0, 5).join(', ');
+        const ellipsis = unmatched.length > 5 ? ' …' : '';
+        parts.push(`매칭 실패 ${unmatched.length}개: ${sample}${ellipsis}`);
+      }
+      showToast({
+        kind: matched.length > 0 ? 'success' : 'info',
+        text: parts.join(' · '),
+      });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[import-notice.pdf]', e);
+      showToast({
+        kind: 'error',
+        text: e instanceof Error ? e.message : 'PDF 파싱 중 오류가 발생했습니다.',
+      });
+    } finally {
+      setNoticeParsingPdf(false);
+    }
   };
 
   const handleNoticeSave = async () => {
@@ -620,6 +680,35 @@ export function ImportReceivingPage() {
               >
                 추가
               </button>
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '6px 12px',
+                  fontSize: 12,
+                  borderRadius: 6,
+                  border: '1px solid var(--line-strong)',
+                  background: 'var(--surface)',
+                  color: 'var(--ink-2)',
+                  cursor: noticeParsingPdf ? 'not-allowed' : 'pointer',
+                  opacity: noticeParsingPdf ? 0.55 : 1,
+                  pointerEvents: noticeParsingPdf ? 'none' : 'auto',
+                }}
+                title="인보이스 PDF 를 업로드해 제품을 자동 추가"
+              >
+                {noticeParsingPdf ? '파싱 중…' : '📄 인보이스 PDF'}
+                <input
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void handleNoticePdfUpload(f);
+                    e.target.value = '';
+                  }}
+                  disabled={noticeParsingPdf}
+                />
+              </label>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {noticeProducts.map((p) => (
