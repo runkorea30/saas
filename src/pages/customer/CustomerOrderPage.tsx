@@ -1087,13 +1087,6 @@ interface ImportNoticeData {
 
 type ImportNoticeTab = 'fedex' | 'sea' | 'soldout' | 'low';
 
-const IMPORT_TABS: ReadonlyArray<{ key: ImportNoticeTab; label: string }> = [
-  { key: 'fedex', label: '✈️ 페덱스' },
-  { key: 'sea', label: '🚢 해상운송' },
-  { key: 'soldout', label: '품절' },
-  { key: 'low', label: '재고부족' },
-];
-
 /** 카테고리 → 코드 오름차순 정렬. */
 function sortByCategoryThenCode<T extends { code: string; category: string | null }>(
   items: T[],
@@ -1250,47 +1243,103 @@ function ImportNoticeCard({
         padding: 16,
       }}
     >
-      {/* 탭 (4탭) — 최상단, 알약 뱃지 스타일 (탭별 색상 구분) */}
+      {/* 탭 (4탭) — 최상단, pill 뱃지 스타일 (탭별 색상 구분) */}
       <div
         style={{
           display: 'flex',
-          gap: 6,
+          gap: 8,
           flexWrap: 'wrap',
           marginBottom: 12,
           flexShrink: 0,
         }}
       >
-        {IMPORT_TABS.map((t) => {
-          const on = tab === t.key;
-          const variant = tabBadgeColors(t.key);
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              style={{
-                padding: '4px 12px',
-                fontSize: 11,
-                fontWeight: 500,
-                borderRadius: 999,
-                border: `1px solid ${on ? variant.solidBorder : variant.outlineBorder}`,
-                background: on ? variant.solidBg : '#FFFFFF',
-                color: on ? '#FFFFFF' : variant.outlineFg,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                transition: 'background 0.15s, color 0.15s',
-              }}
-              onMouseEnter={(e) => {
-                if (!on) e.currentTarget.style.background = variant.hoverBg;
-              }}
-              onMouseLeave={(e) => {
-                if (!on) e.currentTarget.style.background = '#FFFFFF';
-              }}
-            >
-              {t.label}
-            </button>
-          );
-        })}
+        {/* 페덱스 탭 */}
+        <button
+          type="button"
+          onClick={() => setTab('fedex')}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '4px 10px',
+            borderRadius: '999px',
+            fontSize: '11px',
+            fontWeight: 600,
+            border: '1.5px solid',
+            cursor: 'pointer',
+            backgroundColor: tab === 'fedex' ? '#6B1F2A' : 'white',
+            color: tab === 'fedex' ? 'white' : '#6B1F2A',
+            borderColor: '#6B1F2A',
+          }}
+        >
+          ✈️ 페덱스
+        </button>
+
+        {/* 해상운송 탭 */}
+        <button
+          type="button"
+          onClick={() => setTab('sea')}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '4px 10px',
+            borderRadius: '999px',
+            fontSize: '11px',
+            fontWeight: 600,
+            border: '1.5px solid',
+            cursor: 'pointer',
+            backgroundColor: tab === 'sea' ? '#6B1F2A' : 'white',
+            color: tab === 'sea' ? 'white' : '#6B1F2A',
+            borderColor: '#6B1F2A',
+          }}
+        >
+          🚢 해상운송
+        </button>
+
+        {/* 품절 탭 */}
+        <button
+          type="button"
+          onClick={() => setTab('soldout')}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '4px 10px',
+            borderRadius: '999px',
+            fontSize: '11px',
+            fontWeight: 600,
+            border: '1.5px solid',
+            cursor: 'pointer',
+            backgroundColor: tab === 'soldout' ? '#ef4444' : 'white',
+            color: tab === 'soldout' ? 'white' : '#ef4444',
+            borderColor: '#ef4444',
+          }}
+        >
+          🚫 품절
+        </button>
+
+        {/* 재고부족 탭 */}
+        <button
+          type="button"
+          onClick={() => setTab('low')}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '4px 10px',
+            borderRadius: '999px',
+            fontSize: '11px',
+            fontWeight: 600,
+            border: '1.5px solid',
+            cursor: 'pointer',
+            backgroundColor: tab === 'low' ? '#f59e0b' : 'white',
+            color: tab === 'low' ? 'white' : '#f59e0b',
+            borderColor: '#f59e0b',
+          }}
+        >
+          ⚠️ 재고부족
+        </button>
       </div>
 
       {/* 헤더 — 페덱스/해상운송 탭일 때만 (제목 + 도착예정 자유 텍스트) */}
@@ -1343,44 +1392,6 @@ function ImportNoticeCard({
       />
     </section>
   );
-}
-
-/**
- * 탭 뱃지 색상 팔레트 — 페덱스/해상운송은 브랜드 블루, 품절은 빨강, 재고부족은 주황.
- * 활성 상태는 solid 채움, 비활성은 outline + hover wash.
- */
-function tabBadgeColors(key: ImportNoticeTab): {
-  solidBg: string;
-  solidBorder: string;
-  outlineBorder: string;
-  outlineFg: string;
-  hoverBg: string;
-} {
-  if (key === 'soldout') {
-    return {
-      solidBg: '#EF4444',
-      solidBorder: '#EF4444',
-      outlineBorder: '#FCA5A5',
-      outlineFg: '#EF4444',
-      hoverBg: '#FEF2F2',
-    };
-  }
-  if (key === 'low') {
-    return {
-      solidBg: '#F59E0B',
-      solidBorder: '#F59E0B',
-      outlineBorder: '#FCD34D',
-      outlineFg: '#D97706',
-      hoverBg: '#FFFBEB',
-    };
-  }
-  return {
-    solidBg: '#2563EB',
-    solidBorder: '#2563EB',
-    outlineBorder: '#D6D3D1',
-    outlineFg: '#6B7280',
-    hoverBg: '#F5F5F4',
-  };
 }
 
 /** companies.import_notice_products / sea_products jsonb → {code,name} 배열로 안전 추출. */
