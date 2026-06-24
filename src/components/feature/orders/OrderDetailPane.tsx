@@ -386,9 +386,24 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
 
   // 일반 모드: orderItems 만 표시 (수량은 인라인 편집).
   // 새 행 추가 모드: orderItems + draftItems (신규 행만 별도 INSERT).
-  const displayRows: Array<OrderItemRow | OrderItemDraft> = editMode
-    ? [...orderItems, ...draftItems]
-    : orderItems;
+  // 🟠 기존 행은 카테고리→코드 오름차순 정렬. draft 행은 정렬 제외 (입력 순서 유지, 맨 뒤).
+  const displayRows: Array<OrderItemRow | OrderItemDraft> = useMemo(() => {
+    const base: Array<OrderItemRow | OrderItemDraft> = editMode
+      ? [...orderItems, ...draftItems]
+      : [...orderItems];
+    const existing = base.filter((r) => !(r as OrderItemDraft)._isNew);
+    const drafts = base.filter((r) => (r as OrderItemDraft)._isNew);
+    existing.sort((a, b) => {
+      const catA = (a as OrderItemRow).category ?? '';
+      const catB = (b as OrderItemRow).category ?? '';
+      const catCmp = catA.localeCompare(catB, 'ko');
+      if (catCmp !== 0) return catCmp;
+      const codeA = (a as OrderItemRow).product_code ?? '';
+      const codeB = (b as OrderItemRow).product_code ?? '';
+      return codeA.localeCompare(codeB);
+    });
+    return [...existing, ...drafts];
+  }, [editMode, orderItems, draftItems]);
   const tableTotal = displayRows.reduce((sum, it) => {
     if ((it as OrderItemDraft)._isNew) {
       return sum + (it as OrderItemDraft).quantity * it.unit_price;

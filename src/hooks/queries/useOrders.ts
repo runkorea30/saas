@@ -48,6 +48,7 @@ export function useOrders({ companyId, range }: UseOrdersParams) {
           .gte('order_date', range.start)
           .lt('order_date', range.end)
           .order('order_date', { ascending: false })
+          .order('created_at', { ascending: false })
           .returns<Order[]>(),
       );
       return rows;
