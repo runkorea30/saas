@@ -553,12 +553,12 @@ export function calcSalesQty1m(qty3m: number): number {
 
 /**
  * 발주서 추천 발주수량.
- * - unit 이 'DZ'(대소문자 무관) 면 ceil(qty3m / 12) DZ
+ * - unit 이 'DZ'(대소문자 무관) 면 round(qty3m / 12) DZ (소수점 첫째 자리 반올림)
  * - 그 외(EA 등) 면 qty3m 그대로
  */
 export function calcOrderQty(qty3m: number, unit: string): number {
   if (unit.toUpperCase() === 'DZ') {
-    return Math.ceil(qty3m / 12);
+    return Math.round(qty3m / 12);
   }
   return qty3m;
 }

@@ -600,7 +600,7 @@ export function PurchaseOrderPage() {
                   <Th align="right">판매량(3개월)</Th>
                   <Th align="right">판매량(1개월)</Th>
                   <Th align="right">재고수량</Th>
-                  <Th align="right">발주수량</Th>
+                  <Th align="right">발주수량(DZ)</Th>
                   <Th align="right">합계($)</Th>
                 </tr>
               </thead>
