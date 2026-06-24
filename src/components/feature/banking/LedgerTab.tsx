@@ -3,7 +3,8 @@
  *
  * - KB 엑셀 업로드 → parseKBBank → applyAutoMatch → 미리보기 모달 → 일괄 저장.
  * - 검색·상태 필터.
- * - 행별 거래처 select / 매칭상태 / 정산이동 / 제외/매칭해제 액션.
+ * - 행별 거래처 select / 매칭상태 / 매출월 / 제외/매칭해제 액션.
+ *   (정산이동 컬럼은 UI에서 숨김. DB 컬럼 moved_to_monthly 는 유지.)
  */
 import { useMemo, useRef, useState } from 'react';
 import { Upload, Search } from 'lucide-react';
@@ -136,19 +137,6 @@ export function LedgerTab({ transactions, mappings, excludeKeywords, customers }
           showToast({
             kind: 'error',
             text: `매칭 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`,
-          }),
-      },
-    );
-  };
-
-  const onToggleMoved = (tx: BankTransaction, val: boolean) => {
-    updateTx.mutate(
-      { id: tx.id, moved_to_monthly: val },
-      {
-        onError: (e) =>
-          showToast({
-            kind: 'error',
-            text: `갱신 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`,
           }),
       },
     );
@@ -323,7 +311,6 @@ export function LedgerTab({ transactions, mappings, excludeKeywords, customers }
               <th className="text-center px-3 py-2 font-medium">매출월</th>
               <th className="text-center px-3 py-2 font-medium">매칭상태</th>
               <th className="text-center px-3 py-2 font-medium">매칭방법</th>
-              <th className="text-center px-3 py-2 font-medium">정산이동</th>
               <th className="text-right px-3 py-2 font-medium">액션</th>
             </tr>
           </thead>
@@ -331,7 +318,7 @@ export function LedgerTab({ transactions, mappings, excludeKeywords, customers }
             {filtered.length === 0 ? (
               <tr>
                 <td
-                  colSpan={9}
+                  colSpan={8}
                   className="text-center py-10 text-[var(--ink-3)] text-[12.5px]"
                 >
                   표시할 거래가 없습니다.
@@ -396,13 +383,6 @@ export function LedgerTab({ transactions, mappings, excludeKeywords, customers }
                   </td>
                   <td className="px-3 py-2 text-center text-[var(--ink-2)]">
                     {tx.match_type ?? '-'}
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    <input
-                      type="checkbox"
-                      checked={tx.moved_to_monthly}
-                      onChange={(e) => onToggleMoved(tx, e.target.checked)}
-                    />
                   </td>
                   <td className="px-3 py-2 text-right">
                     {tx.match_status === 'unmatched' && (
