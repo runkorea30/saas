@@ -10,7 +10,11 @@
  *
  * 🔴 본 컴포넌트는 createPortal 로 body 직속에 렌더링되며,
  *    @media print CSS 에서 #root 를 숨기고 .invoice-print-portal 만 표시한다.
+ *
+ * 🔴 공급가 계산: calcSupplyPriceByCustomerGrade(sell_price, grade, product)
+ *    거래처 등급이 없거나 grade rate 가 0 이면 unit_price 로 폴백.
  */
+import { calcSupplyPriceByCustomerGrade } from '@/utils/calculations';
 
 const SUPPLIER_INFO = {
   name: '런코리아',
@@ -27,11 +31,19 @@ export interface InvoiceItem {
   product: {
     code: string;
     name: string;
+    /** 카탈로그 판매가 — "판매가" 컬럼. */
     sell_price?: number;
+    /** 등급별 공급율 — "공급가" 컬럼 계산용. */
+    grade_a?: number | null;
+    grade_b?: number | null;
+    grade_c?: number | null;
+    grade_d?: number | null;
+    grade_e?: number | null;
   };
   quantity: number;
-  /** order_items.unit_price — 실제 적용 단가(거래처별 공급가). */
+  /** order_items.unit_price — 공급가 계산 폴백 단가. */
   unit_price: number;
+  /** order_items.amount — 합계 컬럼에 그대로 사용 (수량 × 공급가 재계산 금지). */
   amount: number;
   is_return: boolean;
 }
@@ -46,8 +58,8 @@ export interface InvoiceOrder {
 export interface InvoiceCustomer {
   id: string;
   name: string;
-  address?: string | null;
-  phone?: string | null;
+  /** 거래처 등급 (A~E) — 공급가 계산에 사용. */
+  grade?: string | null;
 }
 
 export interface InvoiceCustomerGroup {
@@ -79,6 +91,29 @@ function sectionTitle(index: number, memo?: string | null): string {
 
 function orderSubtotal(order: InvoiceOrder): number {
   return order.items.reduce((s, it) => s + it.amount, 0);
+}
+
+/**
+ * 공급가 계산 — 거래처 등급 × 제품 grade rate × 판매가.
+ * grade 가 없거나 grade rate 가 0 (미설정) 이면 unit_price 폴백.
+ */
+function computeSupplyPrice(
+  item: InvoiceItem,
+  customerGrade: string | null | undefined,
+): number {
+  if (!customerGrade || !item.product.sell_price) return item.unit_price;
+  const computed = calcSupplyPriceByCustomerGrade(
+    item.product.sell_price,
+    customerGrade,
+    {
+      grade_a: item.product.grade_a ?? null,
+      grade_b: item.product.grade_b ?? null,
+      grade_c: item.product.grade_c ?? null,
+      grade_d: item.product.grade_d ?? null,
+      grade_e: item.product.grade_e ?? null,
+    },
+  );
+  return computed > 0 ? computed : item.unit_price;
 }
 
 export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
@@ -143,57 +178,31 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
               </div>
             </header>
 
-            {/* 공급자 정보 박스 */}
-            <table
+            {/* 공급자 정보 박스 — 단순 div 레이아웃 (세로쓰기 깨짐 해결) */}
+            <div
               className="invoice-no-break"
               style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                fontSize: '10pt',
-                marginBottom: '6mm',
                 border: '1px solid #111',
+                padding: '3mm 4mm',
+                marginBottom: '6mm',
+                fontSize: '10pt',
+                lineHeight: 1.6,
               }}
             >
-              <tbody>
-                <tr>
-                  <td
-                    rowSpan={4}
-                    style={{
-                      width: '12%',
-                      padding: '3mm',
-                      textAlign: 'center',
-                      borderRight: '1px solid #111',
-                      fontWeight: 600,
-                      background: '#f3f3f3',
-                    }}
-                  >
-                    공<br />급<br />자
-                  </td>
-                  <td style={cellLabel}>상호</td>
-                  <td style={cellValue}>{SUPPLIER_INFO.name}</td>
-                  <td style={cellLabel}>대표자</td>
-                  <td style={cellValue}>{SUPPLIER_INFO.representative}</td>
-                </tr>
-                <tr>
-                  <td style={cellLabel}>사업자번호</td>
-                  <td style={cellValue} colSpan={3}>
-                    {SUPPLIER_INFO.bizNo}
-                  </td>
-                </tr>
-                <tr>
-                  <td style={cellLabel}>전화</td>
-                  <td style={cellValue}>{SUPPLIER_INFO.phone}</td>
-                  <td style={cellLabel}>팩스</td>
-                  <td style={cellValue}>{SUPPLIER_INFO.fax}</td>
-                </tr>
-                <tr>
-                  <td style={cellLabel}>주소</td>
-                  <td style={cellValue} colSpan={3}>
-                    {SUPPLIER_INFO.address}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+              <div style={{ fontWeight: 700, marginBottom: '1mm' }}>공급자</div>
+              <div>
+                상호: {SUPPLIER_INFO.name}
+                <span style={{ display: 'inline-block', width: '8mm' }} />
+                대표자: {SUPPLIER_INFO.representative}
+              </div>
+              <div>사업자번호: {SUPPLIER_INFO.bizNo}</div>
+              <div>
+                전화: {SUPPLIER_INFO.phone}
+                <span style={{ display: 'inline-block', width: '8mm' }} />
+                팩스: {SUPPLIER_INFO.fax}
+              </div>
+              <div>주소: {SUPPLIER_INFO.address}</div>
+            </div>
 
             {/* 주문서 / 추가주문 섹션들 */}
             {g.orders.map((o, oi) => {
@@ -206,9 +215,6 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                 >
                   <div
                     style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'baseline',
                       fontSize: '11pt',
                       fontWeight: 600,
                       marginBottom: '2mm',
@@ -216,10 +222,7 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                       paddingBottom: '1mm',
                     }}
                   >
-                    <span>{sectionTitle(oi, o.memo)}</span>
-                    <span style={{ fontSize: '9pt', fontWeight: 400, color: '#555' }}>
-                      {fmtDate(o.order_date)} · {o.id.slice(0, 8)}
-                    </span>
+                    {sectionTitle(oi, o.memo)}
                   </div>
                   <table
                     style={{
@@ -240,27 +243,31 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {o.items.map((it, idx) => (
-                        <tr
-                          key={it.id}
-                          style={{
-                            borderBottom: '1px solid #ccc',
-                            color: it.is_return ? '#a23' : '#111',
-                          }}
-                        >
-                          <td style={td()}>{idx + 1}</td>
-                          <td style={tdLeft()}>{it.product.name}</td>
-                          <td style={td()}>{it.product.code}</td>
-                          <td style={tdRight()}>{fmt(it.quantity)}</td>
-                          <td style={tdRight()}>{fmt(it.unit_price)}</td>
-                          <td style={tdRight()}>
-                            {it.product.sell_price
-                              ? fmt(it.product.sell_price)
-                              : '—'}
-                          </td>
-                          <td style={tdRight()}>{fmt(it.amount)}</td>
-                        </tr>
-                      ))}
+                      {o.items.map((it, idx) => {
+                        // 공급가: 거래처 등급 기반 계산 (없으면 unit_price 폴백).
+                        const supplyPrice = computeSupplyPrice(it, g.customer.grade);
+                        return (
+                          <tr
+                            key={it.id}
+                            style={{
+                              borderBottom: '1px solid #ccc',
+                              color: it.is_return ? '#a23' : '#111',
+                            }}
+                          >
+                            <td style={td()}>{idx + 1}</td>
+                            <td style={tdLeft()}>{it.product.name}</td>
+                            <td style={td()}>{it.product.code}</td>
+                            <td style={tdRight()}>{fmt(it.quantity)}</td>
+                            <td style={tdRight()}>{fmt(supplyPrice)}</td>
+                            <td style={tdRight()}>
+                              {it.product.sell_price
+                                ? fmt(it.product.sell_price)
+                                : '—'}
+                            </td>
+                            <td style={tdRight()}>{fmt(it.amount)}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                     <tfoot>
                       <tr>
@@ -304,7 +311,7 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
               );
             })}
 
-            {/* 푸터 — 받는사람 + 합계 */}
+            {/* 푸터 — 받는사람(이름만) + 합계(2건 이상일 때만) */}
             <div
               className="invoice-no-break"
               style={{
@@ -316,24 +323,12 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                 fontSize: '11pt',
               }}
             >
-              <div>
-                <div style={{ fontWeight: 600, marginBottom: '1mm' }}>
-                  받는사람: {g.customer.name}
+              <div style={{ fontWeight: 600 }}>받는사람: {g.customer.name}</div>
+              {g.orders.length > 1 && (
+                <div style={{ fontSize: '14pt', fontWeight: 700 }}>
+                  합 계: {fmt(grandTotal)}원
                 </div>
-                {g.customer.address && (
-                  <div style={{ fontSize: '10pt', color: '#333' }}>
-                    {g.customer.address}
-                  </div>
-                )}
-                {g.customer.phone && (
-                  <div style={{ fontSize: '10pt', color: '#333' }}>
-                    {g.customer.phone}
-                  </div>
-                )}
-              </div>
-              <div style={{ fontSize: '14pt', fontWeight: 700 }}>
-                합 계: {fmt(grandTotal)}원
-              </div>
+              )}
             </div>
           </section>
         );
@@ -342,20 +337,7 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
   );
 }
 
-// ── 셀 스타일 헬퍼 (테이블 가독성 통일) ─────────────────────────────────
-const baseCell: React.CSSProperties = {
-  padding: '2mm 3mm',
-  border: '1px solid #111',
-};
-const cellLabel: React.CSSProperties = {
-  ...baseCell,
-  width: '12%',
-  background: '#f8f8f8',
-  fontWeight: 600,
-};
-const cellValue: React.CSSProperties = {
-  ...baseCell,
-};
+// ── 셀 스타일 헬퍼 ─────────────────────────────────────────────────────
 
 function th(width: number): React.CSSProperties {
   return {

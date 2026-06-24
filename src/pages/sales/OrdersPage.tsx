@@ -212,8 +212,7 @@ export function OrdersPage() {
           customer: {
             id: o.customer.id,
             name: o.customer.name,
-            address: o.customer.delivery_address ?? null,
-            phone: o.customer.contact1 ?? null,
+            grade: o.customer.grade,
           },
           orders: [],
         };
@@ -229,6 +228,11 @@ export function OrdersPage() {
             code: it.product?.code ?? '',
             name: it.product?.name ?? '',
             sell_price: it.product?.sell_price,
+            grade_a: it.product?.grade_a ?? null,
+            grade_b: it.product?.grade_b ?? null,
+            grade_c: it.product?.grade_c ?? null,
+            grade_d: it.product?.grade_d ?? null,
+            grade_e: it.product?.grade_e ?? null,
           },
           quantity: it.quantity,
           unit_price: it.unit_price,

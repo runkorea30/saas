@@ -8,10 +8,6 @@ export interface OrderCustomerRef {
   id: string;
   name: string;
   grade: string | null;
-  /** 배송지 — 거래명세서 출력용. orders SELECT join에 포함. */
-  delivery_address?: string | null;
-  /** 대표 연락처 — 거래명세서 출력용. */
-  contact1?: string | null;
 }
 
 export interface OrderProductRef {
@@ -20,6 +16,12 @@ export interface OrderProductRef {
   name: string;
   /** 카탈로그 판매가 — 거래명세서 "판매가" 컬럼 출력용. */
   sell_price?: number;
+  /** 거래처 등급별 공급율 (A~E). 거래명세서에서 unit_price × grade_X 로 공급가 계산. */
+  grade_a?: number | null;
+  grade_b?: number | null;
+  grade_c?: number | null;
+  grade_d?: number | null;
+  grade_e?: number | null;
 }
 
 export interface OrderCreatorRef {

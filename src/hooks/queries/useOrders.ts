@@ -21,11 +21,11 @@ const ORDER_SELECT = `
   source,
   memo,
   created_by,
-  customer:customers ( id, name, grade, delivery_address, contact1 ),
+  customer:customers ( id, name, grade ),
   creator:user_profiles ( id, name ),
   items:order_items (
     id, product_id, quantity, unit_price, amount, is_return,
-    product:products ( id, code, name, sell_price )
+    product:products ( id, code, name, sell_price, grade_a, grade_b, grade_c, grade_d, grade_e )
   )
 `;
 
