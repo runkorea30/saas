@@ -7,7 +7,9 @@
  * - 체크박스 열은 32px 고정(리사이저 없음).
  * - 행 선택(단일) + 체크박스(다중) 분리 — 클릭=선택, 체크박스=일괄.
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { Trash2 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Check,
   EmptyState,
@@ -20,6 +22,8 @@ import {
   useResizableColumns,
   type ColumnDef,
 } from '@/hooks/useResizableColumns';
+import { supabase } from '@/lib/supabase';
+import { useCompany } from '@/hooks/useCompany';
 import type { Order } from '@/types/orders';
 
 type Align = 'left' | 'right' | 'center';
@@ -105,10 +109,51 @@ export function OrderListTable(props: OrderListTableProps) {
     onResetFilters,
   } = props;
 
+  const { companyId } = useCompany();
+  const queryClient = useQueryClient();
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   const { widths, draggingKey, onResizeStart, resetColumn } = useResizableColumns({
     pageKey: 'orders',
     columns: COLUMN_DEFS,
   });
+
+  const handleDelete = async (orderId: string) => {
+    if (!companyId) return;
+    if (!window.confirm('이 주문을 삭제하면 복구할 수 없습니다. 계속하시겠습니까?')) {
+      return;
+    }
+    setDeletingId(orderId);
+    try {
+      const nowIso = new Date().toISOString();
+      const { error: itemsErr } = await supabase
+        .from('order_items')
+        .update({ deleted_at: nowIso })
+        .eq('company_id', companyId)
+        .eq('order_id', orderId)
+        .is('deleted_at', null);
+      if (itemsErr) throw itemsErr;
+
+      const { error: orderErr } = await supabase
+        .from('orders')
+        .update({ deleted_at: nowIso })
+        .eq('company_id', companyId)
+        .eq('id', orderId);
+      if (orderErr) throw orderErr;
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory-stock'] }),
+        queryClient.invalidateQueries({ queryKey: ['products'] }),
+      ]);
+    } catch (err) {
+      console.error('주문 삭제 실패:', err);
+      alert('주문 삭제 중 오류가 발생했습니다.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const gridTemplate = `${CHECKBOX_COL_PX}px ${COLUMN_DEFS.map(
     (c) => `${widths[c.key]}px`,
@@ -185,11 +230,13 @@ export function OrderListTable(props: OrderListTableProps) {
             );
             const hasReturn = o.items.some((it) => it.is_return);
             const customerName = o.customer?.name ?? '—';
+            const showTrash = hoveredId === o.id || deletingId === o.id;
             return (
               <div
                 key={o.id}
                 onClick={() => onSelect(o.id)}
                 style={{
+                  position: 'relative',
                   display: 'grid',
                   gridTemplateColumns: gridTemplate,
                   gap: ROW_GAP_PX,
@@ -209,15 +256,47 @@ export function OrderListTable(props: OrderListTableProps) {
                   transition: 'background .12s',
                 }}
                 onMouseEnter={(e) => {
+                  setHoveredId(o.id);
                   if (!sel) e.currentTarget.style.background = 'var(--surface-2)';
                 }}
                 onMouseLeave={(e) => {
+                  setHoveredId((cur) => (cur === o.id ? null : cur));
                   if (!sel)
                     e.currentTarget.style.background = isChecked
                       ? 'var(--surface-2)'
                       : 'transparent';
                 }}
               >
+                {showTrash && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDelete(o.id);
+                    }}
+                    disabled={deletingId === o.id}
+                    title="주문 삭제"
+                    style={{
+                      position: 'absolute',
+                      right: 8,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      width: 24,
+                      height: 24,
+                      display: 'grid',
+                      placeItems: 'center',
+                      border: '1px solid var(--line)',
+                      borderRadius: 6,
+                      background: 'var(--surface)',
+                      color: 'var(--danger)',
+                      cursor: deletingId === o.id ? 'wait' : 'pointer',
+                      zIndex: 2,
+                      opacity: deletingId === o.id ? 0.5 : 1,
+                    }}
+                  >
+                    <Trash2 size={12} strokeWidth={1.8} />
+                  </button>
+                )}
                 <div onClick={(e) => e.stopPropagation()}>
                   <Check on={isChecked} onChange={() => onToggleChecked(o.id)} />
                 </div>

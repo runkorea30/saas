@@ -6,7 +6,7 @@
  * 🔴 CLAUDE.md §2: 공급가/VAT 계산은 calcSupplyAmount 단일 진입점.
  * 🟠 편집 모드: useOrderItems 별도 fetch + draft 임시 모델. 저장 후 ['order-items', orderId] / ['orders'] 양쪽 invalidate.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { FileText, MoreHorizontal, Printer, Tag, Truck } from 'lucide-react';
 import {
@@ -15,11 +15,14 @@ import {
   StatusBadge,
   fmtDateTime,
 } from './primitives';
-import { calcSupplyAmount } from '@/utils/calculations';
+import {
+  calcSupplyAmount,
+  calcSupplyPriceByCustomerGrade,
+} from '@/utils/calculations';
 import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
 import { useOrderItems, type OrderItemRow } from '@/hooks/queries/useOrderItems';
-import { useProducts } from '@/hooks/queries/useProducts';
+import { useProducts, type Product } from '@/hooks/queries/useProducts';
 import type { Order, OrderItemDraft } from '@/types/orders';
 
 export function OrderDetailPane({ order }: { order: Order | null }) {
@@ -32,12 +35,34 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
   const [isSaving, setIsSaving] = useState(false);
   /** 수량 인라인 편집의 임시 오버라이드 — blur 시 DB 반영 + 클리어. */
   const [qtyOverrides, setQtyOverrides] = useState<Record<string, number>>({});
+  /** 자동완성: { draftId: { col: 'code'|'name', query } } — 현재 포커스된 셀만 드롭다운 표시. */
+  const [autoFocus, setAutoFocus] = useState<{
+    draftId: string;
+    col: 'code' | 'name';
+  } | null>(null);
 
   const { data: orderItems = [], isLoading: itemsLoading } = useOrderItems(
     order?.id ?? null,
     companyId,
   );
   const { data: products = [] } = useProducts(companyId);
+
+  // 자동완성 후보 — 현재 포커스된 셀의 쿼리(코드 prefix / 이름 부분일치) 기준.
+  const suggestions: Product[] = useMemo(() => {
+    if (!autoFocus) return [];
+    const draft = draftItems.find((d) => d.id === autoFocus.draftId);
+    if (!draft) return [];
+    if (autoFocus.col === 'code') {
+      const q = draft.product_code.trim().toUpperCase();
+      if (!q) return [];
+      return products
+        .filter((p) => p.code.toUpperCase().startsWith(q))
+        .slice(0, 10);
+    }
+    const q = draft.product_name.trim();
+    if (!q) return [];
+    return products.filter((p) => p.name.includes(q)).slice(0, 10);
+  }, [autoFocus, draftItems, products]);
 
   if (!order) return <DetailEmpty />;
 
@@ -118,9 +143,15 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
     );
   };
 
-  const handleProductSelect = (draftId: string, productId: string) => {
-    const p = products.find((x) => x.id === productId);
-    if (!p) return;
+  const applyProductToDraft = (draftId: string, p: Product) => {
+    const customerGrade = order?.customer?.grade ?? null;
+    const supplyPrice = calcSupplyPriceByCustomerGrade(p.sell_price, customerGrade, {
+      grade_a: p.grade_a ?? null,
+      grade_b: p.grade_b ?? null,
+      grade_c: p.grade_c ?? null,
+      grade_d: p.grade_d ?? null,
+      grade_e: p.grade_e ?? null,
+    });
     setDraftItems((prev) =>
       prev.map((item) =>
         item.id === draftId
@@ -131,7 +162,7 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
               product_name: p.name,
               sell_price: p.sell_price,
               unit_price: p.sell_price,
-              supply_price: p.supply_price,
+              supply_price: supplyPrice,
               grade_a: p.grade_a ?? 0,
               grade_b: p.grade_b ?? 0,
               grade_c: p.grade_c ?? 0,
@@ -143,6 +174,48 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
           : item,
       ),
     );
+    setAutoFocus(null);
+  };
+
+  const handleCodeQueryChange = (draftId: string, value: string) => {
+    setDraftItems((prev) =>
+      prev.map((item) =>
+        item.id === draftId
+          ? {
+              ...item,
+              product_code: value,
+              // 코드를 직접 수정하면 기존 선택 무효화.
+              product_id: null,
+              product_name: '',
+              sell_price: 0,
+              unit_price: 0,
+              supply_price: 0,
+              amount: 0,
+            }
+          : item,
+      ),
+    );
+    setAutoFocus({ draftId, col: 'code' });
+  };
+
+  const handleNameQueryChange = (draftId: string, value: string) => {
+    setDraftItems((prev) =>
+      prev.map((item) =>
+        item.id === draftId
+          ? {
+              ...item,
+              product_name: value,
+              product_id: null,
+              product_code: '',
+              sell_price: 0,
+              unit_price: 0,
+              supply_price: 0,
+              amount: 0,
+            }
+          : item,
+      ),
+    );
+    setAutoFocus({ draftId, col: 'name' });
   };
 
   const handleAddReturn = () => {
@@ -166,9 +239,15 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
   const handleSave = async () => {
     if (!order || !companyId) return;
 
-    const unselected = draftItems.filter((item) => item._isNew && !item.product_id);
+    const newRows = draftItems.filter((item) => item._isNew);
+    const unselected = newRows.filter((item) => !item.product_id);
     if (unselected.length > 0) {
-      alert(`제품이 선택되지 않은 행이 ${unselected.length}개 있습니다.`);
+      alert('제품을 선택해주세요');
+      return;
+    }
+    const zeroQty = newRows.filter((item) => !item.quantity || item.quantity <= 0);
+    if (zeroQty.length > 0) {
+      alert('수량을 입력해주세요');
       return;
     }
 
@@ -178,14 +257,18 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
 
       for (const item of dirtyItems) {
         if (item._isNew) {
+          // 🔴 반품은 quantity/amount 모두 음수로 저장 — calculations.ts 정합성
+          //    (OrderEntry RPC와 동일 패턴).
+          const sign = item.is_return ? -1 : 1;
+          const absQty = Math.abs(item.quantity);
           const { error } = await supabase.from('order_items').insert({
             id: item.id,
             company_id: companyId,
             order_id: item.order_id,
             product_id: item.product_id!,
-            quantity: item.quantity,
+            quantity: sign * absQty,
             unit_price: item.unit_price,
-            amount: item.quantity * item.unit_price,
+            amount: sign * absQty * item.unit_price,
             is_return: item.is_return,
           });
           if (error) throw error;
@@ -202,10 +285,24 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
         }
       }
 
+      // orders.total_amount 재계산: 기존 orderItems + 신규 draft (반품 부호 적용 후).
+      const existingTotal = orderItems.reduce((s, it) => s + it.amount, 0);
+      const newTotal = newRows.reduce((s, it) => {
+        const sign = it.is_return ? -1 : 1;
+        return s + sign * Math.abs(it.quantity) * it.unit_price;
+      }, 0);
+      const { error: totalErr } = await supabase
+        .from('orders')
+        .update({ total_amount: existingTotal + newTotal })
+        .eq('id', order.id)
+        .eq('company_id', companyId);
+      if (totalErr) throw totalErr;
+
       await queryClient.invalidateQueries({ queryKey: ['order-items', order.id] });
       await queryClient.invalidateQueries({ queryKey: ['orders'] });
       setEditMode(false);
       setDraftItems([]);
+      setAutoFocus(null);
     } catch (err) {
       console.error('저장 실패:', err);
       alert('저장 중 오류가 발생했습니다.');
@@ -285,6 +382,7 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
             alignItems: 'center',
             gap: 8,
             marginTop: 4,
+            flexWrap: 'wrap',
           }}
         >
           <GradeBadge grade={order.customer?.grade ?? null} size="sm" />
@@ -310,6 +408,32 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
             {fmtDateTime(d)}
             {order.creator && ` · ${order.creator.name}`}
           </span>
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--ink)',
+              fontFamily: 'var(--font-num)',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {order.total_amount.toLocaleString('ko-KR')}원
+          </span>
+          <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            onClick={handleAddReturn}
+            className="px-2.5 py-1 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] transition-colors"
+          >
+            반품추가
+          </button>
+          <button
+            type="button"
+            onClick={handleAddOrderItem}
+            className="px-2.5 py-1 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] transition-colors"
+          >
+            주문추가
+          </button>
         </div>
         {order.memo && (
           <div
@@ -332,61 +456,6 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
         )}
       </div>
 
-      {/* Stats row */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          borderBottom: '1px solid var(--line)',
-        }}
-      >
-        {[
-          { label: '라인', v: `${order.items.length}건`, bold: false },
-          {
-            label: '수량',
-            v: `${order.items.reduce((s, it) => s + Math.abs(it.quantity), 0)} ea`,
-            bold: false,
-          },
-          {
-            label: '총액',
-            v: `${order.total_amount.toLocaleString('ko-KR')}원`,
-            bold: true,
-          },
-        ].map((s, i) => (
-          <div
-            key={i}
-            style={{
-              padding: '6px 12px',
-              borderLeft: i === 0 ? 'none' : '1px solid var(--line)',
-            }}
-          >
-            <div
-              style={{
-                fontSize: 9.5,
-                color: 'var(--ink-3)',
-                fontFamily: 'var(--font-num)',
-                letterSpacing: '0.1em',
-                textTransform: 'uppercase',
-                marginBottom: 1,
-              }}
-            >
-              {s.label}
-            </div>
-            <div
-              style={{
-                fontFamily: 'var(--font-num)',
-                fontSize: s.bold ? 14 : 12,
-                fontWeight: s.bold ? 600 : 500,
-                color: 'var(--ink)',
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            >
-              {s.v}
-            </div>
-          </div>
-        ))}
-      </div>
-
       {/* Items: 편집 가능한 6컬럼 테이블 */}
       <div style={{ padding: '14px 20px 8px' }}>
         <div
@@ -405,42 +474,26 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
           <span>{displayRows.length}개 라인</span>
         </div>
 
-        {/* 버튼 행 — 수량은 항상 인라인 편집(blur autosave). 행 추가만 별도 모드. */}
-        <div className="flex gap-2 mb-3">
-          <button
-            type="button"
-            onClick={handleAddReturn}
-            className="px-3 py-1.5 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] transition-colors"
-          >
-            반품추가
-          </button>
-          <button
-            type="button"
-            onClick={handleAddOrderItem}
-            className="px-3 py-1.5 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] transition-colors"
-          >
-            주문추가
-          </button>
-          {editMode && (
-            <>
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={isSaving}
-                className="px-3 py-1.5 text-xs font-medium rounded bg-[var(--brand)] text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
-              >
-                {isSaving ? '저장 중...' : '저장하기'}
-              </button>
-              <button
-                type="button"
-                onClick={handleCancel}
-                className="px-3 py-1.5 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-3)] hover:bg-[var(--surface-2)] transition-colors ml-auto"
-              >
-                취소
-              </button>
-            </>
-          )}
-        </div>
+        {/* 편집 모드 액션 — 행 추가는 헤더 우측 버튼에서. 수량은 항상 인라인 편집(blur autosave). */}
+        {editMode && (
+          <div className="flex gap-2 mb-3">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={isSaving}
+              className="px-3 py-1.5 text-xs font-medium rounded bg-[var(--brand)] text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+            >
+              {isSaving ? '저장 중...' : '저장하기'}
+            </button>
+            <button
+              type="button"
+              onClick={handleCancel}
+              className="px-3 py-1.5 text-xs font-medium rounded border border-[var(--line-strong)] text-[var(--ink-3)] hover:bg-[var(--surface-2)] transition-colors ml-auto"
+            >
+              취소
+            </button>
+          </div>
+        )}
 
         {itemsLoading ? (
           <div className="text-xs text-[var(--ink-3)] py-4 text-center">불러오는 중...</div>
@@ -474,6 +527,17 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                   //    OPS 수동주문입력 INSERT 정책: unit_price = 판매가.
                   //    혼재 가능하나 dogfooding 단계에서는 unit_price 를 공급가로 표시.
 
+                  const draft = item as OrderItemDraft;
+                  const showSuggestForCode =
+                    isNewRow &&
+                    autoFocus?.draftId === item.id &&
+                    autoFocus.col === 'code' &&
+                    suggestions.length > 0;
+                  const showSuggestForName =
+                    isNewRow &&
+                    autoFocus?.draftId === item.id &&
+                    autoFocus.col === 'name' &&
+                    suggestions.length > 0;
                   return (
                     <tr
                       key={item.id}
@@ -481,26 +545,73 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                         item.is_return ? 'text-red-500' : ''
                       }`}
                     >
-                      <td className="py-1.5 px-2 font-mono">
-                        {(item as OrderItemDraft).product_code ??
-                          (item as OrderItemRow).product_code}
-                      </td>
-                      <td className="py-1.5 px-2">
+                      <td className="py-1.5 px-2 font-mono relative">
                         {isNewRow ? (
-                          <select
-                            value={(item as OrderItemDraft).product_id ?? ''}
-                            onChange={(e) => handleProductSelect(item.id, e.target.value)}
-                            className="w-full border border-[var(--line-strong)] rounded px-1 py-0.5 bg-[var(--surface)] text-[var(--ink)] text-xs focus:outline-none focus:border-[var(--brand)]"
-                          >
-                            <option value="">제품 선택</option>
-                            {products.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} ({p.code})
-                              </option>
-                            ))}
-                          </select>
+                          <>
+                            <input
+                              type="text"
+                              value={draft.product_code}
+                              onChange={(e) =>
+                                handleCodeQueryChange(item.id, e.target.value)
+                              }
+                              onFocus={() =>
+                                setAutoFocus({ draftId: item.id, col: 'code' })
+                              }
+                              onBlur={() =>
+                                setTimeout(() => {
+                                  setAutoFocus((cur) =>
+                                    cur?.draftId === item.id && cur.col === 'code'
+                                      ? null
+                                      : cur,
+                                  );
+                                }, 120)
+                              }
+                              placeholder="코드"
+                              className="w-full border border-[var(--line-strong)] rounded px-1 py-0.5 bg-[var(--surface)] text-[var(--ink)] text-xs focus:outline-none focus:border-[var(--brand)]"
+                            />
+                            {showSuggestForCode && (
+                              <SuggestionList
+                                items={suggestions}
+                                onPick={(p) => applyProductToDraft(item.id, p)}
+                              />
+                            )}
+                          </>
                         ) : (
-                          (item as OrderItemDraft).product_name ??
+                          (item as OrderItemRow).product_code
+                        )}
+                      </td>
+                      <td className="py-1.5 px-2 relative">
+                        {isNewRow ? (
+                          <>
+                            <input
+                              type="text"
+                              value={draft.product_name}
+                              onChange={(e) =>
+                                handleNameQueryChange(item.id, e.target.value)
+                              }
+                              onFocus={() =>
+                                setAutoFocus({ draftId: item.id, col: 'name' })
+                              }
+                              onBlur={() =>
+                                setTimeout(() => {
+                                  setAutoFocus((cur) =>
+                                    cur?.draftId === item.id && cur.col === 'name'
+                                      ? null
+                                      : cur,
+                                  );
+                                }, 120)
+                              }
+                              placeholder="제품명 검색"
+                              className="w-full border border-[var(--line-strong)] rounded px-1 py-0.5 bg-[var(--surface)] text-[var(--ink)] text-xs focus:outline-none focus:border-[var(--brand)]"
+                            />
+                            {showSuggestForName && (
+                              <SuggestionList
+                                items={suggestions}
+                                onPick={(p) => applyProductToDraft(item.id, p)}
+                              />
+                            )}
+                          </>
+                        ) : (
                           (item as OrderItemRow).product_name
                         )}
                       </td>
@@ -508,12 +619,15 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                         <input
                           type="number"
                           min={0}
-                          value={displayQty}
-                          onChange={(e) =>
-                            isNewRow
-                              ? handleQtyChange(item.id, Number(e.target.value))
-                              : handleQtyInput(item.id, Number(e.target.value))
-                          }
+                          value={displayQty === 0 ? '' : displayQty}
+                          placeholder={isNewRow ? '수량' : undefined}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            const num = raw === '' ? 0 : Number(raw);
+                            const safe = Number.isFinite(num) && num >= 0 ? num : 0;
+                            if (isNewRow) handleQtyChange(item.id, safe);
+                            else handleQtyInput(item.id, safe);
+                          }}
                           onBlur={
                             isNewRow ? undefined : () => handleQtyBlur(item.id)
                           }
@@ -540,12 +654,16 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                         />
                       </td>
                       <td className="py-1.5 px-2 text-right font-num">
-                        {(item as OrderItemRow).sell_price > 0
-                          ? (item as OrderItemRow).sell_price.toLocaleString()
+                        {item.sell_price > 0
+                          ? item.sell_price.toLocaleString()
                           : '—'}
                       </td>
                       <td className="py-1.5 px-2 text-right font-num">
-                        {item.unit_price.toLocaleString()}
+                        {isNewRow
+                          ? draft.supply_price > 0
+                            ? draft.supply_price.toLocaleString()
+                            : '—'
+                          : item.unit_price.toLocaleString()}
                       </td>
                       <td className="py-1.5 px-2 text-right font-num font-medium">
                         {rowAmount.toLocaleString()}
@@ -658,6 +776,85 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
   );
 }
 
+function SuggestionList({
+  items,
+  onPick,
+}: {
+  items: Product[];
+  onPick: (p: Product) => void;
+}) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: '100%',
+        left: 0,
+        right: 0,
+        marginTop: 2,
+        background: 'var(--surface)',
+        border: '1px solid var(--line-strong)',
+        borderRadius: 6,
+        boxShadow: '0 6px 24px rgba(0,0,0,0.12)',
+        zIndex: 20,
+        maxHeight: 240,
+        overflowY: 'auto',
+        minWidth: 280,
+      }}
+    >
+      {items.map((p) => (
+        <button
+          key={p.id}
+          type="button"
+          onMouseDown={(e) => {
+            // input blur 보다 먼저 발화 — autoFocus 초기화 방지.
+            e.preventDefault();
+            onPick(p);
+          }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            width: '100%',
+            padding: '6px 10px',
+            background: 'transparent',
+            border: 'none',
+            borderBottom: '1px solid var(--line-subtle)',
+            cursor: 'pointer',
+            fontSize: 11.5,
+            textAlign: 'left',
+          }}
+          onMouseEnter={(e) =>
+            (e.currentTarget.style.background = 'var(--brand-wash)')
+          }
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.background = 'transparent')
+          }
+        >
+          <span
+            style={{
+              fontFamily: 'monospace',
+              color: 'var(--ink-3)',
+              minWidth: 90,
+            }}
+          >
+            {p.code}
+          </span>
+          <span style={{ color: 'var(--ink)', flex: 1 }}>{p.name}</span>
+          <span
+            style={{
+              fontFamily: 'var(--font-num)',
+              color: 'var(--ink-3)',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {p.sell_price.toLocaleString()}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function createNewDraft(args: {
   orderId: string;
   companyId: string;
@@ -668,7 +865,7 @@ function createNewDraft(args: {
     company_id: args.companyId,
     order_id: args.orderId,
     product_id: null,
-    quantity: 1,
+    quantity: 0,
     unit_price: 0,
     amount: 0,
     is_return: args.isReturn,
