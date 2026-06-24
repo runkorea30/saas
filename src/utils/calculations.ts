@@ -768,7 +768,7 @@ export function calcMonthlyReconciliation(
 ): import('@/types/database').MonthlyReconciliation[] {
   type Cycle = '당월' | '익월' | '2개월';
 
-  // 거래처×매출월별 매출 집계
+  // 거래처×매출월별 매출 집계 + 거래처별 settlement_cycle 맵
   const salesMap = new Map<
     string,
     {
@@ -779,11 +779,14 @@ export function calcMonthlyReconciliation(
       sales_total: number;
     }
   >();
+  const customerCycleMap = new Map<string, Cycle>();
   for (const o of orders) {
     const month = o.order_date.slice(0, 7);
     const key = `${o.customer_id}__${month}`;
-    const existing = salesMap.get(key);
     const cycle = (o.settlement_cycle || '익월') as Cycle;
+    // 거래처별 정산주기는 마지막 주문 기준으로 1개만 유지.
+    customerCycleMap.set(o.customer_id, cycle);
+    const existing = salesMap.get(key);
     if (existing) {
       existing.sales_total += o.total_amount;
     } else {
@@ -797,18 +800,33 @@ export function calcMonthlyReconciliation(
     }
   }
 
-  // 거래처×입금월별 입금 집계 (matched만)
-  const depositMap = new Map<string, number>();
+  // 거래처×매출월별 입금 집계 (matched만).
+  // 입금월에서 거래처 정산주기만큼 역산해 매출월에 귀속시킨다.
+  //   당월(offset 0): 입금월 = 매출월
+  //   익월(offset 1): 입금월 - 1개월 = 매출월
+  //   2개월(offset 2): 입금월 - 2개월 = 매출월
+  const depositMap = new Map<string, { amount: number; dates: Set<string> }>();
   for (const t of transactions) {
     if (!t.customer_id || t.match_status !== 'matched') continue;
-    const txMonth = t.transaction_date.slice(0, 7);
-    const key = `${t.customer_id}__${txMonth}`;
-    depositMap.set(key, (depositMap.get(key) ?? 0) + t.amount);
+    const cycle = customerCycleMap.get(t.customer_id) ?? '익월';
+    const offset = cycle === '당월' ? 0 : cycle === '익월' ? 1 : 2;
+
+    const txDate = new Date(`${t.transaction_date.slice(0, 10)}T00:00:00Z`);
+    txDate.setUTCMonth(txDate.getUTCMonth() - offset);
+    const salesMonth = txDate.toISOString().slice(0, 7);
+
+    const key = `${t.customer_id}__${salesMonth}`;
+    const slot = depositMap.get(key) ?? { amount: 0, dates: new Set<string>() };
+    slot.amount += t.amount;
+    slot.dates.add(t.transaction_date.slice(0, 10));
+    depositMap.set(key, slot);
   }
 
   const result: import('@/types/database').MonthlyReconciliation[] = [];
   for (const [, s] of salesMap) {
-    const deposit_total = depositMap.get(`${s.customer_id}__${s.month}`) ?? 0;
+    const slot = depositMap.get(`${s.customer_id}__${s.month}`);
+    const deposit_total = slot?.amount ?? 0;
+    const deposit_dates = slot ? [...slot.dates].sort() : [];
     const difference = s.sales_total - deposit_total;
     const due_date = calcDueDate(s.month, s.settlement_cycle);
     const is_overdue = difference > 0 && new Date(due_date) < today;
@@ -825,6 +843,7 @@ export function calcMonthlyReconciliation(
       due_date,
       sales_total: s.sales_total,
       deposit_total,
+      deposit_dates,
       difference,
       is_overdue,
       status,

@@ -1581,10 +1581,11 @@ export interface MonthlyReconciliation {
   customer_id: string;
   customer_name: string;
   payment_cycle: '당월' | '익월' | '2개월';
-  month: string;                    // 'YYYY-MM'
+  month: string;                    // 'YYYY-MM' — 매출월
   due_date: string;                 // 정산 마감일
   sales_total: number;
   deposit_total: number;
+  deposit_dates: string[];          // 해당 매출월에 매칭된 입금일 목록 ('YYYY-MM-DD', 오름차순)
   difference: number;               // sales_total - deposit_total
   is_overdue: boolean;
   status: '정산완료' | '정산대기' | '연체';

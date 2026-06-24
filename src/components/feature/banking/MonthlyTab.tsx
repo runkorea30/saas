@@ -166,7 +166,12 @@ function ReconRow({ r }: { r: MonthlyReconciliation }) {
       </td>
       <td className="px-3 py-2 num text-center text-[var(--ink-2)]">{r.due_date}</td>
       <td className="px-3 py-2 num text-right text-[var(--ink)]">
-        ₩{fmtWon(r.deposit_total)}
+        <div>₩{fmtWon(r.deposit_total)}</div>
+        {r.deposit_dates.length > 0 && (
+          <div className="text-xs text-gray-500">
+            입금일: {r.deposit_dates.map((d) => d.slice(5)).join(', ')}
+          </div>
+        )}
       </td>
       <td className={`px-3 py-2 num text-right ${diffColor(r.difference)}`}>
         ₩{fmtWon(r.difference)}
