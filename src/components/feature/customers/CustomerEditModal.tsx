@@ -29,7 +29,6 @@ interface FormState {
   delivery_address: string;
   bank_aliases: string;
   business_registration_number: string;
-  sub_business_number: string;
   ceo_name: string;
   business_address: string;
   business_type: string;
@@ -48,7 +47,6 @@ function initFromCustomer(c: Customer): FormState {
     delivery_address: c.delivery_address ?? '',
     bank_aliases: c.bank_aliases ?? '',
     business_registration_number: c.business_registration_number ?? '',
-    sub_business_number: c.sub_business_number ?? '',
     ceo_name: c.ceo_name ?? '',
     business_address: c.business_address ?? '',
     business_type: c.business_type ?? '',
@@ -118,7 +116,6 @@ export function CustomerEditModal({ open, customer, companyId, onClose }: Props)
       bank_aliases: form.bank_aliases.trim() || null,
       business_registration_number:
         form.business_registration_number.trim() || null,
-      sub_business_number: form.sub_business_number.trim() || null,
       ceo_name: form.ceo_name.trim() || null,
       business_address: form.business_address.trim() || null,
       business_type: form.business_type.trim() || null,
@@ -311,22 +308,6 @@ export function CustomerEditModal({ open, customer, companyId, onClose }: Props)
                     )
                   }
                   placeholder="000-00-00000"
-                  disabled={busy}
-                  style={inputStyle}
-                />
-              </Field>
-              <Field label="종사업장번호" style={{ flex: 1 }}>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={form.sub_business_number}
-                  onChange={(e) =>
-                    update(
-                      'sub_business_number',
-                      e.target.value.replace(/\D/g, '').slice(0, 4),
-                    )
-                  }
-                  placeholder="0000"
                   disabled={busy}
                   style={inputStyle}
                 />

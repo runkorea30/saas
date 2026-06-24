@@ -527,7 +527,6 @@ export type Database = {
           match_type: string
           name: string
           settlement_cycle: string | null
-          sub_business_number: string | null
           tax_email: string | null
           updated_at: string
         }
@@ -555,7 +554,6 @@ export type Database = {
           match_type?: string
           name: string
           settlement_cycle?: string | null
-          sub_business_number?: string | null
           tax_email?: string | null
           updated_at?: string
         }
@@ -583,7 +581,6 @@ export type Database = {
           match_type?: string
           name?: string
           settlement_cycle?: string | null
-          sub_business_number?: string | null
           tax_email?: string | null
           updated_at?: string
         }

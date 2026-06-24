@@ -227,13 +227,6 @@ export function CustomerDetailPane({
             value={customer.business_registration_number}
             numeric={Boolean(customer.business_registration_number)}
           />
-          {customer.sub_business_number && (
-            <InfoRow
-              label="종사업장번호"
-              value={customer.sub_business_number}
-              numeric
-            />
-          )}
           <InfoRow label="대표자명" value={customer.ceo_name} />
           <InfoRow label="사업자 주소" value={customer.business_address} />
           <InfoRow label="업태" value={customer.business_type} />
