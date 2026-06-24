@@ -149,7 +149,7 @@
 
 #### 알려진 이슈
 - `OrderDetailPane.handleSave`의 INSERT payload는 Supabase 자동생성 타입에 `original_quantity` 미반영 → 타입 단언(`as unknown as {...}`)으로 우회. `supabase gen types typescript --schema mochicraft_demo` 재실행 후 단언 제거 권장.
-- **재고 자동조정 quantity=0 INSERT 누락**: `OrderEntryPage.handleSave` 가 `itemsForRpc = adjusted.filter(a => Math.abs(a.finalQty) > 0)` 로 결품(=0) 행을 RPC에서 제외 중. `OrderDetailPane` 는 quantity=0도 INSERT (정책 불일치). 다음 세션에서 통일 결정 필요 — 0 행도 명세서에 표시해 거래처에 결품 통지하려면 INSERT 유지가 맞음.
+- ~~**재고 자동조정 quantity=0 INSERT 누락**~~ → `060045e` 에서 해결. `OrderEntryPage.handleSave` 의 `itemsForRpc` filter 제거 — 결품(finalQty=0) 행도 RPC 에 전달되어 `OrderDetailPane` 정책(0 INSERT)과 통일됨. `insert_order` RPC 및 `order_items.original_quantity` 컬럼은 이전 마이그레이션에서 이미 반영되어 추가 DDL 불필요.
 
 ### 수동주문입력 공급가 자동계산 폴백 (`b8b2c5d`)
 
@@ -167,7 +167,7 @@
 
 ### 다음 세션 후속 작업 (사용자 명시)
 
-1. **재고 자동조정 quantity=0 INSERT 정책 통일** — `OrderEntryPage` 에서 filter 제거하여 결품 행도 INSERT 시키도록 `OrderDetailPane` 패턴으로 통일.
+1. (완료) ~~재고 자동조정 quantity=0 INSERT 정책 통일~~ — `060045e` 로 완료. `OrderEntryPage.handleSave` 의 `itemsForRpc` filter 제거.
 2. **거래처 주문서 업로드 페이지(`/customer-order`) 재고부족 동일 표시** — 거래처 포털에서도 자동조정 + 원본수량 취소선.
 3. **추가주문 구분 표시** — `orders.is_additional` 컬럼 신설 + `InvoicePrintView` 섹션 라벨 결정 로직 보강 (현재는 customer 그룹 내 날짜순 index 기반).
 4. (완료) ~~수동주문입력 공급가 자동계산~~ — `b8b2c5d`로 완료.
