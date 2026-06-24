@@ -21,7 +21,10 @@ import { useCompany } from '@/hooks/useCompany';
 import { useCustomers, type Customer } from '@/hooks/queries/useCustomers';
 import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 import { useProducts, type Product } from '@/hooks/queries/useProducts';
-import { calcSupplyPriceByGrade } from '@/utils/calculations';
+import { calcSupplyPriceByCustomerGrade } from '@/utils/calculations';
+
+/** 거래처 grade 미설정 시 공급가 계산용 기본 등급. */
+const DEFAULT_CUSTOMER_GRADE = 'a';
 
 type OrderType = '일반주문' | '반품(정상)' | '반품(파손)';
 type ColKey = 'code' | 'name' | 'qty';
@@ -92,14 +95,13 @@ function writeRecent(id: string): string[] {
   return next;
 }
 
-function gradeRateOf(product: Product, grade: string | null | undefined): number {
-  const gradeKey = `grade_${(grade ?? '').toLowerCase()}` as
-    | 'grade_a'
-    | 'grade_b'
-    | 'grade_c'
-    | 'grade_d'
-    | 'grade_e';
-  return gradeKey in product ? ((product[gradeKey] as number | undefined) ?? 0) : 0;
+/** 공급가 계산 — grade 미지정 시 DEFAULT_CUSTOMER_GRADE 폴백. */
+function computeSupply(product: Product, grade: string | null | undefined): number {
+  return calcSupplyPriceByCustomerGrade(
+    product.sell_price,
+    grade ?? DEFAULT_CUSTOMER_GRADE,
+    product,
+  );
 }
 
 export function OrderEntryPage() {
@@ -213,8 +215,8 @@ export function OrderEntryPage() {
   // ───── 제품 적용 ─────
   const applyProduct = useCallback(
     (rowId: string, product: Product) => {
-      const rate = gradeRateOf(product, selectedCustomer?.grade);
-      const supplyPrice = calcSupplyPriceByGrade(product.sell_price, rate);
+      // 🔴 grade 미설정 시 'a' 폴백으로 0원 출력 방지.
+      const supplyPrice = computeSupply(product, selectedCustomer?.grade);
 
       setRows((prev) => {
         const updated = prev.map((r) =>
@@ -385,7 +387,7 @@ export function OrderEntryPage() {
     setRows((prev) => prev.map((r) => ({ ...r, is_return: isRet })));
   };
 
-  // ───── 거래처 변경 → 공급가 재계산 ─────
+  // ───── 거래처 변경 → 공급가 일괄 재계산 ─────
   const handleCustomerChange = (id: string) => {
     setCustomerId(id);
     const next = customers.find((c) => c.id === id) ?? null;
@@ -394,8 +396,7 @@ export function OrderEntryPage() {
         if (!r.product_id) return r;
         const p = products.find((x) => x.id === r.product_id);
         if (!p) return r;
-        const rate = gradeRateOf(p, next?.grade);
-        return { ...r, supply_price: calcSupplyPriceByGrade(p.sell_price, rate) };
+        return { ...r, supply_price: computeSupply(p, next?.grade) };
       }),
     );
   };
@@ -449,9 +450,6 @@ export function OrderEntryPage() {
               products.find(
                 (p) => p.code.toUpperCase() === code.toUpperCase(),
               ) ?? null;
-            const rate = product
-              ? gradeRateOf(product, selectedCustomer?.grade)
-              : 0;
 
             parsed.push({
               id: crypto.randomUUID(),
@@ -461,7 +459,7 @@ export function OrderEntryPage() {
               quantity: qty,
               unit_price: product?.sell_price ?? 0,
               supply_price: product
-                ? calcSupplyPriceByGrade(product.sell_price, rate)
+                ? computeSupply(product, selectedCustomer?.grade)
                 : 0,
               amount: product ? qty * product.sell_price : 0,
               is_return: isReturnMode,
