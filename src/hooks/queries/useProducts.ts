@@ -32,12 +32,12 @@ export interface Product {
   reorder_point: number | null;
   created_at: string;
   updated_at: string;
-  // 거래처 등급(A~E)별 공급율. unit_price × grade_X → 공급가(원). 0 이면 미설정.
-  grade_a?: number;
-  grade_b?: number;
-  grade_c?: number;
-  grade_d?: number;
-  grade_e?: number;
+  // 거래처 등급(A~E)별 공급율. unit_price × grade_X → 공급가(원). null/0 이면 미설정.
+  grade_a: number | null;
+  grade_b: number | null;
+  grade_c: number | null;
+  grade_d: number | null;
+  grade_e: number | null;
 }
 
 export interface ProductCreateInput {
@@ -59,7 +59,7 @@ export interface ProductUpdateArgs {
 }
 
 const PRODUCT_SELECT =
-  'id, code, name, category, sell_price, supply_price, unit_price_usd, unit, is_active, safety_stock, reorder_point, created_at, updated_at';
+  'id, code, name, category, sell_price, supply_price, unit_price_usd, unit, is_active, safety_stock, reorder_point, grade_a, grade_b, grade_c, grade_d, grade_e, created_at, updated_at';
 
 // ───────────────────────────────────────────────────────────
 // 에러 매핑

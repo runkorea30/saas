@@ -95,13 +95,17 @@ function writeRecent(id: string): string[] {
   return next;
 }
 
-/** 공급가 계산 — grade 미지정 시 DEFAULT_CUSTOMER_GRADE 폴백. */
+/**
+ * 공급가 계산 — grade 미지정 시 DEFAULT_CUSTOMER_GRADE 폴백.
+ * grade rate(`products.grade_a..e`) 가 null/0 이면 sell_price 폴백 — 매출 0원 저장 방지.
+ */
 function computeSupply(product: Product, grade: string | null | undefined): number {
-  return calcSupplyPriceByCustomerGrade(
+  const supply = calcSupplyPriceByCustomerGrade(
     product.sell_price,
     grade ?? DEFAULT_CUSTOMER_GRADE,
     product,
   );
+  return supply > 0 ? supply : product.sell_price;
 }
 
 export function OrderEntryPage() {
@@ -545,18 +549,12 @@ export function OrderEntryPage() {
     const itemsForRpc = adjusted;
 
     // 🟠 저장 직전 방어용 공급가 재계산 — applyProduct/Excel 파싱에서 누락된 경우 대비.
-    //    selectedCustomer.grade + product.grade_a~e 로 supply 재산출. 0(grade rate 누락)이면
-    //    sell_price 폴백하여 매출 0원 저장 방지. RPC 의 unit_price/amount 가 실거래가가 됨.
+    //    computeSupply 단일 진입점 사용 (grade 폴백 + sell_price 폴백 내장).
     const productById = new Map(products.map((p) => [p.id, p]));
     const finalItems = itemsForRpc.map((a) => {
       const product = productById.get(a.row.product_id);
       if (!product) return a;
-      const supplyPrice = calcSupplyPriceByCustomerGrade(
-        product.sell_price,
-        selectedCustomer?.grade ?? DEFAULT_CUSTOMER_GRADE,
-        product,
-      );
-      const effective = supplyPrice > 0 ? supplyPrice : a.row.unit_price;
+      const effective = computeSupply(product, selectedCustomer?.grade);
       return { ...a, row: { ...a.row, unit_price: effective } };
     });
 
