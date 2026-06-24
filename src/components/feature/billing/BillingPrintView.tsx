@@ -239,8 +239,8 @@ export function BillingPrintView({
                 <thead>
                   <tr style={{ background: '#f3f3f3' }}>
                     <th style={thCenter('10mm')}>No</th>
-                    <th style={thLeft()}>제품명</th>
                     <th style={thCenter('22mm')}>코드</th>
+                    <th style={thLeft()}>제품명</th>
                     <th style={thRight('14mm')}>수량</th>
                     <th style={thRight('20mm')}>공급가</th>
                     <th style={thRight('20mm')}>판매가</th>
@@ -256,8 +256,8 @@ export function BillingPrintView({
                         style={{ color: it.is_return ? '#a23' : '#111' }}
                       >
                         <td style={td('center')}>{idx + 1}</td>
-                        <td style={td('left')}>{it.product.name}</td>
                         <td style={td('center')}>{it.product.code}</td>
+                        <td style={td('left')}>{it.product.name}</td>
                         <td style={td('right')}>{fmt(it.quantity)}</td>
                         <td style={td('right')}>{fmt(supplyPrice)}</td>
                         <td style={td('right')}>
