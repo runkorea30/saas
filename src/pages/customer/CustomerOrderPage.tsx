@@ -355,7 +355,13 @@ function CustomerOrderShell({
             fontScale={fontScale}
             onOpenInput={() => setMode('input')}
           />
-          <NoticePanel fontScale={fontScale} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <NoticePanel fontScale={fontScale} />
+            <ImportNoticeCard
+              companyId={customer.companyId}
+              fontScale={fontScale}
+            />
+          </div>
         </div>
         {/* 하단: 오늘 (좌) + 월별 (우) */}
         <div
@@ -1041,6 +1047,205 @@ function NoticePanel({ fontScale }: { fontScale: number }) {
       </div>
     </Card>
   );
+}
+
+// ───────────────────────────────────────────────────────────
+
+const IMPORT_NOTICE_STEPS = ['주문완료', '운송중', '통관진행중', '도착예정'] as const;
+type ImportNoticeStep = (typeof IMPORT_NOTICE_STEPS)[number];
+
+interface ImportNoticeData {
+  status: ImportNoticeStep | null;
+  date: string | null;
+  products: { code: string; name: string }[];
+}
+
+function ImportNoticeCard({
+  companyId,
+  fontScale,
+}: {
+  companyId: string;
+  fontScale: number;
+}) {
+  const { data: notice } = useQuery<ImportNoticeData | null>({
+    queryKey: ['customer-import-notice', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('companies')
+        .select(
+          'import_notice_status, import_notice_date, import_notice_products',
+        )
+        .eq('id', companyId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      const rawProducts = data.import_notice_products;
+      const products = Array.isArray(rawProducts)
+        ? (rawProducts as unknown as { code?: unknown; name?: unknown }[])
+            .filter(
+              (p): p is { code: string; name: string } =>
+                !!p &&
+                typeof p === 'object' &&
+                typeof p.code === 'string' &&
+                typeof p.name === 'string',
+            )
+            .map((p) => ({ code: p.code, name: p.name }))
+        : [];
+      const status = data.import_notice_status as ImportNoticeStep | null;
+      return {
+        status: IMPORT_NOTICE_STEPS.includes(status as ImportNoticeStep)
+          ? status
+          : null,
+        date: data.import_notice_date ?? null,
+        products,
+      };
+    },
+    staleTime: 60_000,
+  });
+
+  if (!notice || !notice.status) return null;
+  const currentIdx = IMPORT_NOTICE_STEPS.indexOf(notice.status);
+  const baseFont = 12 * fontScale;
+
+  return (
+    <Card title="🚢 수입 예정 제품 안내">
+      {/* 진행 스텝퍼 */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 0,
+          marginBottom: 14,
+        }}
+      >
+        {IMPORT_NOTICE_STEPS.map((s, i) => {
+          const isCurrent = i === currentIdx;
+          const isDone = i < currentIdx;
+          const reached = isCurrent || isDone;
+          const bg = reached ? '#2563EB' : '#F5F5F4';
+          const fg = reached ? '#FFFFFF' : '#9CA3AF';
+          const border = reached ? '#2563EB' : '#D6D3D1';
+          const label =
+            s === '도착예정' && notice.date
+              ? `${formatKoreanShortDate(notice.date)} 도착예정`
+              : s;
+          return (
+            <div
+              key={s}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                flex: i < IMPORT_NOTICE_STEPS.length - 1 ? 1 : 0,
+                minWidth: 0,
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  minWidth: 0,
+                }}
+              >
+                <div
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: '50%',
+                    background: bg,
+                    color: fg,
+                    border: `1px solid ${border}`,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: isDone ? 0.7 : 1,
+                  }}
+                >
+                  {isDone ? '✓' : i + 1}
+                </div>
+                <span
+                  style={{
+                    fontSize: 10,
+                    marginTop: 4,
+                    color: isCurrent ? '#2563EB' : '#6B7280',
+                    fontWeight: isCurrent ? 600 : 400,
+                    whiteSpace: 'nowrap',
+                    textAlign: 'center',
+                  }}
+                >
+                  {label}
+                </span>
+              </div>
+              {i < IMPORT_NOTICE_STEPS.length - 1 && (
+                <div
+                  style={{
+                    flex: 1,
+                    height: 2,
+                    marginTop: 10,
+                    marginLeft: 4,
+                    marginRight: 4,
+                    background: i < currentIdx ? '#2563EB' : '#E5E7EB',
+                    opacity: i < currentIdx ? 0.6 : 1,
+                  }}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 제품 목록 */}
+      {notice.products.length > 0 && (
+        <div>
+          <div
+            style={{
+              fontSize: 11,
+              color: '#6B7280',
+              marginBottom: 6,
+              fontWeight: 500,
+            }}
+          >
+            입고 예정 제품
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {notice.products.map((p, idx) => (
+              <div
+                key={p.code}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: baseFont,
+                  padding: '5px 0',
+                  borderTop: idx === 0 ? 'none' : '1px solid #F3F4F6',
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: 'var(--font-num)',
+                    color: '#6B7280',
+                    width: 80,
+                    flexShrink: 0,
+                  }}
+                >
+                  {p.code}
+                </span>
+                <span style={{ color: '#1F2937' }}>{p.name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function formatKoreanShortDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.getMonth() + 1}월 ${d.getDate()}일`;
 }
 
 // ───────────────────────────────────────────────────────────

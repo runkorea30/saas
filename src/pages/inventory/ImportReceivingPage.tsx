@@ -11,8 +11,12 @@
  *    adjustedQuantity 가 새 default 로 자동 추종. 수동 편집하면 이후 자동 추종 안 함.
  *    Phase 2 에서 PDF 업로드 + 자동 파싱 예정.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
+import type { ImportNoticeProduct, ImportNoticeStatus } from '@/hooks/useCompany';
+import type { Json } from '@/types/database';
 import { useProducts } from '@/hooks/queries/useProducts';
 import { useCreateImportWithLots } from '@/hooks/queries/useCreateImportWithLots';
 import { useToast } from '@/components/ui/Toast';
@@ -75,10 +79,11 @@ const DEFAULT_HEADER: ImportInvoiceHeader = {
 // ───────────────────────────────────────────────────────────
 
 export function ImportReceivingPage() {
-  const { companyId, isLoading: companyLoading } = useCompany();
+  const { companyId, company, isLoading: companyLoading } = useCompany();
   const productsQuery = useProducts(companyId);
   const createMut = useCreateImportWithLots(companyId);
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
 
   const [header, setHeader] = useState<ImportInvoiceHeader>(() => ({
     ...DEFAULT_HEADER,
@@ -91,6 +96,21 @@ export function ImportReceivingPage() {
   const [confirmShipping, setConfirmShipping] = useState(false);
   const [confirmDiff, setConfirmDiff] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+
+  // ───── 거래처 포털 수입 안내 설정 ─────
+  const [noticeStatus, setNoticeStatus] = useState<'' | ImportNoticeStatus>('');
+  const [noticeDate, setNoticeDate] = useState<string>('');
+  const [noticeProducts, setNoticeProducts] = useState<ImportNoticeProduct[]>([]);
+  const [noticeProductInput, setNoticeProductInput] = useState('');
+  const [noticeSaving, setNoticeSaving] = useState(false);
+
+  // company 로드/갱신 시 폼 초기값 동기화.
+  useEffect(() => {
+    if (!company) return;
+    setNoticeStatus(company.import_notice_status ?? '');
+    setNoticeDate(company.import_notice_date ?? '');
+    setNoticeProducts(company.import_notice_products ?? []);
+  }, [company]);
 
   // 제품 코드 매칭 맵 (convertedCode = products.code).
   const products = productsQuery.data ?? [];
@@ -285,6 +305,50 @@ export function ImportReceivingPage() {
 
   const busy = createMut.isPending;
 
+  // ───── 수입 안내 핸들러 ─────
+  const handleAddNoticeProduct = () => {
+    const q = noticeProductInput.trim().toUpperCase();
+    if (!q) return;
+    const found = products.find((p) => p.code.toUpperCase() === q);
+    if (!found) {
+      showToast({ kind: 'error', text: `제품 코드 "${q}"를 찾을 수 없습니다.` });
+      return;
+    }
+    if (noticeProducts.some((p) => p.code === found.code)) {
+      showToast({ kind: 'info', text: '이미 추가된 제품입니다.' });
+      return;
+    }
+    setNoticeProducts((prev) => [...prev, { code: found.code, name: found.name }]);
+    setNoticeProductInput('');
+  };
+
+  const handleNoticeSave = async () => {
+    if (!companyId) return;
+    setNoticeSaving(true);
+    try {
+      const { error } = await supabase
+        .from('companies')
+        .update({
+          import_notice_status: noticeStatus || null,
+          import_notice_date: noticeDate || null,
+          import_notice_products: noticeProducts as unknown as Json,
+        })
+        .eq('id', companyId);
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ['current-company'] });
+      showToast({ kind: 'success', text: '저장되었습니다.' });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[import-notice.save]', e);
+      showToast({
+        kind: 'error',
+        text: e instanceof Error ? e.message : '저장 중 오류가 발생했습니다.',
+      });
+    } finally {
+      setNoticeSaving(false);
+    }
+  };
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <main
@@ -414,6 +478,223 @@ export function ImportReceivingPage() {
               : `입고확정 (${validSubmitRows.length}건)`}
           </button>
         </div>
+
+        {/* ───── 거래처 포털 수입 안내 설정 ───── */}
+        <section
+          style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--line)',
+            borderRadius: 10,
+            padding: 16,
+            marginTop: 24,
+          }}
+        >
+          <h3
+            style={{
+              margin: '0 0 14px',
+              fontSize: 13.5,
+              fontWeight: 600,
+              color: 'var(--ink)',
+            }}
+          >
+            📦 거래처 포털 수입 안내 설정
+          </h3>
+
+          {/* 상태 선택 */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+            {(['주문완료', '운송중', '통관진행중', '도착예정'] as const).map((s) => {
+              const active = noticeStatus === s;
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setNoticeStatus(s)}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: 12,
+                    borderRadius: 6,
+                    border: `1px solid ${active ? 'var(--brand)' : 'var(--line-strong)'}`,
+                    background: active ? 'var(--brand)' : 'var(--surface)',
+                    color: active ? '#fff' : 'var(--ink-2)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {s}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setNoticeStatus('')}
+              style={{
+                padding: '6px 12px',
+                fontSize: 12,
+                borderRadius: 6,
+                border: `1px solid ${!noticeStatus ? '#9CA3AF' : 'var(--line-strong)'}`,
+                background: !noticeStatus ? '#E5E7EB' : 'var(--surface)',
+                color: !noticeStatus ? '#4B5563' : 'var(--ink-3)',
+                cursor: 'pointer',
+              }}
+            >
+              안내 숨기기
+            </button>
+          </div>
+
+          {/* 도착예정일 — 도착예정 상태일 때만 */}
+          {noticeStatus === '도착예정' && (
+            <div style={{ marginBottom: 14 }}>
+              <label
+                style={{
+                  fontSize: 11.5,
+                  color: 'var(--ink-3)',
+                  display: 'block',
+                  marginBottom: 4,
+                }}
+              >
+                도착예정일
+              </label>
+              <input
+                type="date"
+                value={noticeDate}
+                onChange={(e) => setNoticeDate(e.target.value)}
+                style={{
+                  border: '1px solid var(--line-strong)',
+                  borderRadius: 6,
+                  padding: '6px 8px',
+                  fontSize: 12.5,
+                  background: 'var(--surface)',
+                  color: 'var(--ink)',
+                  outline: 'none',
+                }}
+              />
+            </div>
+          )}
+
+          {/* 제품 목록 */}
+          <div style={{ marginBottom: 14 }}>
+            <label
+              style={{
+                fontSize: 11.5,
+                color: 'var(--ink-3)',
+                display: 'block',
+                marginBottom: 4,
+              }}
+            >
+              표시할 제품 (코드 입력)
+            </label>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+              <input
+                type="text"
+                value={noticeProductInput}
+                onChange={(e) => setNoticeProductInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddNoticeProduct();
+                  }
+                }}
+                placeholder="제품코드 입력 후 Enter"
+                style={{
+                  border: '1px solid var(--line-strong)',
+                  borderRadius: 6,
+                  padding: '6px 8px',
+                  fontSize: 12.5,
+                  background: 'var(--surface)',
+                  color: 'var(--ink)',
+                  outline: 'none',
+                  width: 200,
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleAddNoticeProduct}
+                style={{
+                  padding: '6px 12px',
+                  fontSize: 12,
+                  borderRadius: 6,
+                  border: '1px solid var(--line-strong)',
+                  background: 'var(--surface)',
+                  color: 'var(--ink-2)',
+                  cursor: 'pointer',
+                }}
+              >
+                추가
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {noticeProducts.map((p) => (
+                <span
+                  key={p.code}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '3px 10px',
+                    fontSize: 11.5,
+                    background: 'var(--surface-2)',
+                    border: '1px solid var(--line)',
+                    borderRadius: 999,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-num)',
+                      color: 'var(--ink-3)',
+                    }}
+                  >
+                    {p.code}
+                  </span>
+                  <span style={{ color: 'var(--ink)' }}>{p.name}</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setNoticeProducts((prev) =>
+                        prev.filter((x) => x.code !== p.code),
+                      )
+                    }
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      color: 'var(--ink-3)',
+                      padding: 0,
+                      marginLeft: 2,
+                      fontSize: 11,
+                    }}
+                    title="제거"
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+              {noticeProducts.length === 0 && (
+                <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>
+                  추가된 제품 없음
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* 저장 버튼 */}
+          <button
+            type="button"
+            onClick={handleNoticeSave}
+            disabled={noticeSaving || !companyId}
+            style={{
+              padding: '8px 18px',
+              fontSize: 12.5,
+              fontWeight: 500,
+              borderRadius: 6,
+              border: 'none',
+              background: 'var(--brand)',
+              color: '#fff',
+              cursor: noticeSaving || !companyId ? 'not-allowed' : 'pointer',
+              opacity: noticeSaving || !companyId ? 0.55 : 1,
+            }}
+          >
+            {noticeSaving ? '저장 중…' : '저장'}
+          </button>
+        </section>
       </main>
 
       {/* 운송비 0 확인 */}

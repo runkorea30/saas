@@ -19,19 +19,52 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 
+export type ImportNoticeStatus =
+  | '주문완료'
+  | '운송중'
+  | '통관진행중'
+  | '도착예정';
+
+export interface ImportNoticeProduct {
+  code: string;
+  name: string;
+}
+
 export interface Company {
   id: string;
   name: string;
+  import_notice_status: ImportNoticeStatus | null;
+  import_notice_date: string | null;
+  import_notice_products: ImportNoticeProduct[];
 }
 
 async function fetchFirstCompany() {
   return supabase
     .from('companies')
-    .select('id, name')
+    .select('id, name, import_notice_status, import_notice_date, import_notice_products')
     .is('deleted_at', null)
     .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle();
+}
+
+type CompanyRow = NonNullable<Awaited<ReturnType<typeof fetchFirstCompany>>['data']>;
+
+function normalizeCompany(row: CompanyRow | null): Company | null {
+  if (!row) return null;
+  const products = Array.isArray(row.import_notice_products)
+    ? (row.import_notice_products as unknown as ImportNoticeProduct[]).filter(
+        (p): p is ImportNoticeProduct =>
+          !!p && typeof p === 'object' && typeof p.code === 'string' && typeof p.name === 'string',
+      )
+    : [];
+  return {
+    id: row.id,
+    name: row.name,
+    import_notice_status: (row.import_notice_status as ImportNoticeStatus | null) ?? null,
+    import_notice_date: row.import_notice_date ?? null,
+    import_notice_products: products,
+  };
 }
 
 export function useCompany() {
@@ -40,7 +73,7 @@ export function useCompany() {
     queryFn: async () => {
       const { data, error } = await fetchFirstCompany();
       if (error) throw error;
-      if (data) return data;
+      if (data) return normalizeCompany(data);
 
       // 빈 결과 + 인증 세션 존재 → stale 세션 가능성. signOut 후 anon 으로 재시도.
       const { data: sessionData } = await supabase.auth.getSession();
@@ -48,7 +81,7 @@ export function useCompany() {
         await supabase.auth.signOut();
         const retry = await fetchFirstCompany();
         if (retry.error) throw retry.error;
-        return retry.data;
+        return normalizeCompany(retry.data);
       }
       return null;
     },
