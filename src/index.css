@@ -380,6 +380,10 @@
   body > .invoice-print-portal {
     display: block !important;
   }
+  /* 화면에만 보이고 인쇄에서는 숨길 영역 (예: 청구서 페이지 필터 바). */
+  .no-print {
+    display: none !important;
+  }
   @page {
     size: A4 portrait;
     margin: 12mm 10mm;
