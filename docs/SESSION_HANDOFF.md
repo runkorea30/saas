@@ -27,9 +27,11 @@
 | Phase 3.18 | 미수금 관리 페이지 (`/finance/receivables`) — 카드형 현황 + 월별 상세 모달 | ✅ 완료 (2026-06-24) |
 | Phase 3.19 | 은행거래 버그 수정 + 운영 보강 (입금 매출월 매칭 로직 개편, 사업자계좌 포맷, target_sales_month 수동지정) | ✅ 완료 (2026-06-25) |
 | Phase 3.20 | 입금 분할 기능 + 허용 오차(100원) 정산완료 처리 (bank_transaction_splits) | ✅ 완료 (2026-06-25, 브라우저 검증 미수행) |
+| Phase 3.21 | 세금계산서대장 페이지 (`/finance/tax-invoices`) — 사업자번호 단위 발행 + 국세청 일괄발급 엑셀 다운로드 | ✅ 완료 (2026-06-25) |
+| Phase 3.22 | 미수금 페이지 — 월별 정산마감 기준 미수금/정산대기 재계산 + 카드 배경색 3단계 + 필터 4종 | ✅ 완료 (2026-06-25) |
 | Phase 4 | 나머지 페이지 + Auth 도입 | 대기 |
 
-**페이지 진도: 11 / 13 구현 완료**
+**페이지 진도: 12 / 13 구현 완료** (`/finance/pnl` 만 남음)
 
 - `/` — 홈 대시보드 (KPI + Today + Chart + Timeline)
 - `/sales/orders` — 주문내역 (필터/목록/상세 split, 상세에서 수정/저장/반품추가/주문추가)
@@ -42,7 +44,8 @@
 - `/customer-order` — 거래처 주문서 포털 (로그인 + 주문서 업로드 + 직송정보 + 월별 주문내역)
 - `/finance/banking` — 은행거래 (KB엑셀 업로드, 자동매칭, 월별정산, 매핑설정)
 - `/finance/receivables` — 미수금 관리 (카드형 현황, 월별 누적미수금, 연체일수)
-- 나머지 2 경로 (`/finance/tax-invoices`, `/finance/pnl`) 는 `<PlaceholderPage />` 상태
+- `/finance/tax-invoices` — 세금계산서대장 (사업자번호 단위 발행, 국세청 일괄발급 엑셀 다운로드)
+- 나머지 1 경로 (`/finance/pnl`) 는 `<PlaceholderPage />` 상태
 
 **배포**: https://saas-beta-pied.vercel.app (Vercel 자동 배포, GitHub push)
 
@@ -51,11 +54,12 @@
 ## 후속 PR 로드맵 (2026-06-24 갱신, 은행거래/미수금 완료 후)
 
 - **다음 후보 (택1)**:
-  - **세금계산서** (`/finance/tax-invoices`) — 발행/조회
   - **손익계산서** (`/finance/pnl`) — `calcCostOfSales` 선행 필요 (FIFO 로트 소비)
   - **거래처 편집 UI** — CustomerDetailPane 인라인/모달 편집 (정산주기·입금매칭 포함)
   - **송장대장** (`/sales/invoices`)
   - **매출분석 페이지 심화** — 차트·필터·CSV 내보내기 보강
+  - **Auth 도입 + RLS 정책 복원** (§5)
+  - **재고 조정 RPC 보강** — 현재 opening lot 의 `quantity` 만 가감, FIFO 도입 시 `remaining_quantity` 동기화 필요
 - **PR 2 (예정)**: Products 엑셀 업로드 — XLSX 템플릿, 프리뷰, 일괄 추가
 - **PR 3 (예정)**: Products 일괄 수정 — 체크된 행의 판매가/공급가/USD 등 동시 변경. PR 1.5 (#4) 의 체크박스 컬럼이 이 PR을 위한 사전 준비
 - **Phase B (예정)**: Products 행 클릭 상세 펼침
@@ -64,6 +68,134 @@
   - 컬럼간격 드래그 리사이저 (현재는 fixed/flex 토글만)
   - 우상단 "자동수집 OFF" + "수집/팩스" 영역 (의미 미정의)
   - 파일 자체를 서버 업로드 (현재는 클라이언트 미리보기만)
+
+---
+
+## 오늘 추가된 작업 요약 (2026-06-25, 세금계산서)
+
+### 세금계산서대장 페이지 (Phase 3.21) — `/finance/tax-invoices`
+
+#### DB 재설계 — `tax_invoices` 테이블 (마이그레이션 `redesign_tax_invoices_customer_based`)
+- 기존 `business_id` 기반 FK 폐기 → `customer_id` / `customer_group_id` **이중 FK** 구조.
+- `CHECK (chk_one_subject)`: 두 FK 컬럼 중 정확히 하나만 NOT NULL.
+- 신규 컬럼: `invoice_type VARCHAR(2) DEFAULT '01'` (01:일반/02:영세율) · `payment_type VARCHAR(2) DEFAULT '02'` (01:영수/02:청구) · `status VARCHAR(20) DEFAULT 'draft'` (draft/issued) · `issued_at TIMESTAMPTZ` · `memo TEXT`.
+- `UNIQUE NULLS NOT DISTINCT`: `(company_id, customer_id, invoice_year, invoice_month)` + `(company_id, customer_group_id, invoice_year, invoice_month)` — 중복 발행 방지.
+- RLS 활성화 + `anon_all` / `auth_all` 정책 (Phase 2 임시).
+- `updated_at` 자동 갱신 트리거 (`trg_tax_invoices_updated_at`).
+
+#### 발행 단위 정책
+- **독립 거래처** (`customers.group_id IS NULL` AND 자체 `business_registration_number` 보유): `customer_id` 사용.
+- **그룹 소속 거래처들** (`customers.group_id IS NOT NULL`): `customer_group_id` 사용, 그룹 멤버 매출 **합산** 1건 발행.
+- 빈문자열/`-` brn은 클라이언트에서 추가 필터링 (DB는 NULL만 거름).
+
+#### 금액 계산
+- `supply_amount = Math.floor(total_amount / 1.1)` — **`Math.round` 아님** (기존 `calcSupplyAmount` 와 의도적으로 다름).
+- `vat_amount = total_amount - supply_amount`.
+- 훅 내부 단일 진입점 `splitAmounts(total)` 로 통일.
+
+#### 신규 파일
+- `src/types/taxInvoice.ts` — `TaxInvoice` / `TaxInvoiceSubject` (독립/그룹 정규화) / `TaxInvoiceRow` (매출 집계 + 발행 현황 병합).
+- `src/hooks/useTaxInvoices.ts` — 5개 훅:
+  - `useTaxInvoices(companyId, year, month)` — 해당 월 발행 목록.
+  - `useTaxInvoiceRows(companyId, year, month)` — 발행 가능 행 (5개 쿼리 병렬 + JS 병합: 독립거래처 / 그룹 / 그룹멤버매핑 / 주문 / 기존발행).
+  - `useCreateTaxInvoice` / `useCreateTaxInvoicesBulk` / `useDeleteTaxInvoice` mutation.
+  - `monthRangeKst(year, month)` — KST(+9) 월 경계 (UTC-9h 보정).
+- `src/pages/finance/TaxInvoicesPage.tsx` — 페이지 + 엑셀 다운로드 (62컬럼).
+
+#### 페이지 UX
+- 헤더: 월 네비 (← / `YYYY년 N월` / →) + [이달 전체 생성 (N)] + [엑셀 다운로드].
+- 다음달 버튼: 현재 월 이상이면 disabled.
+- KPI 3개: 발행 건수 / 공급가액 합계 / 세액 합계 (발행된 행만).
+- 테이블: 거래처(상호) + "그룹" 인디케이터 / 사업자번호 / 주문수 / 공급가액 / 세액 / 합계(VAT포함) / 상태 / 작업.
+  - 발행: 정상 텍스트 + 초록 "발행" 뱃지 + [삭제] 버튼 (`ConfirmDialog` danger).
+  - 미발행: 회색 텍스트 + 회색 "미발행" 뱃지 + [생성] 브랜드 버튼.
+- 일괄 생성: `ConfirmDialog` 로 "미발행 N건 생성" 안내, 이미 발행된 건은 스킵 (`invoice === null` 필터).
+- 단건 삭제: 하드 DELETE (soft delete 아님), 토스트 알림.
+
+#### 엑셀 다운로드 — 국세청 전자세금계산서 일괄발급 양식
+- **62 컬럼 (A~BJ)** — 발행 완료된 행만 포함.
+- A: invoice_type / B: 작성일자 YYYYMMDD **숫자형** (해당 연월 말일) / C: 공급자 사업자번호 (`-` 제거).
+- E: 공급자 상호 (`companies.name`), F~J: 빈칸.
+- K: 공급받는자 사업자번호 (`-` 제거) / M-R: 거래처 정보 / S: 빈칸(이메일2).
+- T: supply_amount 숫자 / U: vat_amount 숫자 / V: 빈칸.
+- W: 일자1 2자리 문자열 (예: `"30"`) / X: "가죽공예 용품" / Y-AA 빈칸 / AB: supply_amount / AC: vat_amount / AD 빈칸.
+- AE-AM (9칸), AN-AV (9칸), AW-BE (9칸): 품목 2/3/4 빈칸.
+- BF-BI: 현금/수표/어음/외상미수금 빈칸.
+- BJ: payment_type ('02' 청구 기본).
+- 파일명: `세금계산서_YYYY년MM월.xlsx`.
+- 공급자 정보 가드: `companies.business_number` NULL이면 에러 토스트.
+
+#### TS 타입 보강 / 마이그레이션
+- `src/types/database.ts` — `tax_invoices` Row/Insert/Update 3종 + Relationships 수동 갱신 (Supabase MCP `generate_typescript_types` 가 `public` 만 지원하는 한계 회피).
+- `src/hooks/queries/useHomeDashboard.ts` — 홈 타임라인 세금계산서 항목을 새 스키마(`issued_at` + `customer` / `customer_group` join)로 마이그레이션. `business:businesses(name)` 조인 제거.
+
+#### 검증
+- `npx tsc -b --noEmit` → 0 errors.
+- `npm run build` → 성공 (5.37s). xlsx 동적/정적 import 경고는 기존 코드의 이슈로 무관.
+
+#### 세금계산서 후속 버그픽스 (Phase 3.21 ~ 후속)
+
+**일괄 생성 실패 — UNIQUE NULLS NOT DISTINCT 제약 (`7e4963a`)**
+- 원인: 두 UNIQUE 제약이 `NULLS NOT DISTINCT` 라 그룹 인보이스 다건 INSERT 시 `customer_id=NULL` 끼리 충돌. 단건은 통과하지만 일괄은 무조건 실패.
+- DB 마이그레이션 `fix_tax_invoices_unique_to_partial_indexes`: 두 UNIQUE 제약 DROP 후 부분 unique 인덱스 2종으로 교체 (`WHERE customer_id IS NOT NULL AND deleted_at IS NULL` / 그룹 동일).
+- 훅: 단일 bulk INSERT → 순차 INSERT, per-row 결과 추적 (`BulkInsertResult { inserted, skipped, failed, errors }`). 23505 는 skip 처리.
+- 페이지: skip 건수 안내 + 실패 시 첫 에러 메시지 + "외 N건" 토스트.
+
+**엑셀 다운로드 원서식 구조 (`8344faf`)**
+- 데이터만 1행부터 출력 → 1~6행 국세청 원서식 (안내문 5행 + 컬럼 헤더 59칸) + 7행부터 데이터.
+- 데이터 행 컬럼 수 62 → 59 정정 (품목당 9칸 → 표준 8칸).
+- 시트명: `'세금계산서'` → `'엑셀업로드양식'`.
+
+**anon GRANT 누락 보강 (사용자 직접 적용)**
+- 원래 마이그레이션에 RLS 정책만 있고 `GRANT SELECT, INSERT, UPDATE, DELETE TO anon/authenticated` 누락 → permission denied.
+- 사용자가 Supabase 대시보드/CLI 로 직접 GRANT 적용 완료. `information_schema.role_table_grants` 검증 통과.
+
+---
+
+## 오늘 추가된 작업 요약 (2026-06-25, 미수금 페이지)
+
+### 미수금 페이지 (Phase 3.22) — `/finance/receivables`
+
+이번 세션 3건 커밋 (`271bae7`, `8cd8cb4`, `ae56396`).
+
+#### 핵심 개념 정립
+`receivables_summary.outstanding` (DB 원본) = 전체 누적 미정산 — 그대로 "미수금" 으로 쓰면 안 됨.
+- **미수금(연체)** = 정산마감일 경과 + 잔액 > tolerance → `calcMonthlyReconciliation` 의 `status='연체'`
+- **정산대기** = 정산마감일 미도래 + 잔액 > tolerance → `status='정산대기'`
+- 슈즈케어 outstanding=6,400,800 예시: 익월 정산 사이클에서 5월 매출(마감 6/30)·6월 매출(마감 7/31) 모두 미도래 → 미수금 ₩0, 정산대기 ₩13,233,560 (오늘 2026-06-25 기준).
+
+#### 페이지 레벨 계산 추가
+- `useOrdersForReconciliation` + `useBankTransactions(year, null)` + `useBankTransactionSplits` + customers(id, group_id) 4개 쿼리.
+- `calcMonthlyReconciliation` 한 번 실행 → 결과를 `customer_id → entity_key` 매핑으로 변환해 `pendingByEntity` / `overdueByEntity` Map 생성.
+- 현재 연도 주문만 필터링 (`useBankTransactions(year, null)` 와 일관성).
+
+#### outstanding 사용 금지 — 4곳 모두 overdue/pending 으로 교체
+1. **상단 KPI**: 총 미수금 = `overdueByEntity` 합계. 정산대기는 sub-text.
+2. **카드**: `hasReceivable = overdueAmount > 0`, `hasPending = pendingAmount > 0`. 두 행 동시 노출 가능.
+3. **테이블 뷰**: "미수금" / "정산대기" 컬럼 분리.
+4. **드릴다운 모달 SummaryInline**: 미수금 + 정산대기 라인.
+5. **PaymentModal**: "현재 미수금" → "현재 잔여 (연체+정산대기)". `totalApplied >= totalDue` 비교.
+
+#### 카드 색상 표현 — 테두리 → 배경색
+- 미수금: `var(--danger-wash, #fef2f2)`
+- 정산대기만: `var(--warning-wash, #fffbeb)`
+- 정산완료: `var(--surface)` 기본
+- 테두리는 모두 `var(--line)` 통일.
+
+#### 필터 4종
+미수금 있음 / **정산대기** (신규) / 그룹만 / 전체.
+- 'positive' 기준도 `outstanding > 0` → `overdueAmount > 0` 으로 보정 (이전 잔존 버그).
+- 'pending': `pendingAmount > 0 && overdueAmount === 0`.
+
+#### 기본값 변경
+- 뷰: `'table'` → `'card'` (localStorage 미설정 시 카드)
+- 필터: `'positive'` → `'all'` (전체)
+- 드릴다운 모달 기본 탭: `'orders'` → `'reconciliation'` (월별 정산)
+
+#### DB 데이터 기반 검증 예상
+- **누보아트** outstanding=-1,332,360 → ✓ 정산 완료 카드 (기본 배경)
+- **슈즈케어** outstanding=6,400,800 → 5/6월 매출 정산대기 카드 (amber 배경)
+- **안앤리** outstanding=290,890 → 정산마감 기준 분기 표시
 
 ---
 
@@ -523,6 +655,15 @@ ProductListTable에서 `Check` 컴포넌트(`orders/primitives.tsx`)를 신규 i
   - 신규 테이블 `mochicraft_demo.bank_transaction_splits` (FK CASCADE 2종 + idx 2종 + RLS) — 롤백: `DROP TABLE mochicraft_demo.bank_transaction_splits CASCADE;`
   - `anon_all_bank_transaction_splits` 정책 (anon ALL USING true) — 테이블 DROP 시 함께 제거됨
   - `GRANT SELECT, INSERT, UPDATE, DELETE ON mochicraft_demo.bank_transaction_splits TO anon` — Phase 2 Auth 도입 시 회수
+- **세금계산서 (Phase 3.21 — 마이그레이션 `redesign_tax_invoices_customer_based` + 후속 `fix_tax_invoices_unique_to_partial_indexes`):**
+  - 기존 `tax_invoices` (business_id 기반) DROP 후 재생성. 데이터 없음 → 안전 (로컬 마이그레이션 파일 없음, MCP `apply_migration` 직접).
+  - 신규 컬럼: `customer_id` / `customer_group_id` 이중 FK + `CHECK chk_one_subject` (둘 중 하나만 NOT NULL).
+  - 신규 컬럼: `invoice_type` / `payment_type` / `status` / `issued_at` / `memo`.
+  - 🟠 후속 `fix_tax_invoices_unique_to_partial_indexes`: 두 UNIQUE NULLS NOT DISTINCT 제약 DROP 후 부분 unique 인덱스 2종으로 교체 (`WHERE customer_id IS NOT NULL AND deleted_at IS NULL` / 그룹 동일). 그룹 인보이스 다건 INSERT 시 NULL 끼리 충돌하던 버그 해결.
+  - `anon_all` / `auth_all` 정책 (anon/authenticated ALL USING true) — Phase 2 Auth 도입 시 회수.
+  - `GRANT SELECT, INSERT, UPDATE, DELETE ON mochicraft_demo.tax_invoices TO anon, authenticated` (사용자 직접 보강 — 원 마이그레이션 누락분, permission denied 해결).
+  - `trg_tax_invoices_updated_at` 트리거 + `mochicraft_demo.update_tax_invoices_updated_at()` 함수.
+  - 롤백 SQL: `DROP TABLE mochicraft_demo.tax_invoices CASCADE; DROP FUNCTION mochicraft_demo.update_tax_invoices_updated_at();` (인덱스/GRANT는 테이블 DROP 시 함께 제거).
 
 ### 원복 SQL
 ```sql
@@ -777,10 +918,6 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 ### (그 다음 후보) 송장대장 — `/sales/invoices`
 - 주문/매출 데이터 기반 송장 발행/조회 화면. 거래처별·월별 묶음 출력.
 
-### (그 다음 후보) 세금계산서 — `/finance/tax-invoices`
-- `mochicraft_demo.tax_invoices` 테이블 기존 존재 (조회만 필요 시 그대로, 발행 플로우는 별도 RPC 설계).
-- 공급가액 역산은 `calcSupplyAmount(totalAmount)` 활용.
-
 ### (그 다음 후보) 손익계산서 — `/finance/pnl`
 - **`calcCostOfSales` 선행 구현 필요** (FIFO 로트 소비 로직 — `inventory_lots.remaining_quantity` × `cost_krw` 차감 누적).
 
@@ -798,13 +935,13 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 ### ~~(완료) 수입/매입 Phase 2~~ ✅ Phase 3.13 (2026-06-23)
 ### ~~(완료) 발주서 페이지~~ ✅ Phase 3.14 (2026-06-24)
 ### ~~(완료) 거래처 주문서 포털~~ ✅ Phase 3.15 (2026-06-24)
+### ~~(완료) 세금계산서~~ ✅ Phase 3.21 (2026-06-25)
 ### ~~(대안) 수동주문입력 페이지~~ ✅ 완료 (Phase 3.11)
 - 구현됨: `/sales/order-entry`
 - 단, 도메인 규칙 D(`requested_quantity` 이중 수량 모델)과 B/C(주문 상태별 재고 차감, `inventory_transactions` out)는 **미적용**. 현재는 단순 INSERT (재고 검증/차감 없이) → 본격 운영 전 RPC를 `create_order_with_stock_check` 로 보강 필요.
 
 ### 후속 페이지 (우선순위 무관)
 - `/sales/invoices` — 송장대장
-- `/finance/tax-invoices` — 세금계산서 발행
 - `/finance/pnl` — 손익계산서 (`calcCostOfSales` 선행 필요)
 
 ### 사용 가능한 공용 인프라 (재확인)
@@ -835,6 +972,20 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 - dev 서버 재시작: `Ctrl+C` 후 `npm run dev` (포트 점유 시 다음 포트로)
 - DB 수정 시 MochiCraft 브라우저 탭 닫아둘 것 (열려 있으면 프론트가 덮어쓸 가능성)
 - 타입체크: `npx tsc --noEmit` (커밋 전 필수) — **단, 루트 tsconfig.json 이 files:[] 라 이걸로는 미감지. `npm run build` 로 검증할 것**
+
+### 최근 커밋 (2026-06-25 세션 후반 — 미수금 페이지 개편)
+- `ae56396` fix(receivables): 정산대기 필터 추가 및 카드 배경색으로 상태 표시
+- `8cd8cb4` fix(receivables): 미수금/정산대기 계산 로직 및 카드 UI 수정 (outstanding → 월별 정산마감 기준)
+- `271bae7` fix(receivables): 미수금 관리 카드 뷰 및 계산 오류 수정 (기본값 변경 + 음수 처리 + 색상 3단계)
+
+### 최근 커밋 (2026-06-25 세션 중반 — 세금계산서 후속)
+- `8344faf` fix(tax-invoice): 엑셀 다운로드 국세청 원서식 구조로 수정 (1~6행 헤더 + 59컬럼)
+- `7e4963a` fix(tax-invoice): 일괄 생성 에러 핸들링 및 null 필드 처리 수정 (UNIQUE 제약 부분 인덱스 + 순차 INSERT)
+
+### 최근 커밋 (2026-06-25 세션 전반 — 세금계산서대장)
+- `81bb2d3` feat(tax-invoice): 세금계산서대장 페이지 구현
+- `59e259d` feat(tax-invoice): 세금계산서 타입 정의 및 훅 구현
+- `8611986` feat(db): tax_invoices 테이블 customer_id 기반으로 재설계
 
 ### 최근 커밋 (2026-06-25 세션 — 은행거래 버그수정 & 운영 보강)
 - `1e2fcf3` fix(banking): 허용 오차 100원 이하 차액 정산완료 처리
