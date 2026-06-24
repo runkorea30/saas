@@ -697,9 +697,10 @@ export function ImportReceivingPage() {
                 도착예정일
               </span>
               <input
-                type="date"
+                type="text"
                 value={noticeDate}
                 onChange={(e) => setNoticeDate(e.target.value)}
+                placeholder="예: 2026-07-15"
                 style={{
                   border: '1px solid var(--line-strong)',
                   borderRadius: 6,
