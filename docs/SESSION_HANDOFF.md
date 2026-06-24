@@ -30,6 +30,7 @@
 | Phase 3.21 | 세금계산서대장 페이지 (`/finance/tax-invoices`) — 사업자번호 단위 발행 + 국세청 일괄발급 엑셀 다운로드 | ✅ 완료 (2026-06-25) |
 | Phase 3.22 | 미수금 페이지 — 월별 정산마감 기준 미수금/정산대기 재계산 + 카드 배경색 3단계 + 필터 4종 | ✅ 완료 (2026-06-25) |
 | Phase 3.23 | 주문내역 UI 정리 + 거래명세서 인쇄 + 재고부족 자동조정 + 수동주문 공급가 폴백 | ✅ 완료 (2026-06-25) |
+| Phase 3.24 | 수입 입고 예정일 4탭 카드 (페덱스/해상운송/품절/재고부족) + 제품 일괄삭제/일괄수정/노출금지 | ✅ 완료 (2026-06-25) |
 | Phase 4 | 나머지 페이지 + Auth 도입 | 대기 |
 
 **페이지 진도: 12 / 13 구현 완료** (`/finance/pnl` 만 남음)
@@ -1106,6 +1107,50 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 - dev 서버 재시작: `Ctrl+C` 후 `npm run dev` (포트 점유 시 다음 포트로)
 - DB 수정 시 MochiCraft 브라우저 탭 닫아둘 것 (열려 있으면 프론트가 덮어쓸 가능성)
 - 타입체크: `npx tsc --noEmit` (커밋 전 필수) — **단, 루트 tsconfig.json 이 files:[] 라 이걸로는 미감지. `npm run build` 로 검증할 것**
+
+### 최근 커밋 (2026-06-25 세션 마지막 — 수입 입고 예정일 4탭 + 제품 일괄작업)
+
+**버그 수정** (Phase 3.23 후속, `cb3ba1b` 까지 반영됨)
+- 재고부족 자동조정: quantity=0 품목 INSERT 누락 수정 (OrderEntryPage/OrderDetailPane 정책 통일)
+- 수량 표시 순서: ~~원래수량~~ 실제수량 순서로 변경 + 글자 크기 통일
+- 수동주문입력 공급가: grade 기반 `calcSupplyPriceByCustomerGrade` 즉시 적용
+- 수동주문입력 합계: sell_price → supply_price 기준으로 수정
+- 주문 목록 정렬: created_at 보조 정렬 추가 (같은 날짜 내 최신순)
+- 주문 상세 패널: category→code 오름차순 정렬 (useMemo hooks 순서 버그 포함 수정)
+- companies anon GRANT 추가 (`import_notice` 저장 401 오류 해결)
+
+**신규 기능 — 거래처 포털 수입 입고 예정일 카드 (4탭)**
+- DB: `import_notice_*` 컬럼 10개 추가 (페덱스 6 + 해상운송 6)
+- OPS 수입/매입 페이지: 페덱스/해상운송 탭 분리 설정 + 인보이스 PDF 파싱으로 제품 자동 추가 (`parseInvoicePDF` 재사용)
+- 거래처 포털: 탭 최상단 pill 뱃지 (페덱스/해상=버건디, 품절=빨강, 재고부족=주황), 제품 카테고리→코드 정렬, 400px 고정 스크롤
+- 품절(재고=0) / 재고부족(1~5개) 자동 산출 — `calcCurrentStockByProduct` 재사용
+- `is_active=false` 제품은 품절/재고부족 목록에서 제외
+
+**신규 기능 — 제품 리스트 일괄 작업**
+- 체크 시 헤더에 일괄수정/노출금지/노출/삭제 4버튼 노출 + N개 선택 카운트
+- 일괄수정 모달 (분류/단위/USD/판매가): 입력한 필드만 UPDATE (빈 필드는 변경 안 함)
+- `is_active=false`로 노출금지 / `is_active=true`로 복원 (양방향 토글)
+- 노출금지 제품: 테이블 행 `opacity:0.6` + 주황 wash "노출금지" 뱃지 (제품명 옆)
+- 일괄삭제: soft delete (`deleted_at = NOW()`) + `['products', companyId]` 무효화
+
+**커밋 (cb3ba1b 이후)**
+- `cc8460d` feat(products): 일괄수정 모달 + 노출금지 기능 추가
+- `f38e9b6` feat(products): 제품 일괄삭제 기능 추가
+- `139b16a` fix(customer-portal): 탭 버튼 pill 뱃지 스타일 적용
+- `a5d00b7` fix(customer-portal): 수입 입고 예정일 카드 탭/헤더 구조 수정
+- `c421c19` fix(customer-portal): 수입 입고 예정일 카드 높이 고정 (제품 14개 기준 400px 스크롤)
+- `72c7c3c` feat(customer-portal): 수입 입고 예정일 카드 4탭 구조로 개편
+- `73179a1` fix(customer-portal): 수입 입고 예정일 카드 높이를 좌측 컬럼에 맞춤
+- `342b378` fix(customer-portal): 수입 입고 예정일 카드 높이/스텝퍼 오버플로우 수정
+- `5b2c25b` fix(customer-portal): 수입 입고 예정일 카드 UI 수정 (타이틀/스텝퍼/flex 정렬)
+- `adea76b` feat(import-notice): 도착예정일을 텍스트 입력으로 변경 (date picker 제거)
+- `2537c78` feat(import-notice): OPS 에 도착예정일(date) 입력 노출
+- `584a177` feat(import-notice): 수입 예정 안내 카드 UI 개선 (4 status 자유 텍스트 + arrivalText)
+- `323a52a` feat(import-notice): 인보이스 PDF 업로드로 수입 예정 제품 자동 추가
+- `c1164b7` fix(orders): OrderDetailPane useMemo hook 순서 수정 (hooks 규칙 위반 해결)
+- `654435e` feat(import): 거래처 포털 수입 예정 안내 기능 추가
+
+---
 
 ### 최근 커밋 (2026-06-25 세션 후반 — 미수금 페이지 개편)
 - `ae56396` fix(receivables): 정산대기 필터 추가 및 카드 배경색으로 상태 표시
