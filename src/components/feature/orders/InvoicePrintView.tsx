@@ -171,8 +171,12 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
         return (
           <section
             key={g.customer.id}
-            className={isLast ? undefined : 'invoice-page-break'}
-            style={{ padding: '4mm 0' }}
+            style={{
+              // 마지막 거래처는 page-break 없음 — 빈 페이지 방지.
+              pageBreakAfter: isLast ? 'auto' : 'always',
+              breakAfter: isLast ? 'auto' : 'page',
+              padding: '4mm 0',
+            }}
           >
             {/* 1) 타이틀 */}
             <h1
@@ -191,7 +195,6 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
 
             {/* 2) 헤더 2단: 좌(거래처/날짜/안내문/은행) | 우(공급자 테이블) */}
             <div
-              className="invoice-no-break"
               style={{
                 display: 'flex',
                 gap: '6mm',
@@ -217,11 +220,11 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                 </div>
               </div>
 
-              {/* 우측 — 공급자 rowSpan 테이블 */}
+              {/* 우측 — 공급자 rowSpan 테이블 (가로쓰기, 2컬럼 단순 구조) */}
               <table
                 style={{
                   borderCollapse: 'collapse',
-                  fontSize: '10pt',
+                  fontSize: '11px',
                   minWidth: '95mm',
                 }}
               >
@@ -232,37 +235,35 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                       style={{
                         border: '1px solid #000',
                         textAlign: 'center',
-                        fontWeight: 700,
-                        background: '#f3f3f3',
-                        width: '14mm',
-                        writingMode: 'vertical-rl',
-                        letterSpacing: '4px',
-                        padding: '3mm 0',
+                        verticalAlign: 'middle',
+                        fontWeight: 'bold',
+                        width: '48px',
+                        padding: '4px',
                       }}
                     >
                       공급자
                     </td>
-                    <td style={cellLabel}>상호</td>
-                    <td style={cellValue}>{SUPPLIER_INFO.name}</td>
-                    <td style={cellLabel}>대표자</td>
-                    <td style={cellValue}>{SUPPLIER_INFO.representative}</td>
-                  </tr>
-                  <tr>
-                    <td style={cellLabel}>사업자번호</td>
-                    <td style={cellValue} colSpan={3}>
-                      {SUPPLIER_INFO.bizNo}
+                    <td style={{ border: '1px solid #000', padding: '2px 8px' }}>
+                      상호&nbsp;&nbsp;{SUPPLIER_INFO.name}
+                      &nbsp;&nbsp;&nbsp;&nbsp;대표자&nbsp;&nbsp;
+                      {SUPPLIER_INFO.representative}
                     </td>
                   </tr>
                   <tr>
-                    <td style={cellLabel}>전화</td>
-                    <td style={cellValue}>{SUPPLIER_INFO.phone}</td>
-                    <td style={cellLabel}>팩스</td>
-                    <td style={cellValue}>{SUPPLIER_INFO.fax}</td>
+                    <td style={{ border: '1px solid #000', padding: '2px 8px' }}>
+                      사업자번호&nbsp;&nbsp;{SUPPLIER_INFO.bizNo}
+                    </td>
                   </tr>
                   <tr>
-                    <td style={cellLabel}>주소</td>
-                    <td style={cellValue} colSpan={3}>
-                      {SUPPLIER_INFO.address}
+                    <td style={{ border: '1px solid #000', padding: '2px 8px' }}>
+                      전화&nbsp;&nbsp;{SUPPLIER_INFO.phone}
+                      &nbsp;&nbsp;&nbsp;&nbsp;팩스&nbsp;&nbsp;
+                      {SUPPLIER_INFO.fax}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style={{ border: '1px solid #000', padding: '2px 8px' }}>
+                      주소&nbsp;&nbsp;{SUPPLIER_INFO.address}
                     </td>
                   </tr>
                 </tbody>
@@ -274,11 +275,7 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
               const subtotal = orderSubtotal(o);
               const rows = buildRows(o.items);
               return (
-                <div
-                  key={o.id}
-                  className="invoice-no-break"
-                  style={{ marginBottom: '6mm' }}
-                >
+                <div key={o.id} style={{ marginBottom: '6mm' }}>
                   {/* 섹션 타이틀 — 배지 + 직송 배지 (옵션) */}
                   <div
                     style={{
@@ -400,7 +397,6 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
             {/* 4) 합계 바 — 섹션 ≥ 2 일 때만 */}
             {showGrandTotal && (
               <div
-                className="invoice-no-break"
                 style={{
                   display: 'flex',
                   justifyContent: 'space-between',
@@ -425,20 +421,6 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
 }
 
 // ── 셀 스타일 헬퍼 ─────────────────────────────────────────────────────
-
-const cellLabel: React.CSSProperties = {
-  border: '1px solid #000',
-  padding: '1.5mm 3mm',
-  background: '#f8f8f8',
-  fontWeight: 700,
-  width: '18mm',
-  textAlign: 'left',
-};
-
-const cellValue: React.CSSProperties = {
-  border: '1px solid #000',
-  padding: '1.5mm 3mm',
-};
 
 function thCenter(width: string): React.CSSProperties {
   return {

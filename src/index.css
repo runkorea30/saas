@@ -364,8 +364,9 @@
   거래명세서 인쇄 — InvoicePrintView 전용 @media print 규칙.
   --------------------------------------------------------------------------
   - 평상시: .invoice-print-portal 숨김.
-  - 인쇄 시: #root 와 그 외 body 직속 노드는 모두 숨기고 invoice 만 표시.
-  - .invoice-page-break 가 붙은 노드 뒤에서 페이지 강제 분할.
+  - 인쇄 시: #root 숨기고 invoice 만 표시.
+  - page-break-after 는 컴포넌트 내 인라인 스타일로 거래처 wrapper 에만 적용.
+  - page-break-inside:avoid 는 사용하지 않음 — 빈 페이지 원인.
   ==========================================================================
 */
 .invoice-print-portal {
@@ -379,16 +380,8 @@
   body > .invoice-print-portal {
     display: block !important;
   }
-  .invoice-page-break {
-    page-break-after: always;
-    break-after: page;
-  }
-  .invoice-no-break {
-    page-break-inside: avoid;
-    break-inside: avoid;
-  }
   @page {
     size: A4 portrait;
-    margin: 14mm 12mm;
+    margin: 12mm 10mm;
   }
 }
