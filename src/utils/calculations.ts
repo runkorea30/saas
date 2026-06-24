@@ -714,3 +714,178 @@ export async function calcCostOfSales(
 export async function calcMRR(_companyId: string): Promise<number> {
   throw new Error('calcMRR: Phase 5에서 구현 예정 (Super Admin 페이지와 함께)');
 }
+
+// ── 은행거래 / 미수금 계산 ─────────────────────────────────────────
+
+/**
+ * 정산 마감일 계산.
+ *
+ * 당월 → 해당 월 말일
+ * 익월 → 다음 달 말일
+ * 2개월 → 2개월 후 말일
+ */
+export function calcDueDate(
+  salesMonth: string, // 'YYYY-MM'
+  settlementCycle: '당월' | '익월' | '2개월',
+): string {
+  const [year, month] = salesMonth.split('-').map(Number);
+  const offset =
+    settlementCycle === '당월' ? 0
+    : settlementCycle === '익월' ? 1
+    : 2;
+  // new Date(year, month + offset, 0) = (month + offset)월의 마지막 날
+  const due = new Date(year, month + offset, 0);
+  return due.toISOString().slice(0, 10);
+}
+
+/**
+ * 월별 정산 계산.
+ *
+ * orders:        거래처별 주문 목록 (total_amount = 공급가 합계)
+ * transactions:  매칭된 입금 내역 (match_status = 'matched')
+ * today:         기준일 (기본값: 현재 날짜)
+ *
+ * 반환: 거래처×월 조합별 MonthlyReconciliation[]
+ *   - 정산완료: difference <= 0
+ *   - 정산대기: difference > 0 AND due_date >= today
+ *   - 연체:    difference > 0 AND due_date < today
+ */
+export function calcMonthlyReconciliation(
+  orders: {
+    customer_id: string;
+    customer_name: string;
+    settlement_cycle: string;
+    order_date: string;
+    total_amount: number;
+  }[],
+  transactions: {
+    customer_id: string | null;
+    transaction_date: string;
+    amount: number;
+    match_status: string;
+  }[],
+  today: Date = new Date(),
+): import('@/types/database').MonthlyReconciliation[] {
+  type Cycle = '당월' | '익월' | '2개월';
+
+  // 거래처×매출월별 매출 집계
+  const salesMap = new Map<
+    string,
+    {
+      customer_id: string;
+      customer_name: string;
+      settlement_cycle: Cycle;
+      month: string;
+      sales_total: number;
+    }
+  >();
+  for (const o of orders) {
+    const month = o.order_date.slice(0, 7);
+    const key = `${o.customer_id}__${month}`;
+    const existing = salesMap.get(key);
+    const cycle = (o.settlement_cycle || '익월') as Cycle;
+    if (existing) {
+      existing.sales_total += o.total_amount;
+    } else {
+      salesMap.set(key, {
+        customer_id: o.customer_id,
+        customer_name: o.customer_name,
+        settlement_cycle: cycle,
+        month,
+        sales_total: o.total_amount,
+      });
+    }
+  }
+
+  // 거래처×입금월별 입금 집계 (matched만)
+  const depositMap = new Map<string, number>();
+  for (const t of transactions) {
+    if (!t.customer_id || t.match_status !== 'matched') continue;
+    const txMonth = t.transaction_date.slice(0, 7);
+    const key = `${t.customer_id}__${txMonth}`;
+    depositMap.set(key, (depositMap.get(key) ?? 0) + t.amount);
+  }
+
+  const result: import('@/types/database').MonthlyReconciliation[] = [];
+  for (const [, s] of salesMap) {
+    const deposit_total = depositMap.get(`${s.customer_id}__${s.month}`) ?? 0;
+    const difference = s.sales_total - deposit_total;
+    const due_date = calcDueDate(s.month, s.settlement_cycle);
+    const is_overdue = difference > 0 && new Date(due_date) < today;
+    const status =
+      difference <= 0 ? '정산완료'
+      : is_overdue ? '연체'
+      : '정산대기';
+
+    result.push({
+      customer_id: s.customer_id,
+      customer_name: s.customer_name,
+      payment_cycle: s.settlement_cycle,
+      month: s.month,
+      due_date,
+      sales_total: s.sales_total,
+      deposit_total,
+      difference,
+      is_overdue,
+      status,
+    });
+  }
+
+  return result.sort(
+    (a, b) =>
+      a.customer_name.localeCompare(b.customer_name) || a.month.localeCompare(b.month),
+  );
+}
+
+/**
+ * 거래처별 미수금 카드 집계.
+ * calcMonthlyReconciliation() 결과를 거래처 단위로 롤업.
+ *
+ * badge 판정:
+ *   위험: overdue_amount > 0 (연체 발생)
+ *   경고: pending_amount > 0 (정산대기, 아직 due_date 미경과)
+ *   정상: 잔액 없음
+ *
+ * 정렬: 위험 → 경고 → 정상, 같은 등급이면 이름순.
+ */
+export function calcReceivableCards(
+  reconciliations: import('@/types/database').MonthlyReconciliation[],
+  lastDepositDates: Map<string, string>, // customer_id → 최근 입금일
+): import('@/types/database').ReceivableCard[] {
+  const cardMap = new Map<string, import('@/types/database').ReceivableCard>();
+
+  for (const r of reconciliations) {
+    if (!cardMap.has(r.customer_id)) {
+      cardMap.set(r.customer_id, {
+        customer_id: r.customer_id,
+        customer_name: r.customer_name,
+        payment_cycle: r.payment_cycle,
+        total_sales: 0,
+        total_deposit: 0,
+        pending_amount: 0,
+        overdue_amount: 0,
+        last_deposit_date: lastDepositDates.get(r.customer_id) ?? null,
+        badge: '정상',
+        monthly_detail: [],
+      });
+    }
+    const card = cardMap.get(r.customer_id)!;
+    card.total_sales += r.sales_total;
+    card.total_deposit += r.deposit_total;
+    if (r.status === '정산대기') card.pending_amount += r.difference;
+    if (r.status === '연체') card.overdue_amount += r.difference;
+    card.monthly_detail.push(r);
+  }
+
+  for (const card of cardMap.values()) {
+    if (card.overdue_amount > 0) card.badge = '위험';
+    else if (card.pending_amount > 0) card.badge = '경고';
+    else card.badge = '정상';
+  }
+
+  const order: Record<string, number> = { 위험: 0, 경고: 1, 정상: 2 };
+  return [...cardMap.values()].sort(
+    (a, b) =>
+      order[a.badge] - order[b.badge] || a.customer_name.localeCompare(b.customer_name),
+  );
+}
