@@ -1475,42 +1475,57 @@ export type Database = {
       }
       tax_invoices: {
         Row: {
-          business_id: string
           company_id: string
           created_at: string
+          customer_group_id: string | null
+          customer_id: string | null
           deleted_at: string | null
-          exported_at: string | null
           id: string
           invoice_month: number
+          invoice_type: string
           invoice_year: number
+          issued_at: string | null
+          memo: string | null
+          payment_type: string
+          status: string
           supply_amount: number
           total_amount: number
           updated_at: string
           vat_amount: number
         }
         Insert: {
-          business_id: string
           company_id: string
           created_at?: string
+          customer_group_id?: string | null
+          customer_id?: string | null
           deleted_at?: string | null
-          exported_at?: string | null
           id?: string
           invoice_month: number
+          invoice_type?: string
           invoice_year: number
+          issued_at?: string | null
+          memo?: string | null
+          payment_type?: string
+          status?: string
           supply_amount: number
           total_amount: number
           updated_at?: string
           vat_amount: number
         }
         Update: {
-          business_id?: string
           company_id?: string
           created_at?: string
+          customer_group_id?: string | null
+          customer_id?: string | null
           deleted_at?: string | null
-          exported_at?: string | null
           id?: string
           invoice_month?: number
+          invoice_type?: string
           invoice_year?: number
+          issued_at?: string | null
+          memo?: string | null
+          payment_type?: string
+          status?: string
           supply_amount?: number
           total_amount?: number
           updated_at?: string
@@ -1518,17 +1533,24 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "tax_invoices_business_id_fkey"
-            columns: ["business_id"]
-            isOneToOne: false
-            referencedRelation: "businesses"
-            referencedColumns: ["id"]
-          },
-          {
             foreignKeyName: "tax_invoices_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tax_invoices_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tax_invoices_customer_group_id_fkey"
+            columns: ["customer_group_id"]
+            isOneToOne: false
+            referencedRelation: "customer_groups"
             referencedColumns: ["id"]
           },
         ]

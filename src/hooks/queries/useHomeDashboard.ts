@@ -416,11 +416,12 @@ interface PoTimelineRow {
 
 interface InvoiceTimelineRow {
   id: string;
-  exported_at: string | null;
+  issued_at: string | null;
   total_amount: number;
   invoice_year: number;
   invoice_month: number;
-  business: { name: string } | null;
+  customer: { name: string } | null;
+  customer_group: { name: string } | null;
 }
 
 interface StockTxTimelineRow {
@@ -509,23 +510,23 @@ async function fetchTimelineInvoices(companyId: string): Promise<TimelineEvent[]
     supabase
       .from('tax_invoices')
       .select(
-        'id, exported_at, total_amount, invoice_year, invoice_month, business:businesses(name)',
+        'id, issued_at, total_amount, invoice_year, invoice_month, customer:customers(name), customer_group:customer_groups(name)',
       )
       .eq('company_id', companyId)
-      .not('exported_at', 'is', null)
+      .not('issued_at', 'is', null)
       .is('deleted_at', null)
-      .order('exported_at', { ascending: false })
+      .order('issued_at', { ascending: false })
       .limit(5),
   );
   return rows
-    .filter((r) => r.exported_at)
+    .filter((r) => r.issued_at)
     .map(
       (r): TimelineEvent => ({
         id: `inv:${r.id}`,
         kind: 'invoice',
-        at: r.exported_at!,
+        at: r.issued_at!,
         title: '세금계산서 발행',
-        desc: `${r.business?.name ?? '—'} — ₩${r.total_amount.toLocaleString('ko-KR')}`,
+        desc: `${r.customer?.name ?? r.customer_group?.name ?? '—'} — ₩${r.total_amount.toLocaleString('ko-KR')}`,
         ref: `TAX-${r.invoice_year}${String(r.invoice_month).padStart(2, '0')}`,
       }),
     );
