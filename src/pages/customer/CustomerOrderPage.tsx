@@ -363,8 +363,6 @@ function CustomerOrderShell({
               display: 'flex',
               flexDirection: 'column',
               gap: 16,
-              height: '100%',
-              minHeight: 0,
             }}
           >
             <NoticePanel fontScale={fontScale} />
@@ -1250,11 +1248,6 @@ function ImportNoticeCard({
         border: '1px solid #E7E5E4',
         borderRadius: 10,
         padding: 16,
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: 0,
-        overflow: 'hidden',
       }}
     >
       {/* 헤더 — 제목 + (페덱스/해상운송 탭의 경우) 도착예정 자유 텍스트 강조 */}
@@ -1494,18 +1487,10 @@ function ProductList({
     grouped.set(cat, arr);
   }
   return (
-    <div
-      style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: 0,
-      }}
-    >
+    <div>
       <div
         style={{
-          flex: 1,
-          minHeight: 0,
+          height: 400,
           overflowY: 'auto',
           border: '1px solid #F3F4F6',
           borderRadius: 6,
