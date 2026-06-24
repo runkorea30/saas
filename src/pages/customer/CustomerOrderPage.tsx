@@ -26,14 +26,32 @@ import type { Json } from '@/types/database';
 
 const ACCEPT_EXT = '.xlsx,.xls,.csv,.jpg,.jpeg,.png,.pdf';
 
+/**
+ * 직송 정보 테이블의 사용자 입력 7컬럼.
+ * - 표시 컬럼 9개 중 마지막 2개(거래처/신용) 는 자동값(고정) 이므로 state 미포함.
+ *   · 거래처 → 로그인 거래처명 (customer.customerName)
+ *   · 신용 → 항상 '신용'
+ */
 interface ShippingRow {
-  name: string;
-  zipcode: string;
-  address: string;
-  phone1: string;
-  phone2: string;
-  memo: string;
+  name: string;      // 받는사람
+  zipcode: string;   // 우편번호
+  address: string;   // 주소
+  phone1: string;    // 연락처1
+  phone2: string;    // 연락처2
+  blank: string;     // 빈칸 (헤더 무라벨, 사용자 자유 입력)
+  product: string;   // 제품
 }
+
+/** 엑셀 붙여넣기 매핑용 컬럼 키 순서. 거래처/신용 은 자동값이라 제외. */
+const SHIPPING_COLS: ReadonlyArray<keyof ShippingRow> = [
+  'name',
+  'zipcode',
+  'address',
+  'phone1',
+  'phone2',
+  'blank',
+  'product',
+];
 
 const emptyShipping = (): ShippingRow => ({
   name: '',
@@ -41,8 +59,11 @@ const emptyShipping = (): ShippingRow => ({
   address: '',
   phone1: '',
   phone2: '',
-  memo: '',
+  blank: '',
+  product: '',
 });
+
+const CREDIT_LABEL = '신용';
 
 // ───────────────────────────────────────────────────────────
 // 주문 내역 데이터 모델
@@ -408,15 +429,8 @@ function LeftPanel({
    * - 단일 셀(텍스트에 탭/줄바꿈 없음) 이면 기본 paste 허용 → preventDefault 하지 않음.
    * - 다중 셀이면 \n 으로 행, \t 으로 컬럼 분리해 (rowIndex+ri, colIndex+ci) 위치에 채움.
    * - 부족한 행은 emptyShipping 으로 자동 확장.
+   * - 거래처/신용 컬럼(SHIPPING_COLS 길이 초과 인덱스) 은 자동값이라 덮어쓰지 않음.
    */
-  const SHIPPING_KEYS: ReadonlyArray<keyof ShippingRow> = [
-    'name',
-    'zipcode',
-    'address',
-    'phone1',
-    'phone2',
-    'memo',
-  ];
   const handleShippingPaste =
     (rowIndex: number, colIndex: number) =>
     (e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -439,8 +453,8 @@ function LeftPanel({
           const target = { ...next[ti] };
           cols.forEach((val, ci) => {
             const keyIdx = colIndex + ci;
-            if (keyIdx < SHIPPING_KEYS.length) {
-              target[SHIPPING_KEYS[keyIdx]] = val.trim();
+            if (keyIdx < SHIPPING_COLS.length) {
+              target[SHIPPING_COLS[keyIdx]] = val.trim();
             }
           });
           next[ti] = target;
@@ -456,9 +470,13 @@ function LeftPanel({
     }
     setSending(true);
     try {
-      const filledShipping = shipping.filter(
-        (s) => s.name || s.address || s.phone1,
-      );
+      const filledShipping = shipping
+        .filter((s) => s.name || s.address || s.phone1 || s.product)
+        .map((s) => ({
+          ...s,
+          customer: customer.customerName,
+          credit: CREDIT_LABEL,
+        }));
       const { error } = await supabase.from('customer_order_uploads').insert({
         company_id: customer.companyId,
         customer_id: customer.customerId,
@@ -630,7 +648,10 @@ function LeftPanel({
                 <ShipTh>주소</ShipTh>
                 <ShipTh>연락처1</ShipTh>
                 <ShipTh>연락처2</ShipTh>
-                <ShipTh>비고</ShipTh>
+                <ShipTh />
+                <ShipTh>제품</ShipTh>
+                <ShipTh>거래처</ShipTh>
+                <ShipTh>신용</ShipTh>
                 <ShipTh width={36} />
               </tr>
             </thead>
@@ -674,10 +695,23 @@ function LeftPanel({
                   </ShipTd>
                   <ShipTd>
                     <CellInput
-                      value={row.memo}
-                      onChange={(v) => updateShipping(i, 'memo', v)}
+                      value={row.blank}
+                      onChange={(v) => updateShipping(i, 'blank', v)}
                       onPaste={handleShippingPaste(i, 5)}
                     />
+                  </ShipTd>
+                  <ShipTd>
+                    <CellInput
+                      value={row.product}
+                      onChange={(v) => updateShipping(i, 'product', v)}
+                      onPaste={handleShippingPaste(i, 6)}
+                    />
+                  </ShipTd>
+                  <ShipTd>
+                    <ReadOnlyCell value={customer.customerName} />
+                  </ShipTd>
+                  <ShipTd>
+                    <ReadOnlyCell value={CREDIT_LABEL} />
                   </ShipTd>
                   <ShipTd width={36}>
                     <button
@@ -1422,6 +1456,32 @@ function CellInput({
         background: '#FFFFFF',
       }}
     />
+  );
+}
+
+/** 직송 테이블의 자동값 셀 (거래처 / 신용). 편집 불가, 회색 배경. */
+function ReadOnlyCell({ value }: { value: string }) {
+  return (
+    <div
+      title={value}
+      style={{
+        width: '100%',
+        height: 28,
+        padding: '0 6px',
+        fontSize: 12,
+        border: '1px solid #E7E5E4',
+        borderRadius: 4,
+        background: '#F5F5F4',
+        color: '#57534E',
+        display: 'flex',
+        alignItems: 'center',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+      }}
+    >
+      {value}
+    </div>
   );
 }
 
