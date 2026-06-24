@@ -20,6 +20,7 @@ import {
 import {
   parseInvoicePDF,
   type InvoiceParsed,
+  type InvoiceParsedRow,
 } from '@/utils/invoiceParser';
 import type { ImportRowInput, ImportInvoiceHeader } from '@/types/import';
 
@@ -33,27 +34,44 @@ function normalizeCode(code: string | number | null | undefined): string {
 // ───── 비교 결과 타입 ─────
 
 export type CompareStatus =
-  | 'match'
-  | 'qty_diff'
-  | 'invoice_only'
-  | 'backorder';
+  | 'match'         // 일치 — 코드·수량·단가 모두 동일
+  | 'qty_diff'      // 수량불일치 — 코드는 같은데 수량 다름
+  | 'amount_diff'   // 금액불일치 — 코드·수량 같지만 단가 다름
+  | 'order_only'    // 주문서만 — 주문 있고 인보이스에 없음 (구 backorder)
+  | 'invoice_only'  // 인보이스만 — 주문은 없고 인보이스만 존재
+  | 'unknown';      // 미확인 — OPS products 에 등록되지 않은 코드
 
 interface ComparisonRow {
+  id: string; // 안정적 React key + 편집 핸들러 식별자 (코드 변경되어도 유지)
   code: string;
+  originalCode: string; // 파싱 직후 원본 코드 (편집 감지용)
   description: string;
   unit: 'DZ' | 'EA';
-  orderQty: number; // 0 = 주문서에 없음
-  invoiceQty: number; // 0 = 인보이스에 없거나 BO
-  originalInvoiceQty: number; // 파싱 직후의 원본 인보이스 수량 (편집 비교용)
-  price: number; // 인보이스 단가 (있으면) > 주문서 단가
-  amount: number; // 인보이스 금액 (있으면) > 주문서 금액
+  orderQty: number;
+  invoiceQty: number;
+  originalInvoiceQty: number; // 현재 매칭 기준 원본 수량 (재매칭 시 리셋)
+  orderPrice?: number;   // 주문서 단가 (없으면 undefined → 금액 비교 스킵)
+  invoicePrice: number;  // 인보이스 단가
+  amount: number;        // 인보이스 금액 (totalUsd 채움 용도)
+  isInOps: boolean;      // OPS products 에 코드가 존재하는지
   status: CompareStatus;
 }
 
-function recomputeStatus(orderQty: number, invoiceQty: number): CompareStatus {
-  if (invoiceQty === 0 && orderQty > 0) return 'backorder';
-  if (orderQty === 0) return 'invoice_only';
-  return invoiceQty === orderQty ? 'match' : 'qty_diff';
+function calcStatus(
+  orderQty: number,
+  invoiceQty: number,
+  invoicePrice: number,
+  orderPrice: number | undefined,
+  isInOps: boolean,
+): CompareStatus {
+  if (!isInOps) return 'unknown';
+  if (orderQty === 0 && invoiceQty > 0) return 'invoice_only';
+  if (invoiceQty === 0 && orderQty > 0) return 'order_only';
+  if (orderQty !== invoiceQty) return 'qty_diff';
+  if (orderPrice !== undefined && Math.abs(invoicePrice - orderPrice) > 0.01) {
+    return 'amount_diff';
+  }
+  return 'match';
 }
 
 // ───── Props ─────
@@ -66,16 +84,19 @@ interface Props {
   products?: ReadonlyArray<{ code: string; name: string }>;
 }
 
-type Tab = 'all' | 'diff' | 'backorder';
+type Tab = 'all' | CompareStatus;
 
+// '금액불일치' 는 테마 토큰에 별도 orange 가 없어 hex 직접 지정 (amber 와 구분).
 const STATUS_META: Record<
   CompareStatus,
   { label: string; color: string; bg: string }
 > = {
-  match:        { label: '일치',        color: 'var(--success)', bg: 'var(--success-wash)' },
-  qty_diff:     { label: '수량차이',    color: 'var(--warning)', bg: 'var(--warning-wash)' },
-  invoice_only: { label: '인보이스에만', color: 'var(--info)',    bg: 'var(--info-wash)' },
-  backorder:    { label: '백오더',      color: 'var(--danger)',  bg: 'var(--danger-wash)' },
+  match:        { label: '일치',       color: 'var(--success)', bg: 'var(--success-wash)' },
+  qty_diff:     { label: '수량불일치', color: 'var(--warning)', bg: 'var(--warning-wash)' },
+  amount_diff:  { label: '금액불일치', color: '#C8590E',         bg: '#FAE3D2' },
+  order_only:   { label: '주문서만',   color: 'var(--danger)',  bg: 'var(--danger-wash)' },
+  invoice_only: { label: '인보이스만', color: 'var(--info)',    bg: 'var(--info-wash)' },
+  unknown:      { label: '미확인',     color: 'var(--ink-3)',   bg: 'var(--surface-2)' },
 };
 
 // ───────────────────────────────────────────────────────────
@@ -87,6 +108,10 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [comparison, setComparison] = useState<{
     rows: ComparisonRow[];
+    /** 원본 주문서 행 — 코드 편집 시 재매칭 소스. */
+    orderRows: OrderSheetRow[];
+    /** 원본 인보이스 행 — 코드 편집 시 재매칭 소스. */
+    invoiceRows: InvoiceParsedRow[];
     invoiceNo: string;
     invoiceDate: string;
   } | null>(null);
@@ -117,6 +142,8 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
       const rows = compareOrderInvoice(orderRows, invoice, productNameByCode);
       setComparison({
         rows,
+        orderRows,
+        invoiceRows: invoice.rows,
         invoiceNo: invoice.invoice_no,
         invoiceDate: invoice.invoice_date,
       });
@@ -130,27 +157,115 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
 
   const counts = useMemo(() => {
     const rows = comparison?.rows ?? [];
-    let diff = 0;
-    let bo = 0;
-    let edited = 0;
+    const c: Record<CompareStatus, number> & { all: number; edited: number } = {
+      all: rows.length,
+      edited: 0,
+      match: 0,
+      qty_diff: 0,
+      amount_diff: 0,
+      order_only: 0,
+      invoice_only: 0,
+      unknown: 0,
+    };
     for (const r of rows) {
-      if (r.status === 'qty_diff' || r.status === 'invoice_only') diff++;
-      if (r.status === 'backorder') bo++;
-      if (r.invoiceQty !== r.originalInvoiceQty) edited++;
+      c[r.status]++;
+      if (r.invoiceQty !== r.originalInvoiceQty || r.code !== r.originalCode) {
+        c.edited++;
+      }
     }
-    return { all: rows.length, diff, bo, edited };
+    return c;
   }, [comparison]);
 
-  const handleQtyChange = (code: string, newQty: number) => {
+  const handleQtyChange = (rowId: string, newQty: number) => {
     setComparison((prev) => {
       if (!prev) return prev;
       const safeQty = Number.isFinite(newQty) ? Math.max(0, Math.floor(newQty)) : 0;
       const nextRows = prev.rows.map((row) => {
-        if (row.code !== code) return row;
+        if (row.id !== rowId) return row;
         return {
           ...row,
           invoiceQty: safeQty,
-          status: recomputeStatus(row.orderQty, safeQty),
+          status: calcStatus(
+            row.orderQty,
+            safeQty,
+            row.invoicePrice,
+            row.orderPrice,
+            row.isInOps,
+          ),
+        };
+      });
+      return { ...prev, rows: nextRows };
+    });
+  };
+
+  // 코드 셀 입력 변경 — 화면 표시만 즉시 반영 (재매칭은 blur 에서).
+  const handleCodeChange = (rowId: string, rawCode: string) => {
+    setComparison((prev) => {
+      if (!prev) return prev;
+      const nextRows = prev.rows.map((row) =>
+        row.id === rowId ? { ...row, code: rawCode } : row,
+      );
+      return { ...prev, rows: nextRows };
+    });
+  };
+
+  // 코드 셀 blur — 새 코드로 OPS / 주문서 / 인보이스 재매칭 후 상태 재계산.
+  const handleCodeBlur = (rowId: string, rawNewCode: string) => {
+    setComparison((prev) => {
+      if (!prev) return prev;
+      const nextRows = prev.rows.map((row) => {
+        if (row.id !== rowId) return row;
+        const newCode = rawNewCode.trim();
+        const normNew = normalizeCode(newCode);
+        const normCur = normalizeCode(row.code);
+
+        // 정규화 형태가 동일하면 재매칭 스킵 (사용자 수량 편집 보존).
+        if (normNew === normCur) {
+          return newCode !== row.code ? { ...row, code: newCode } : row;
+        }
+
+        const matchedOrder = prev.orderRows.find(
+          (r) => normalizeCode(r.code) === normNew,
+        );
+        const matchedInvoice = prev.invoiceRows.find(
+          (r) => normalizeCode(r.item_code) === normNew,
+        );
+        const opsName = productNameByCode.get(normNew);
+        const isInOps = opsName !== undefined;
+
+        const newOrderQty = matchedOrder?.qty ?? 0;
+        const newOrderPrice = matchedOrder?.price;
+        const newInvoiceQty = matchedInvoice?.qty_shipped ?? 0;
+        const newInvoicePrice = matchedInvoice?.price ?? 0;
+        const newAmount = matchedInvoice?.amount ?? 0;
+        const newUnit = (matchedOrder?.unit ??
+          matchedInvoice?.unit ??
+          row.unit) as 'DZ' | 'EA';
+        const newDesc =
+          opsName ||
+          matchedInvoice?.description ||
+          matchedOrder?.description ||
+          '';
+
+        return {
+          ...row,
+          code: newCode,
+          description: newDesc,
+          unit: newUnit,
+          orderQty: newOrderQty,
+          invoiceQty: newInvoiceQty,
+          originalInvoiceQty: newInvoiceQty, // 새 매칭 기준 baseline 으로 리셋
+          orderPrice: newOrderPrice,
+          invoicePrice: newInvoicePrice,
+          amount: newAmount,
+          isInOps,
+          status: calcStatus(
+            newOrderQty,
+            newInvoiceQty,
+            newInvoicePrice,
+            newOrderPrice,
+            isInOps,
+          ),
         };
       });
       return { ...prev, rows: nextRows };
@@ -160,19 +275,14 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
   const visibleRows = useMemo(() => {
     if (!comparison) return [];
     if (tab === 'all') return comparison.rows;
-    if (tab === 'backorder')
-      return comparison.rows.filter((r) => r.status === 'backorder');
-    // 차이있음 = qty_diff + invoice_only
-    return comparison.rows.filter(
-      (r) => r.status === 'qty_diff' || r.status === 'invoice_only',
-    );
+    return comparison.rows.filter((r) => r.status === tab);
   }, [comparison, tab]);
 
   const handleFill = () => {
     if (!comparison) return;
-    // BO 제외 — 실제로 입고할 수 있는 행만.
+    // '주문서만' 행 제외 — 실제로 입고할 수 있는 행만.
     const fillable = comparison.rows.filter(
-      (r) => r.status !== 'backorder' && r.invoiceQty > 0,
+      (r) => r.status !== 'order_only' && r.invoiceQty > 0,
     );
     const rows: ImportRowInput[] = fillable.map((r) => ({
       id: makeId(),
@@ -321,16 +431,32 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
               label={`전체 ${counts.all}`}
             />
             <TabButton
-              active={tab === 'diff'}
-              onClick={() => setTab('diff')}
-              label={`차이있음 ${counts.diff}`}
+              active={tab === 'qty_diff'}
+              onClick={() => setTab('qty_diff')}
+              label={`수량불일치 ${counts.qty_diff}`}
               tone="warning"
             />
             <TabButton
-              active={tab === 'backorder'}
-              onClick={() => setTab('backorder')}
-              label={`백오더 ${counts.bo}`}
+              active={tab === 'amount_diff'}
+              onClick={() => setTab('amount_diff')}
+              label={`금액불일치 ${counts.amount_diff}`}
+              tone="warning"
+            />
+            <TabButton
+              active={tab === 'order_only'}
+              onClick={() => setTab('order_only')}
+              label={`주문서만 ${counts.order_only}`}
               tone="danger"
+            />
+            <TabButton
+              active={tab === 'invoice_only'}
+              onClick={() => setTab('invoice_only')}
+              label={`인보이스만 ${counts.invoice_only}`}
+            />
+            <TabButton
+              active={tab === 'unknown'}
+              onClick={() => setTab('unknown')}
+              label={`미확인 ${counts.unknown}`}
             />
             {counts.edited > 0 && (
               <span
@@ -402,10 +528,13 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                         : diff > 0
                           ? 'var(--success)'
                           : 'var(--danger)';
-                    const edited = r.invoiceQty !== r.originalInvoiceQty;
+                    const qtyEdited = r.invoiceQty !== r.originalInvoiceQty;
+                    const codeEdited =
+                      normalizeCode(r.code) !== normalizeCode(r.originalCode);
+                    const rowEdited = qtyEdited || codeEdited;
                     return (
                       <div
-                        key={r.code}
+                        key={r.id}
                         style={{
                           display: 'grid',
                           gridTemplateColumns:
@@ -416,12 +545,35 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                           fontSize: 12.5,
                           alignItems: 'center',
                           minWidth: 760,
-                          background: edited ? 'var(--warning-wash)' : undefined,
+                          background: rowEdited ? 'var(--warning-wash)' : undefined,
                         }}
                       >
-                        <span className="num" style={{ color: 'var(--ink-2)' }}>
-                          {r.code}
-                        </span>
+                        <input
+                          type="text"
+                          value={r.code}
+                          onChange={(e) =>
+                            handleCodeChange(r.id, e.target.value)
+                          }
+                          onBlur={(e) => handleCodeBlur(r.id, e.target.value)}
+                          onFocus={(e) => e.currentTarget.select()}
+                          title={
+                            codeEdited
+                              ? `원본 코드: ${r.originalCode}`
+                              : undefined
+                          }
+                          className="num"
+                          style={{
+                            width: '100%',
+                            height: 24,
+                            padding: '0 4px',
+                            border: 'none',
+                            borderBottom: `1px ${codeEdited ? 'solid' : 'dashed'} ${codeEdited ? 'var(--warning)' : 'var(--line)'}`,
+                            background: 'transparent',
+                            color: 'var(--ink-2)',
+                            fontSize: 12.5,
+                            outline: 'none',
+                          }}
+                        />
                         <span
                           style={{
                             color: 'var(--ink)',
@@ -455,11 +607,11 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                             step={1}
                             value={r.invoiceQty}
                             onChange={(e) =>
-                              handleQtyChange(r.code, Number(e.target.value))
+                              handleQtyChange(r.id, Number(e.target.value))
                             }
                             onFocus={(e) => e.currentTarget.select()}
                             title={
-                              edited
+                              qtyEdited
                                 ? `원본: ${r.originalInvoiceQty.toLocaleString('ko-KR')}`
                                 : undefined
                             }
@@ -469,7 +621,7 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                               height: 26,
                               padding: '0 6px',
                               textAlign: 'right',
-                              border: `1px solid ${edited ? 'var(--warning)' : 'var(--line)'}`,
+                              border: `1px solid ${qtyEdited ? 'var(--warning)' : 'var(--line)'}`,
                               borderRadius: 4,
                               background: 'var(--surface)',
                               color: 'var(--ink)',
@@ -529,7 +681,7 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
               onClick={handleFill}
               disabled={
                 comparison.rows.filter(
-                  (r) => r.status !== 'backorder' && r.invoiceQty > 0,
+                  (r) => r.status !== 'order_only' && r.invoiceQty > 0,
                 ).length === 0
               }
               style={{ height: 32, fontSize: 12.5 }}
@@ -537,7 +689,7 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
               기존 입력 폼에 채우기 (
               {
                 comparison.rows.filter(
-                  (r) => r.status !== 'backorder' && r.invoiceQty > 0,
+                  (r) => r.status !== 'order_only' && r.invoiceQty > 0,
                 ).length
               }
               건)
@@ -724,49 +876,28 @@ function compareOrderInvoice(
 
     // OPS 한글 제품명 우선, 없으면 인보이스/주문서 영문명.
     const opsName = productNameByCode.get(normInv);
+    const isInOps = opsName !== undefined;
     const desc = opsName || inv.description || ord?.description || '';
 
-    if (inv.qty_shipped === 0) {
-      // BO — 주문 있었지만 출하 0 (또는 정보용)
-      out.push({
-        code: inv.item_code,
-        description: desc,
-        unit: (ord?.unit ?? inv.unit) as 'DZ' | 'EA',
-        orderQty: ord?.qty ?? 0,
-        invoiceQty: 0,
-        originalInvoiceQty: 0,
-        price: inv.price || ord?.price || 0,
-        amount: inv.amount,
-        status: 'backorder',
-      });
-      continue;
-    }
-
-    if (!ord) {
-      out.push({
-        code: inv.item_code,
-        description: desc,
-        unit: inv.unit,
-        orderQty: 0,
-        invoiceQty: inv.qty_shipped,
-        originalInvoiceQty: inv.qty_shipped,
-        price: inv.price,
-        amount: inv.amount,
-        status: 'invoice_only',
-      });
-      continue;
-    }
+    const orderQty = ord?.qty ?? 0;
+    const orderPrice = ord?.price;
+    const invoiceQty = inv.qty_shipped;
+    const invoicePrice = inv.price || ord?.price || 0;
 
     out.push({
+      id: makeId(),
       code: inv.item_code,
+      originalCode: inv.item_code,
       description: desc,
-      unit: ord.unit,
-      orderQty: ord.qty,
-      invoiceQty: inv.qty_shipped,
-      originalInvoiceQty: inv.qty_shipped,
-      price: inv.price || ord.price,
+      unit: (ord?.unit ?? inv.unit) as 'DZ' | 'EA',
+      orderQty,
+      invoiceQty,
+      originalInvoiceQty: invoiceQty,
+      orderPrice,
+      invoicePrice,
       amount: inv.amount,
-      status: ord.qty === inv.qty_shipped ? 'match' : 'qty_diff',
+      isInOps,
+      status: calcStatus(orderQty, invoiceQty, invoicePrice, orderPrice, isInOps),
     });
   }
 
@@ -775,25 +906,33 @@ function compareOrderInvoice(
     const normOrd = normalizeCode(ord.code);
     if (seen.has(normOrd)) continue;
     const opsName = productNameByCode.get(normOrd);
+    const isInOps = opsName !== undefined;
     out.push({
+      id: makeId(),
       code: ord.code,
+      originalCode: ord.code,
       description: opsName || ord.description,
       unit: ord.unit,
       orderQty: ord.qty,
       invoiceQty: 0,
       originalInvoiceQty: 0,
-      price: ord.price,
+      orderPrice: ord.price,
+      invoicePrice: 0,
       amount: 0,
-      status: 'backorder',
+      isInOps,
+      status: calcStatus(ord.qty, 0, 0, ord.price, isInOps),
     });
   }
 
-  // 정렬: 상태별 → 코드 오름차순
+  // 정렬: 상태 중요도 → 코드 오름차순
+  // (수량불일치 → 금액불일치 → 주문서만 → 인보이스만 → 미확인 → 일치)
   const STATUS_ORDER: Record<CompareStatus, number> = {
     qty_diff: 0,
-    backorder: 1,
-    invoice_only: 2,
-    match: 3,
+    amount_diff: 1,
+    order_only: 2,
+    invoice_only: 3,
+    unknown: 4,
+    match: 5,
   };
   out.sort((a, b) => {
     const so = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
