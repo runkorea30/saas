@@ -309,8 +309,12 @@ export type Database = {
           created_at: string
           deleted_at: string | null
           id: string
+          import_notice_arrival_text: string | null
+          import_notice_customs_date: string | null
           import_notice_date: string | null
+          import_notice_order_date: string | null
           import_notice_products: Json
+          import_notice_ship_date: string | null
           import_notice_status: string | null
           industry: string | null
           name: string
@@ -323,8 +327,12 @@ export type Database = {
           created_at?: string
           deleted_at?: string | null
           id?: string
+          import_notice_arrival_text?: string | null
+          import_notice_customs_date?: string | null
           import_notice_date?: string | null
+          import_notice_order_date?: string | null
           import_notice_products?: Json
+          import_notice_ship_date?: string | null
           import_notice_status?: string | null
           industry?: string | null
           name: string
@@ -337,8 +345,12 @@ export type Database = {
           created_at?: string
           deleted_at?: string | null
           id?: string
+          import_notice_arrival_text?: string | null
+          import_notice_customs_date?: string | null
           import_notice_date?: string | null
+          import_notice_order_date?: string | null
           import_notice_products?: Json
+          import_notice_ship_date?: string | null
           import_notice_status?: string | null
           industry?: string | null
           name?: string

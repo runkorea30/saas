@@ -36,12 +36,18 @@ export interface Company {
   import_notice_status: ImportNoticeStatus | null;
   import_notice_date: string | null;
   import_notice_products: ImportNoticeProduct[];
+  import_notice_order_date: string | null;
+  import_notice_ship_date: string | null;
+  import_notice_customs_date: string | null;
+  import_notice_arrival_text: string | null;
 }
 
 async function fetchFirstCompany() {
   return supabase
     .from('companies')
-    .select('id, name, import_notice_status, import_notice_date, import_notice_products')
+    .select(
+      'id, name, import_notice_status, import_notice_date, import_notice_products, import_notice_order_date, import_notice_ship_date, import_notice_customs_date, import_notice_arrival_text',
+    )
     .is('deleted_at', null)
     .order('created_at', { ascending: true })
     .limit(1)
@@ -64,6 +70,10 @@ function normalizeCompany(row: CompanyRow | null): Company | null {
     import_notice_status: (row.import_notice_status as ImportNoticeStatus | null) ?? null,
     import_notice_date: row.import_notice_date ?? null,
     import_notice_products: products,
+    import_notice_order_date: row.import_notice_order_date ?? null,
+    import_notice_ship_date: row.import_notice_ship_date ?? null,
+    import_notice_customs_date: row.import_notice_customs_date ?? null,
+    import_notice_arrival_text: row.import_notice_arrival_text ?? null,
   };
 }
 

@@ -1054,10 +1054,19 @@ function NoticePanel({ fontScale }: { fontScale: number }) {
 const IMPORT_NOTICE_STEPS = ['주문완료', '운송중', '통관진행중', '도착예정'] as const;
 type ImportNoticeStep = (typeof IMPORT_NOTICE_STEPS)[number];
 
+interface ImportNoticeProduct {
+  code: string;
+  name: string;
+  category: string | null;
+}
+
 interface ImportNoticeData {
   status: ImportNoticeStep | null;
-  date: string | null;
-  products: { code: string; name: string }[];
+  products: ImportNoticeProduct[];
+  orderDate: string | null;
+  shipDate: string | null;
+  customsDate: string | null;
+  arrivalText: string | null;
 }
 
 function ImportNoticeCard({
@@ -1073,14 +1082,15 @@ function ImportNoticeCard({
       const { data, error } = await supabase
         .from('companies')
         .select(
-          'import_notice_status, import_notice_date, import_notice_products',
+          'import_notice_status, import_notice_products, import_notice_order_date, import_notice_ship_date, import_notice_customs_date, import_notice_arrival_text',
         )
         .eq('id', companyId)
         .maybeSingle();
       if (error) throw error;
       if (!data) return null;
+
       const rawProducts = data.import_notice_products;
-      const products = Array.isArray(rawProducts)
+      const baseProducts = Array.isArray(rawProducts)
         ? (rawProducts as unknown as { code?: unknown; name?: unknown }[])
             .filter(
               (p): p is { code: string; name: string } =>
@@ -1091,13 +1101,39 @@ function ImportNoticeCard({
             )
             .map((p) => ({ code: p.code, name: p.name }))
         : [];
+
+      // 카테고리 보강 — 필요한 코드만 조회해서 페이로드 최소화.
+      let products: ImportNoticeProduct[] = baseProducts.map((p) => ({
+        ...p,
+        category: null,
+      }));
+      if (baseProducts.length > 0) {
+        const codes = Array.from(new Set(baseProducts.map((p) => p.code)));
+        const { data: productRows } = await supabase
+          .from('products')
+          .select('code, category')
+          .eq('company_id', companyId)
+          .in('code', codes);
+        const catByCode = new Map<string, string | null>();
+        for (const row of productRows ?? []) {
+          catByCode.set(row.code, row.category ?? null);
+        }
+        products = baseProducts.map((p) => ({
+          ...p,
+          category: catByCode.get(p.code) ?? null,
+        }));
+      }
+
       const status = data.import_notice_status as ImportNoticeStep | null;
       return {
         status: IMPORT_NOTICE_STEPS.includes(status as ImportNoticeStep)
           ? status
           : null,
-        date: data.import_notice_date ?? null,
         products,
+        orderDate: data.import_notice_order_date ?? null,
+        shipDate: data.import_notice_ship_date ?? null,
+        customsDate: data.import_notice_customs_date ?? null,
+        arrivalText: data.import_notice_arrival_text ?? null,
       };
     },
     staleTime: 60_000,
@@ -1105,11 +1141,74 @@ function ImportNoticeCard({
 
   if (!notice || !notice.status) return null;
   const currentIdx = IMPORT_NOTICE_STEPS.indexOf(notice.status);
-  const baseFont = 12 * fontScale;
+  const baseFont = 11 * fontScale;
+
+  const stepDates: Array<string | null> = [
+    notice.orderDate,
+    notice.shipDate,
+    notice.customsDate,
+    null,
+  ];
+
+  // 카테고리 → 코드 정렬, 그리고 카테고리별 그룹.
+  const sortedProducts = [...notice.products].sort((a, b) => {
+    const catA = a.category ?? '기타';
+    const catB = b.category ?? '기타';
+    const catCmp = catA.localeCompare(catB, 'ko');
+    if (catCmp !== 0) return catCmp;
+    return a.code.localeCompare(b.code);
+  });
+  const grouped = new Map<string, ImportNoticeProduct[]>();
+  for (const p of sortedProducts) {
+    const cat = p.category ?? '기타';
+    const arr = grouped.get(cat) ?? [];
+    arr.push(p);
+    grouped.set(cat, arr);
+  }
 
   return (
-    <Card title="🚢 수입 예정 제품 안내">
-      {/* 진행 스텝퍼 */}
+    <section
+      style={{
+        background: '#FFFFFF',
+        border: '1px solid #E7E5E4',
+        borderRadius: 10,
+        padding: 16,
+      }}
+    >
+      {/* 헤더 — 제목 + 도착예정 자유 텍스트 강조 */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 10,
+          flexWrap: 'wrap',
+          marginBottom: 14,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: '#1C1917',
+            flexShrink: 0,
+          }}
+        >
+          🚢 수입 예정 제품 안내
+        </span>
+        {notice.arrivalText && (
+          <span
+            style={{
+              fontSize: 15,
+              fontWeight: 700,
+              color: '#2563EB',
+            }}
+          >
+            {notice.arrivalText}
+          </span>
+        )}
+      </div>
+
+      {/* 진행 스텝퍼 (날짜 텍스트 포함) */}
       <div
         style={{
           display: 'flex',
@@ -1120,15 +1219,12 @@ function ImportNoticeCard({
       >
         {IMPORT_NOTICE_STEPS.map((s, i) => {
           const isCurrent = i === currentIdx;
-          const isDone = i < currentIdx;
-          const reached = isCurrent || isDone;
+          const isDone = i <= currentIdx;
+          const reached = isDone;
           const bg = reached ? '#2563EB' : '#F5F5F4';
           const fg = reached ? '#FFFFFF' : '#9CA3AF';
           const border = reached ? '#2563EB' : '#D6D3D1';
-          const label =
-            s === '도착예정' && notice.date
-              ? `${formatKoreanShortDate(notice.date)} 도착예정`
-              : s;
+          const dateText = isDone ? stepDates[i] : null;
           return (
             <div
               key={s}
@@ -1144,7 +1240,7 @@ function ImportNoticeCard({
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
-                  minWidth: 0,
+                  minWidth: 64,
                 }}
               >
                 <div
@@ -1160,10 +1256,10 @@ function ImportNoticeCard({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    opacity: isDone ? 0.7 : 1,
+                    opacity: isDone && !isCurrent ? 0.55 : 1,
                   }}
                 >
-                  {isDone ? '✓' : i + 1}
+                  {isDone && !isCurrent ? '✓' : i + 1}
                 </div>
                 <span
                   style={{
@@ -1175,8 +1271,21 @@ function ImportNoticeCard({
                     textAlign: 'center',
                   }}
                 >
-                  {label}
+                  {s}
                 </span>
+                {dateText && (
+                  <span
+                    style={{
+                      fontSize: 9,
+                      marginTop: 2,
+                      color: '#9CA3AF',
+                      whiteSpace: 'nowrap',
+                      textAlign: 'center',
+                    }}
+                  >
+                    {dateText}
+                  </span>
+                )}
               </div>
               {i < IMPORT_NOTICE_STEPS.length - 1 && (
                 <div
@@ -1187,7 +1296,7 @@ function ImportNoticeCard({
                     marginLeft: 4,
                     marginRight: 4,
                     background: i < currentIdx ? '#2563EB' : '#E5E7EB',
-                    opacity: i < currentIdx ? 0.6 : 1,
+                    opacity: i < currentIdx ? 0.55 : 1,
                   }}
                 />
               )}
@@ -1196,8 +1305,8 @@ function ImportNoticeCard({
         })}
       </div>
 
-      {/* 제품 목록 */}
-      {notice.products.length > 0 && (
+      {/* 제품 목록 — 카테고리 그룹 + 스크롤 (최대 280px) */}
+      {sortedProducts.length > 0 && (
         <div>
           <div
             style={{
@@ -1209,43 +1318,64 @@ function ImportNoticeCard({
           >
             입고 예정 제품
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {notice.products.map((p, idx) => (
-              <div
-                key={p.code}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: baseFont,
-                  padding: '5px 0',
-                  borderTop: idx === 0 ? 'none' : '1px solid #F3F4F6',
-                }}
-              >
-                <span
+          <div
+            style={{
+              maxHeight: 280,
+              overflowY: 'auto',
+              border: '1px solid #F3F4F6',
+              borderRadius: 6,
+            }}
+          >
+            {Array.from(grouped.entries()).map(([cat, items]) => (
+              <div key={cat}>
+                <div
                   style={{
-                    fontFamily: 'var(--font-num)',
+                    position: 'sticky',
+                    top: 0,
+                    background: '#FAFAF9',
+                    padding: '4px 8px',
+                    fontSize: 10,
+                    fontWeight: 600,
                     color: '#6B7280',
-                    width: 80,
-                    flexShrink: 0,
+                    letterSpacing: '0.05em',
+                    textTransform: 'uppercase',
+                    borderBottom: '1px solid #E5E7EB',
                   }}
                 >
-                  {p.code}
-                </span>
-                <span style={{ color: '#1F2937' }}>{p.name}</span>
+                  {cat}
+                </div>
+                {items.map((p, idx) => (
+                  <div
+                    key={p.code}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontSize: baseFont,
+                      padding: '5px 8px',
+                      borderTop: idx === 0 ? 'none' : '1px solid #F3F4F6',
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: 'var(--font-num)',
+                        color: '#6B7280',
+                        width: 84,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {p.code}
+                    </span>
+                    <span style={{ color: '#1F2937' }}>{p.name}</span>
+                  </div>
+                ))}
               </div>
             ))}
           </div>
         </div>
       )}
-    </Card>
+    </section>
   );
-}
-
-function formatKoreanShortDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return `${d.getMonth() + 1}월 ${d.getDate()}일`;
 }
 
 // ───────────────────────────────────────────────────────────

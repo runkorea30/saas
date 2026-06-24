@@ -105,6 +105,11 @@ export function ImportReceivingPage() {
   const [noticeProductInput, setNoticeProductInput] = useState('');
   const [noticeSaving, setNoticeSaving] = useState(false);
   const [noticeParsingPdf, setNoticeParsingPdf] = useState(false);
+  // 상태별 자유 텍스트 — 거래처 포털 카드 스텝퍼 아래/헤더에 그대로 노출됨.
+  const [noticeOrderDate, setNoticeOrderDate] = useState('');
+  const [noticeShipDate, setNoticeShipDate] = useState('');
+  const [noticeCustomsDate, setNoticeCustomsDate] = useState('');
+  const [noticeArrivalText, setNoticeArrivalText] = useState('');
 
   // company 로드/갱신 시 폼 초기값 동기화.
   useEffect(() => {
@@ -112,6 +117,10 @@ export function ImportReceivingPage() {
     setNoticeStatus(company.import_notice_status ?? '');
     setNoticeDate(company.import_notice_date ?? '');
     setNoticeProducts(company.import_notice_products ?? []);
+    setNoticeOrderDate(company.import_notice_order_date ?? '');
+    setNoticeShipDate(company.import_notice_ship_date ?? '');
+    setNoticeCustomsDate(company.import_notice_customs_date ?? '');
+    setNoticeArrivalText(company.import_notice_arrival_text ?? '');
   }, [company]);
 
   // 제품 코드 매칭 맵 (convertedCode = products.code).
@@ -392,6 +401,10 @@ export function ImportReceivingPage() {
           import_notice_status: noticeStatus || null,
           import_notice_date: noticeDate || null,
           import_notice_products: noticeProducts as unknown as Json,
+          import_notice_order_date: noticeOrderDate || null,
+          import_notice_ship_date: noticeShipDate || null,
+          import_notice_customs_date: noticeCustomsDate || null,
+          import_notice_arrival_text: noticeArrivalText || null,
         })
         .eq('id', companyId);
       if (error) throw error;
@@ -600,35 +613,78 @@ export function ImportReceivingPage() {
             </button>
           </div>
 
-          {/* 도착예정일 — 도착예정 상태일 때만 */}
-          {noticeStatus === '도착예정' && (
-            <div style={{ marginBottom: 14 }}>
-              <label
-                style={{
-                  fontSize: 11.5,
-                  color: 'var(--ink-3)',
-                  display: 'block',
-                  marginBottom: 4,
-                }}
+          {/* 상태별 자유 텍스트 — 거래처 포털 카드에 스텝퍼 날짜/헤더 문구로 표시됨. */}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              marginBottom: 14,
+            }}
+          >
+            {[
+              {
+                label: '주문완료 날짜',
+                value: noticeOrderDate,
+                set: setNoticeOrderDate,
+                placeholder: '예: 2026-06-22',
+                width: 200,
+              },
+              {
+                label: '운송중 날짜',
+                value: noticeShipDate,
+                set: setNoticeShipDate,
+                placeholder: '예: 2026-06-25',
+                width: 200,
+              },
+              {
+                label: '통관진행중 날짜',
+                value: noticeCustomsDate,
+                set: setNoticeCustomsDate,
+                placeholder: '예: 2026-07-10',
+                width: 200,
+              },
+              {
+                label: '도착예정 문구',
+                value: noticeArrivalText,
+                set: setNoticeArrivalText,
+                placeholder: '예: 7월 15일 도착예정',
+                width: 280,
+              },
+            ].map((row) => (
+              <div
+                key={row.label}
+                style={{ display: 'flex', alignItems: 'center', gap: 10 }}
               >
-                도착예정일
-              </label>
-              <input
-                type="date"
-                value={noticeDate}
-                onChange={(e) => setNoticeDate(e.target.value)}
-                style={{
-                  border: '1px solid var(--line-strong)',
-                  borderRadius: 6,
-                  padding: '6px 8px',
-                  fontSize: 12.5,
-                  background: 'var(--surface)',
-                  color: 'var(--ink)',
-                  outline: 'none',
-                }}
-              />
-            </div>
-          )}
+                <span
+                  style={{
+                    fontSize: 11.5,
+                    color: 'var(--ink-3)',
+                    width: 96,
+                    flexShrink: 0,
+                  }}
+                >
+                  {row.label}
+                </span>
+                <input
+                  type="text"
+                  value={row.value}
+                  onChange={(e) => row.set(e.target.value)}
+                  placeholder={row.placeholder}
+                  style={{
+                    border: '1px solid var(--line-strong)',
+                    borderRadius: 6,
+                    padding: '6px 8px',
+                    fontSize: 12.5,
+                    background: 'var(--surface)',
+                    color: 'var(--ink)',
+                    outline: 'none',
+                    width: row.width,
+                  }}
+                />
+              </div>
+            ))}
+          </div>
 
           {/* 제품 목록 */}
           <div style={{ marginBottom: 14 }}>
