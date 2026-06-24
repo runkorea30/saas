@@ -360,7 +360,6 @@ function CustomerOrderShell({
               display: 'flex',
               flexDirection: 'column',
               gap: 16,
-              height: '100%',
             }}
           >
             <NoticePanel fontScale={fontScale} />
@@ -1180,10 +1179,6 @@ function ImportNoticeCard({
         border: '1px solid #E7E5E4',
         borderRadius: 10,
         padding: 16,
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: 0,
       }}
     >
       {/* 헤더 — 제목 + 도착예정 자유 텍스트 강조 */}
@@ -1219,12 +1214,12 @@ function ImportNoticeCard({
         )}
       </div>
 
-      {/* 진행 스텝퍼 (날짜 텍스트 포함) */}
+      {/* 진행 스텝퍼 (날짜 텍스트 포함) — 4스텝 균등 분할, 카드 너비 초과 금지 */}
       <div
         style={{
           display: 'flex',
           alignItems: 'flex-start',
-          gap: 0,
+          width: '100%',
           marginBottom: 14,
           overflow: 'hidden',
         }}
@@ -1243,7 +1238,7 @@ function ImportNoticeCard({
               style={{
                 display: 'flex',
                 alignItems: 'flex-start',
-                flex: i < IMPORT_NOTICE_STEPS.length - 1 ? 1 : 0,
+                flex: 1,
                 minWidth: 0,
               }}
             >
@@ -1252,7 +1247,8 @@ function ImportNoticeCard({
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
-                  minWidth: 52,
+                  flex: 1,
+                  minWidth: 0,
                 }}
               >
                 <div
@@ -1269,6 +1265,7 @@ function ImportNoticeCard({
                     alignItems: 'center',
                     justifyContent: 'center',
                     opacity: isDone && !isCurrent ? 0.55 : 1,
+                    flexShrink: 0,
                   }}
                 >
                   {isDone && !isCurrent ? '✓' : i + 1}
@@ -1279,8 +1276,9 @@ function ImportNoticeCard({
                     marginTop: 4,
                     color: isCurrent ? '#2563EB' : '#6B7280',
                     fontWeight: isCurrent ? 600 : 400,
-                    whiteSpace: 'nowrap',
                     textAlign: 'center',
+                    lineHeight: 1.2,
+                    wordBreak: 'keep-all',
                   }}
                 >
                   {s}
@@ -1291,8 +1289,9 @@ function ImportNoticeCard({
                       fontSize: 8,
                       marginTop: 2,
                       color: '#9CA3AF',
-                      whiteSpace: 'nowrap',
                       textAlign: 'center',
+                      lineHeight: 1.2,
+                      wordBreak: 'keep-all',
                     }}
                   >
                     {dateText}
@@ -1302,13 +1301,14 @@ function ImportNoticeCard({
               {i < IMPORT_NOTICE_STEPS.length - 1 && (
                 <div
                   style={{
-                    flex: 1,
+                    width: 12,
                     height: 2,
                     marginTop: 10,
                     marginLeft: 2,
                     marginRight: 2,
                     background: i < currentIdx ? '#2563EB' : '#E5E7EB',
                     opacity: i < currentIdx ? 0.55 : 1,
+                    flexShrink: 0,
                   }}
                 />
               )}
@@ -1317,16 +1317,9 @@ function ImportNoticeCard({
         })}
       </div>
 
-      {/* 제품 목록 — 카테고리 그룹 + 스크롤 (남은 공간 모두 활용) */}
+      {/* 제품 목록 — 카테고리 그룹 + 스크롤 (최대 260px) */}
       {sortedProducts.length > 0 && (
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            minHeight: 0,
-          }}
-        >
+        <div>
           <div
             style={{
               fontSize: 11,
@@ -1339,8 +1332,7 @@ function ImportNoticeCard({
           </div>
           <div
             style={{
-              flex: 1,
-              minHeight: 120,
+              maxHeight: 260,
               overflowY: 'auto',
               border: '1px solid #F3F4F6',
               borderRadius: 6,
