@@ -733,9 +733,13 @@ export function calcDueDate(
     settlementCycle === '당월' ? 0
     : settlementCycle === '익월' ? 1
     : 2;
-  // new Date(year, month + offset, 0) = (month + offset)월의 마지막 날
+  // 로컬 기준 (month + offset)월의 마지막 날.
+  // toISOString()은 UTC라 KST(+9)에서 말일이 하루 당겨짐 → 로컬 y/m/d 추출.
   const due = new Date(year, month + offset, 0);
-  return due.toISOString().slice(0, 10);
+  const y = due.getFullYear();
+  const m = String(due.getMonth() + 1).padStart(2, '0');
+  const d = String(due.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 /**
@@ -768,7 +772,7 @@ export function calcMonthlyReconciliation(
 ): import('@/types/database').MonthlyReconciliation[] {
   type Cycle = '당월' | '익월' | '2개월';
 
-  // 거래처×매출월별 매출 집계 + 거래처별 settlement_cycle 맵
+  // 거래처×매출월별 매출 집계.
   const salesMap = new Map<
     string,
     {
@@ -779,13 +783,10 @@ export function calcMonthlyReconciliation(
       sales_total: number;
     }
   >();
-  const customerCycleMap = new Map<string, Cycle>();
   for (const o of orders) {
     const month = o.order_date.slice(0, 7);
     const key = `${o.customer_id}__${month}`;
     const cycle = (o.settlement_cycle || '익월') as Cycle;
-    // 거래처별 정산주기는 마지막 주문 기준으로 1개만 유지.
-    customerCycleMap.set(o.customer_id, cycle);
     const existing = salesMap.get(key);
     if (existing) {
       existing.sales_total += o.total_amount;
@@ -800,26 +801,59 @@ export function calcMonthlyReconciliation(
     }
   }
 
+  // 거래처별 정산주기 맵 (salesMap에서 마지막 entry 기준).
+  const customerCycleMap = new Map<string, Cycle>();
+  for (const [, s] of salesMap) {
+    customerCycleMap.set(s.customer_id, s.settlement_cycle);
+  }
+
   // 거래처×매출월별 입금 집계 (matched만).
-  // 입금월에서 거래처 정산주기만큼 역산해 매출월에 귀속시킨다.
-  //   당월(offset 0): 입금월 = 매출월
-  //   익월(offset 1): 입금월 - 1개월 = 매출월
-  //   2개월(offset 2): 입금월 - 2개월 = 매출월
-  const depositMap = new Map<string, { amount: number; dates: Set<string> }>();
+  // 1) 입금월에서 정산주기(offset)만큼 역산 → 추정 매출월
+  // 2) 추정 매출월의 due_date(말일) 기준 ±7일 이내이면 그 매출월에 귀속
+  //    ±7일 초과로 늦은 입금 → 다음 매출월, 일찍 입금 → 이전 매출월
+  const depositMap = new Map<string, { amount: number; dates: string[] }>();
   for (const t of transactions) {
     if (!t.customer_id || t.match_status !== 'matched') continue;
+
     const cycle = customerCycleMap.get(t.customer_id) ?? '익월';
     const offset = cycle === '당월' ? 0 : cycle === '익월' ? 1 : 2;
 
-    const txDate = new Date(`${t.transaction_date.slice(0, 10)}T00:00:00Z`);
-    txDate.setUTCMonth(txDate.getUTCMonth() - offset);
-    const salesMonth = txDate.toISOString().slice(0, 7);
+    // 입금월에서 offset 역산 → 추정 매출월
+    const txDate = new Date(t.transaction_date);
+    const estimatedDate = new Date(txDate.getFullYear(), txDate.getMonth() - offset, 1);
+    const estimatedSalesMonth = `${estimatedDate.getFullYear()}-${String(estimatedDate.getMonth() + 1).padStart(2, '0')}`;
 
-    const key = `${t.customer_id}__${salesMonth}`;
-    const slot = depositMap.get(key) ?? { amount: 0, dates: new Set<string>() };
-    slot.amount += t.amount;
-    slot.dates.add(t.transaction_date.slice(0, 10));
-    depositMap.set(key, slot);
+    // 추정 매출월의 due_date(말일) 계산
+    const dueDateStr = calcDueDate(estimatedSalesMonth, cycle);
+    const dueDate = new Date(dueDateStr);
+
+    // ±7일 오차범위 계산
+    const lowerBound = new Date(dueDate);
+    lowerBound.setDate(lowerBound.getDate() - 7);
+    const upperBound = new Date(dueDate);
+    upperBound.setDate(upperBound.getDate() + 7);
+
+    // 입금일이 due_date ±7일 이내이면 해당 매출월, 초과이면 다음/이전 매출월
+    let targetSalesMonth: string;
+    if (txDate >= lowerBound && txDate <= upperBound) {
+      targetSalesMonth = estimatedSalesMonth;
+    } else if (txDate > upperBound) {
+      // 마감일보다 많이 늦게 입금 → 다음 매출월
+      const nextDate = new Date(estimatedDate.getFullYear(), estimatedDate.getMonth() + 1, 1);
+      targetSalesMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+    } else {
+      // 마감일보다 많이 일찍 입금 → 이전 매출월
+      const prevDate = new Date(estimatedDate.getFullYear(), estimatedDate.getMonth() - 1, 1);
+      targetSalesMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    const key = `${t.customer_id}__${targetSalesMonth}`;
+    const existing = depositMap.get(key) ?? { amount: 0, dates: [] };
+    existing.amount += t.amount;
+    if (!existing.dates.includes(t.transaction_date)) {
+      existing.dates.push(t.transaction_date);
+    }
+    depositMap.set(key, existing);
   }
 
   const result: import('@/types/database').MonthlyReconciliation[] = [];
