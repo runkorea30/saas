@@ -531,6 +531,23 @@ export async function calcOrderSuggestion(
   return map.get(productId) ?? 0;
 }
 
+/**
+ * 발주서 페이지용 추천 수량 (EA 단위, 순수 산술).
+ * 공식: max(0, ceil(qty3m / 3 × 1.5) − stockQty)
+ *
+ * - `qty3m`: 최근 3개월 판매수량 합 (EA)
+ * - `stockQty`: 현재 재고 수량 (EA)
+ * - 반환: 추천 발주 수량 (EA). 음수면 0으로 clamp.
+ *
+ * 🟠 발주서 페이지 전용. 기존 `calcOrderSuggestion`(DZ, 6개월 lookback)과
+ *    공식·단위가 다르므로 호출부에서 혼동 금지.
+ */
+export function calcPurchaseOrderQty(qty3m: number, stockQty: number): number {
+  const monthlyAvg = qty3m / 3;
+  const suggested = Math.ceil(monthlyAvg * 1.5) - stockQty;
+  return Math.max(0, suggested);
+}
+
 // ───────────────────────────────────────────────────────────
 // 이익률 근사치 (Phase 3 MVP — products.supply_price 기반)
 // ───────────────────────────────────────────────────────────

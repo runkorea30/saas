@@ -942,6 +942,54 @@ export type Database = {
           },
         ]
       }
+      purchase_order_items: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          product_id: string
+          purchase_order_id: string
+          quantity: number
+          unit_price_usd: number | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          product_id: string
+          purchase_order_id: string
+          quantity?: number
+          unit_price_usd?: number | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          product_id?: string
+          purchase_order_id?: string
+          quantity?: number
+          unit_price_usd?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_order_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_purchase_order_id_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       purchases: {
         Row: {
           company_id: string
@@ -1181,6 +1229,18 @@ export type Database = {
           p_date: string
         }
         Returns: undefined
+      }
+      insert_order: {
+        Args: {
+          p_company_id: string
+          p_customer_id: string
+          p_order_date: string
+          p_source: string
+          p_status: string
+          p_memo: string | null
+          p_items: Json
+        }
+        Returns: string
       }
     }
     Enums: {

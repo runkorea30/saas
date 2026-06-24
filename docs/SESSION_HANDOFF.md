@@ -319,6 +319,13 @@ ProductListTable에서 `Check` 컴포넌트(`orders/primitives.tsx`)를 신규 i
 - **수동주문입력 추가** (`create_insert_order_rpc` 마이그레이션):
   - `mochicraft_demo.insert_order(uuid, uuid, date, text, text, text, jsonb)` 함수 (SECURITY DEFINER)
   - `GRANT EXECUTE ... TO anon` — Phase 2 Auth 도입 후 회수 또는 authenticated 전용으로 변경
+- **발주서 추가** (Phase 3.14):
+  - `mochicraft_demo.purchase_order_items` 테이블 신규 생성 (purchase_order_id FK CASCADE, product_id FK, quantity INT, unit_price_usd NUMERIC)
+  - `anon_all_purchase_orders` 정책 (anon ALL USING true WITH CHECK true) — 롤백 SQL: `DROP POLICY "anon_all_purchase_orders" ON mochicraft_demo.purchase_orders;`
+  - `anon_all_purchase_order_items` 정책 (anon ALL USING true WITH CHECK true) — 롤백 SQL: `DROP POLICY "anon_all_purchase_order_items" ON mochicraft_demo.purchase_order_items;`
+  - `GRANT SELECT, INSERT, UPDATE, DELETE ON mochicraft_demo.purchase_order_items TO anon`
+  - `GRANT SELECT, INSERT, UPDATE, DELETE ON mochicraft_demo.purchase_orders TO anon`
+  - 롤백 시 테이블도 제거: `DROP TABLE mochicraft_demo.purchase_order_items;`
 
 ### 원복 SQL
 ```sql

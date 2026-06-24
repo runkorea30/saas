@@ -19,6 +19,7 @@ import { CustomersPage } from '@/pages/settings/CustomersPage';
 import { ProductsPage } from '@/pages/inventory/ProductsPage';
 import { StockPage } from '@/pages/inventory/StockPage';
 import { ImportReceivingPage } from '@/pages/inventory/ImportReceivingPage';
+import { PurchaseOrderPage } from '@/pages/inventory/PurchaseOrderPage';
 
 function App() {
   return (
@@ -37,7 +38,7 @@ function App() {
           <Route index element={<Navigate to="/inventory/stock" replace />} />
           <Route path="stock" element={<StockPage />} />
           <Route path="purchase" element={<ImportReceivingPage />} />
-          <Route path="purchase-orders" element={<PlaceholderPage />} />
+          <Route path="purchase-orders" element={<PurchaseOrderPage />} />
           <Route path="products" element={<ProductsPage />} />
         </Route>
 
