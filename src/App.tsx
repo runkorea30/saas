@@ -15,6 +15,7 @@ import { PlaceholderPage } from '@/components/common/PlaceholderPage';
 import { HomePage } from '@/pages/HomePage';
 import { OrdersPage } from '@/pages/sales/OrdersPage';
 import { OrderEntryPage } from '@/pages/sales/OrderEntryPage';
+import { SalesAnalysisPage } from '@/pages/sales/SalesAnalysisPage';
 import { CustomersPage } from '@/pages/settings/CustomersPage';
 import { ProductsPage } from '@/pages/inventory/ProductsPage';
 import { StockPage } from '@/pages/inventory/StockPage';
@@ -35,6 +36,7 @@ function App() {
           <Route index element={<Navigate to="/sales/orders" replace />} />
           <Route path="orders" element={<OrdersPage />} />
           <Route path="order-entry" element={<OrderEntryPage />} />
+          <Route path="analysis" element={<SalesAnalysisPage />} />
           <Route path="invoices" element={<PlaceholderPage />} />
         </Route>
 
