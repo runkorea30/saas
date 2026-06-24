@@ -776,7 +776,7 @@ export function calcMonthlyReconciliation(
     amount: number;
   }[] = [],
   today: Date = new Date(),
-  toleranceAmount: number = 0,
+  toleranceAmount: number = 100,
 ): import('@/types/database').MonthlyReconciliation[] {
   type Cycle = '당월' | '익월' | '2개월';
 
@@ -896,8 +896,9 @@ export function calcMonthlyReconciliation(
     const due_date = calcDueDate(s.month, s.settlement_cycle);
     // 허용 오차 적용:
     //   |차액| ≤ tolerance 면 정산완료 (십원 절사 등 소액 흡수)
-    //   초과입금(difference < 0)도 정산완료
-    //   그 외 difference > 0 이고 due_date 지났으면 연체
+    //   양수 차액 + due_date 지났으면 연체
+    //   양수 차액 + 아직 마감 전이면 정산대기
+    //   음수 차액 (초과입금) 도 정산완료
     const effectiveDifference = Math.abs(difference);
     const is_overdue =
       effectiveDifference > toleranceAmount &&
@@ -905,9 +906,9 @@ export function calcMonthlyReconciliation(
       new Date(due_date) < today;
     const status =
       effectiveDifference <= toleranceAmount ? '정산완료'
-      : difference < 0 ? '정산완료'
       : is_overdue ? '연체'
-      : '정산대기';
+      : difference > 0 ? '정산대기'
+      : '정산완료';
 
     result.push({
       customer_id: s.customer_id,
