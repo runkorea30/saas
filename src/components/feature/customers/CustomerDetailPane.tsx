@@ -1,8 +1,12 @@
 /**
  * Customers Detail Pane.
- * 기본 정보 + KPI 4개 + 최근 주문 10건.
+ * 기본 정보 + KPI 4개 + 최근 주문 10건 + 편집 버튼 (모달).
  */
+import { useState } from 'react';
+import { Pencil } from 'lucide-react';
 import { GradeBadge, StatusBadge } from '@/components/feature/orders/primitives';
+import { CustomerEditModal } from '@/components/feature/customers/CustomerEditModal';
+import { useCompany } from '@/hooks/useCompany';
 import type { OrderStatus } from '@/types/common';
 import type { Customer, CustomerOrder } from '@/hooks/queries/useCustomers';
 import type { CustomerAggregate } from '@/utils/calculations';
@@ -22,6 +26,9 @@ export function CustomerDetailPane({
   ordersLoading,
   ordersError,
 }: Props) {
+  const { companyId } = useCompany();
+  const [isEditing, setIsEditing] = useState(false);
+
   if (!customer) {
     return (
       <div
@@ -91,6 +98,22 @@ export function CustomerDetailPane({
             <span className="dot" />
             {customer.is_active ? '활성' : '비활성'}
           </span>
+          <button
+            type="button"
+            onClick={() => setIsEditing(true)}
+            className="btn-base"
+            style={{
+              height: 28,
+              fontSize: 12,
+              padding: '0 10px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+            title="거래처 정보 편집"
+          >
+            <Pencil size={12} strokeWidth={1.8} /> 편집
+          </button>
         </div>
         {customer.business && (
           <div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 6 }}>
@@ -218,6 +241,16 @@ export function CustomerDetailPane({
           <InfoRow label="세금계산서 이메일" value={customer.tax_email} />
         </div>
       </div>
+
+      {/* 편집 모달 — 닫혔다 다시 열릴 때 폼 재초기화를 위해 conditional render */}
+      {isEditing && (
+        <CustomerEditModal
+          open
+          customer={customer}
+          companyId={companyId}
+          onClose={() => setIsEditing(false)}
+        />
+      )}
 
       {/* 최근 주문 이력 */}
       <div style={{ padding: '14px 20px' }}>

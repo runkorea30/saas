@@ -1,11 +1,11 @@
 /**
- * Customers 페이지 쿼리 훅 3종.
+ * Customers 페이지 쿼리 훅.
  *
  * 🔴 CLAUDE.md §1: company_id 필터 필수 (RLS + 프론트 이중 방어).
  * 🔴 CLAUDE.md §2: 집계는 utils/calculations 의 calcCustomerAggregates 만 사용.
  * 🔴 CLAUDE.md §5: fetchAllRows 경유.
  */
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import {
@@ -147,5 +147,55 @@ export function useCustomerOrders(
       return rows;
     },
     staleTime: 60_000,
+  });
+}
+
+// ───────────────────────────────────────────────────────────
+// useUpdateCustomer — 거래처 수정
+// ───────────────────────────────────────────────────────────
+
+/** 거래처 편집 모달 등에서 부분 업데이트할 때 허용되는 필드 (group_id 제외 — 그룹 모달에서만 변경). */
+export type CustomerUpdateInput = Partial<{
+  name: string;
+  grade: string | null;
+  settlement_cycle: string | null;
+  contact1: string | null;
+  contact2: string | null;
+  email: string | null;
+  delivery_address: string | null;
+  bank_aliases: string | null;
+  is_active: boolean;
+  business_registration_number: string | null;
+  sub_business_number: string | null;
+  ceo_name: string | null;
+  business_address: string | null;
+  business_type: string | null;
+  business_category: string | null;
+  tax_email: string | null;
+}>;
+
+export function useUpdateCustomer(companyId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      data,
+    }: {
+      id: string;
+      data: CustomerUpdateInput;
+    }) => {
+      if (!companyId) throw new Error('회사 정보가 없습니다.');
+      const { error } = await supabase
+        .from('customers')
+        .update({ ...data, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .eq('company_id', companyId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['customer-aggregates'] });
+      queryClient.invalidateQueries({ queryKey: ['customer-orders'] });
+    },
   });
 }
