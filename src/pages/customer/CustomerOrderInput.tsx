@@ -5,13 +5,13 @@
  * 🟠 useProducts 는 grade_a~e 컬럼을 select 하지 않으므로 인라인 쿼리 사용.
  * 🟠 재고는 `useInventoryStock(companyId)` 재활용.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
-import { calcSupplyPriceByGrade } from '@/utils/calculations';
+import { calcSupplyPriceByCustomerGrade } from '@/utils/calculations';
 import {
   getCategoryLabel,
   PRODUCT_CATEGORY_DEFAULT,
@@ -46,22 +46,6 @@ async function fetchActiveProducts(companyId: string): Promise<ProductRow[]> {
       .is('deleted_at', null)
       .order('code', { ascending: true }),
   );
-}
-
-/** customer.grade('A'~'E') 와 product 의 grade_a~e 컬럼을 매핑해 단가 산정용 비율을 뽑는다. */
-function pickGradeRate(
-  product: ProductRow,
-  grade: string | null,
-): number | null {
-  if (!grade) return null;
-  switch (grade.toUpperCase()) {
-    case 'A': return product.grade_a;
-    case 'B': return product.grade_b;
-    case 'C': return product.grade_c;
-    case 'D': return product.grade_d;
-    case 'E': return product.grade_e;
-    default: return null;
-  }
 }
 
 interface CustomerOrderInputProps {
@@ -101,6 +85,40 @@ export function CustomerOrderInput({
     return products.filter((p) => p.category === category);
   }, [products, category]);
 
+  // 🟡 dogfooding 진단 — Phase 2 Auth 도입 시 제거.
+  // customer.grade 가 null/비표준이면 공급가가 전부 0으로 표시되는 흔한 원인.
+  // (예: 컬럼 추가 전에 로그인해 localStorage 세션이 stale 인 경우)
+  useEffect(() => {
+    if (!customer.grade) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[customer-order.session] customer.grade 가 비어 있음 — 로그아웃 후 재로그인 필요',
+        { grade: customer.grade },
+      );
+      return;
+    }
+    if (filtered.length === 0) return;
+    const p0 = filtered[0];
+    // eslint-disable-next-line no-console
+    console.log('[customer-order.sample-pricing]', {
+      customerGrade: customer.grade,
+      productCode: p0.code,
+      sellPrice: p0.sell_price,
+      grades: {
+        a: p0.grade_a,
+        b: p0.grade_b,
+        c: p0.grade_c,
+        d: p0.grade_d,
+        e: p0.grade_e,
+      },
+      calculatedSupply: calcSupplyPriceByCustomerGrade(
+        p0.sell_price,
+        customer.grade,
+        p0,
+      ),
+    });
+  }, [customer.grade, filtered]);
+
   const stockOf = (productId: string): number => {
     return stockQuery.data?.stockByProduct.get(productId)?.current ?? 0;
   };
@@ -126,8 +144,11 @@ export function CustomerOrderInput({
         .filter((p) => (qtyMap.get(p.id) ?? 0) > 0)
         .map((p) => {
           const qty = qtyMap.get(p.id)!;
-          const rate = pickGradeRate(p, customer.grade);
-          const supply = calcSupplyPriceByGrade(p.sell_price, rate);
+          const supply = calcSupplyPriceByCustomerGrade(
+            p.sell_price,
+            customer.grade,
+            p,
+          );
           return {
             product_id: p.id,
             code: p.code,
@@ -361,8 +382,11 @@ export function CustomerOrderInput({
                 )}
                 {filtered.map((p) => {
                   const stock = stockOf(p.id);
-                  const rate = pickGradeRate(p, customer.grade);
-                  const supply = calcSupplyPriceByGrade(p.sell_price, rate);
+                  const supply = calcSupplyPriceByCustomerGrade(
+                    p.sell_price,
+                    customer.grade,
+                    p,
+                  );
                   const qty = qtyMap.get(p.id) ?? 0;
                   return (
                     <tr

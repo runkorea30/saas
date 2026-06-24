@@ -653,6 +653,43 @@ export function calcSupplyPriceByGrade(
   return Math.round(unitPrice * gradeRate);
 }
 
+/** products 테이블의 등급별 공급율 컬럼만 추린 shape. */
+export interface ProductGradeRates {
+  grade_a?: number | null;
+  grade_b?: number | null;
+  grade_c?: number | null;
+  grade_d?: number | null;
+  grade_e?: number | null;
+}
+
+/**
+ * 거래처 등급('A'~'E') + 제품 grade_a~e 컬럼 조합으로 공급가 계산.
+ *
+ * 🔴 CLAUDE.md §2: 거래처별 공급가 계산의 단일 진입점.
+ *    이전에는 페이지마다 pickGradeRate 헬퍼를 반복 정의 → 이 함수로 일원화.
+ *
+ * @param unitPrice 판매가 (VAT 포함, 정수 원화)
+ * @param customerGrade 거래처 등급 — 'A'|'B'|'C'|'D'|'E' (대소문자 무관). null/비표준 → 0
+ * @param product grade_a~e 컬럼을 포함한 제품 (다른 컬럼은 무시). null → 0
+ */
+export function calcSupplyPriceByCustomerGrade(
+  unitPrice: number,
+  customerGrade: string | null | undefined,
+  product: ProductGradeRates | null | undefined,
+): number {
+  if (!customerGrade || !product) return 0;
+  let rate: number | null | undefined;
+  switch (customerGrade.toUpperCase()) {
+    case 'A': rate = product.grade_a; break;
+    case 'B': rate = product.grade_b; break;
+    case 'C': rate = product.grade_c; break;
+    case 'D': rate = product.grade_d; break;
+    case 'E': rate = product.grade_e; break;
+    default: return 0;
+  }
+  return calcSupplyPriceByGrade(unitPrice, rate);
+}
+
 // ───────────────────────────────────────────────────────────
 // Phase 4 이후 과제 (스텁 유지)
 // ───────────────────────────────────────────────────────────
