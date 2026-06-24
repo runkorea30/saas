@@ -26,6 +26,7 @@
 | Phase 3.17 | 은행거래 페이지 (`/finance/banking`) — 3탭 (입출금장부/월별정산/매칭설정) + KB엑셀 파싱 + 자동매칭 | ✅ 완료 (2026-06-24) |
 | Phase 3.18 | 미수금 관리 페이지 (`/finance/receivables`) — 카드형 현황 + 월별 상세 모달 | ✅ 완료 (2026-06-24) |
 | Phase 3.19 | 은행거래 버그 수정 + 운영 보강 (입금 매출월 매칭 로직 개편, 사업자계좌 포맷, target_sales_month 수동지정) | ✅ 완료 (2026-06-25) |
+| Phase 3.20 | 입금 분할 기능 + 허용 오차(100원) 정산완료 처리 (bank_transaction_splits) | ✅ 완료 (2026-06-25, 브라우저 검증 미수행) |
 | Phase 4 | 나머지 페이지 + Auth 도입 | 대기 |
 
 **페이지 진도: 11 / 13 구현 완료**
@@ -98,6 +99,19 @@
 #### 정산이동 컬럼 UI 숨김 (`33dee9c`)
 - LedgerTab 에서 "정산이동" 컬럼/체크박스/`onToggleMoved` 핸들러 제거 (colSpan 9→8).
 - DB 컬럼 `bank_transactions.moved_to_monthly` 는 유지 (롤백 시점에 함께 회수 — §5 기록 그대로).
+
+#### 입금 분할 기능 (`a859b42`)
+- **신규 테이블** `mochicraft_demo.bank_transaction_splits` (id / company_id / bank_transaction_id / target_sales_month / amount / memo / created_at) + FK CASCADE 2종 + 인덱스 2종 + RLS + `anon_all_bank_transaction_splits` 정책 + anon GRANT. 마이그레이션 `supabase/migrations/20260625000000_create_bank_transaction_splits.sql`.
+- **TS 타입**: `Database.bank_transaction_splits` Row/Insert/Update + 커스텀 `BankTransactionSplit` 인터페이스 추가.
+- **훅 (`useBanking.ts`)**: `useBankTransactionSplits()` 조회, `useUpsertBankTransactionSplits()` (한 transaction의 기존 분할 DELETE 후 새 INSERT, 빈 배열이면 해제). onSuccess에 `bank-transaction-splits` + `bank-transactions` invalidate.
+- **`calcMonthlyReconciliation`** 시그니처 확장 — `splits = []`, `today = new Date()`, `toleranceAmount` 추가. transactions 항목에 `id` 필수. 분할이 있으면 `splits` 합계로 귀속(원본 금액/`target_sales_month` 무시), 없으면 기존 매칭 로직 (수동 지정 → 허용 구간 자동).
+- **LedgerTab UI**: matched 행 액션에 [분할] 버튼 추가, 분할 있으면 `text-blue-600 (N)` 강조. `SplitModal` — 매출월 select + 금액 input + 메모 행 가변, 하단 카드 원본/합계/차이 (0 green / +red / -blue). 저장 버튼은 `차이=0` 일 때만 활성. 기존 분할이 있으면 "분할 해제" 버튼 노출.
+- **호출부**: `BankingPage` overdueTotal, `MonthlyTab` recon, `ReceivablesPage` cards 모두 `splits` + `PAYMENT_TOLERANCE_AMOUNT` 전달.
+
+#### 허용 오차 100원 — 정산완료 자동 흡수 (`1e2fcf3`, 이전 `a859b42` 포함)
+- **신규 상수** `src/constants/banking.ts` — `PAYMENT_TOLERANCE_AMOUNT = 100`. 추후 회사별 설정 페이지에서 변경 가능하도록 단일 상수로 관리.
+- `calcMonthlyReconciliation` 기본값 `toleranceAmount = 100`. status 분기: `|차액| ≤ tolerance` → 정산완료, `is_overdue` → 연체, `difference > 0` → 정산대기, 그 외(초과입금) → 정산완료. `is_overdue` 도 tolerance 초과일 때만.
+- 십원 단위 절사(최대 90원) 자동 흡수 → 합산 입금 / 잔돈 차액으로 인한 거짓 미수 노출 제거.
 
 ### 신규 DB 객체 (이번 세션, §5 rollback 목록 추가됨)
 - 컬럼: `bank_transactions.target_sales_month VARCHAR(7)` — 롤백: `ALTER TABLE mochicraft_demo.bank_transactions DROP COLUMN target_sales_month;`
@@ -505,6 +519,10 @@ ProductListTable에서 `Check` 컴포넌트(`orders/primitives.tsx`)를 신규 i
   - v1 → OPS 데이터 (bank_transactions 48 / mappings 11 / keywords 7) 는 일회성 INSERT 라 별도 롤백 불필요 (`DELETE FROM ... WHERE company_id = '...'` 로 일괄 제거 가능)
 - **은행거래 보강 (Phase 3.19 — `20260624010000_add_target_sales_month_to_bank_transactions.sql`):**
   - `bank_transactions.target_sales_month VARCHAR(7)` 컬럼 — 롤백: `ALTER TABLE mochicraft_demo.bank_transactions DROP COLUMN target_sales_month;`
+- **입금 분할 (Phase 3.20 — `20260625000000_create_bank_transaction_splits.sql`):**
+  - 신규 테이블 `mochicraft_demo.bank_transaction_splits` (FK CASCADE 2종 + idx 2종 + RLS) — 롤백: `DROP TABLE mochicraft_demo.bank_transaction_splits CASCADE;`
+  - `anon_all_bank_transaction_splits` 정책 (anon ALL USING true) — 테이블 DROP 시 함께 제거됨
+  - `GRANT SELECT, INSERT, UPDATE, DELETE ON mochicraft_demo.bank_transaction_splits TO anon` — Phase 2 Auth 도입 시 회수
 
 ### 원복 SQL
 ```sql
@@ -735,25 +753,44 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 
 ## 7. 다음 세션 진입점
 
-### (권장) 남은 재무 페이지 — 세금계산서 + 손익계산서
-- `/finance/tax-invoices` — 세금계산서 발행/조회. `mochicraft_demo.tax_invoices` 테이블 기존 존재 (조회만 필요 시 그대로, 발행 플로우는 별도 RPC 설계).
-- `/finance/pnl` — 손익계산서. **`calcCostOfSales` 선행 구현 필요** (FIFO 로트 소비 로직 — `inventory_lots.remaining_quantity` × `cost_krw` 차감 누적).
+### 🔴 (최우선) 입금 분할 + 허용 오차 브라우저 검증 — Phase 3.20
+이번 세션에서 `a859b42` + `1e2fcf3` 로 구현 완료. **브라우저 검증 미수행**. 다음 세션 진입 시 다음을 우선 확인:
 
-### (권장 직후) 브라우저 검증 — Phase 3.17~3.19
-- 은행거래 / 미수금 페이지가 코드상 완료되었고 핵심 매칭 로직은 3.19에서 정비됐으나 **브라우저 검증 미수행 영역 잔존**. 다음 세션 진입 시:
-  - KB 엑셀 (개인 + **사업자**) 업로드 → 미리보기 모달 → 저장 → 중복 검증
-  - 거래처 인라인 select, 제외 → 키워드 자동 등록 confirm
-  - **매핑 룰 추가 시 소급 자동 매칭 toast (N건)** 확인
-  - 월별 정산표 합계/색상 + **입금일자 2번째 줄 표시**
-  - **LedgerTab matched 행 "매출월" select** — 자동/YYYY-MM 변경 즉시 DB 반영 → MonthlyTab/ReceivablesPage 에서 해당 매출월로 입금 반영, '자동' 선택 시 자동 매칭으로 복귀
-  - 미수금 카드 정렬 + 상세 모달 누적미수금/연체일수 계산
-- 확인된 버그가 있으면 우선 수정.
+- **`bank_transaction_splits` 테이블** (신규) — Supabase 대시보드에서 정상 생성 / RLS 정책 / GRANT 확인.
+- **LedgerTab [분할] 버튼**:
+  - matched 행 우측 액션에 [분할] 노출, 기존 분할 있으면 `text-blue-600 (N)` 강조 + tooltip `분할 N건`.
+  - 클릭 → `SplitModal` 오픈, 기존 분할이 있으면 그대로 로드, 없으면 원본 금액으로 1행 시드.
+  - 행 추가/삭제, 매출월 select(과거 12개월), 금액 input, 메모(선택).
+  - 하단 카드 — 원본 / 합계 / 차이. `차이 = 0` 일 때만 [저장] 활성.
+  - 기존 분할이 있으면 좌측 [분할 해제] 버튼 — 빈 배열 저장으로 전체 DELETE.
+  - 저장 후 토스트 (`분할 N건 저장 완료` / `분할 해제 완료`).
+- **`calcMonthlyReconciliation` 동작** — 분할이 있는 입금은 `splits` 합계로 매출월 귀속, `target_sales_month` / 자동 매칭은 무시됨. MonthlyTab / ReceivablesPage 가 즉시 반영하는지 확인.
+- **허용 오차 100원** — 매출-입금 차액이 ±100 이내일 때 상태가 '정산완료' / 색상 green / 미수 카드의 잔액 카운트 제외. 십원 절사 / 합산 입금 / 잔돈 차액 케이스로 테스트.
+- 확인된 버그는 우선 수정.
 
-### (권장 직후) 거래처 편집 UI
+### (그 다음 후보) 거래처 편집 UI
 - `CustomerDetailPane` read-only → 인라인 편집 또는 편집 모달 신설.
 - 필수 필드: `settlement_cycle` (당월/익월/2개월) · `match_type` (monthly/daily) · contact1/2 / email / 등급 / 별칭 / 활성 여부.
 - 비활성 상태인 "거래처 추가" 모달도 같이 신설 권장.
 - `useUpdateCustomer` / `useCreateCustomer` mutation 훅 신설 필요.
+
+### (그 다음 후보) 송장대장 — `/sales/invoices`
+- 주문/매출 데이터 기반 송장 발행/조회 화면. 거래처별·월별 묶음 출력.
+
+### (그 다음 후보) 세금계산서 — `/finance/tax-invoices`
+- `mochicraft_demo.tax_invoices` 테이블 기존 존재 (조회만 필요 시 그대로, 발행 플로우는 별도 RPC 설계).
+- 공급가액 역산은 `calcSupplyAmount(totalAmount)` 활용.
+
+### (그 다음 후보) 손익계산서 — `/finance/pnl`
+- **`calcCostOfSales` 선행 구현 필요** (FIFO 로트 소비 로직 — `inventory_lots.remaining_quantity` × `cost_krw` 차감 누적).
+
+### (참고) Phase 3.17~3.19 잔여 브라우저 검증
+- KB 엑셀 (개인 + **사업자**) 업로드 → 미리보기 모달 → 저장 → 중복 검증
+- 거래처 인라인 select, 제외 → 키워드 자동 등록 confirm
+- 매핑 룰 추가 시 소급 자동 매칭 toast (N건) 확인
+- 월별 정산표 합계/색상 + 입금일자 2번째 줄 표시
+- LedgerTab matched 행 "매출월" select — 자동/YYYY-MM 변경 즉시 DB 반영 → MonthlyTab/ReceivablesPage 반영, '자동' 선택 시 자동 매칭 복귀
+- 미수금 카드 정렬 + 상세 모달 누적미수금/연체일수 계산
 
 ### ~~(완료) 매출분석 페이지~~ ✅ Phase 매출분석 (`5853096`)
 ### ~~(완료) 은행거래~~ ✅ Phase 3.17 (2026-06-24)
@@ -800,6 +837,9 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 - 타입체크: `npx tsc --noEmit` (커밋 전 필수) — **단, 루트 tsconfig.json 이 files:[] 라 이걸로는 미감지. `npm run build` 로 검증할 것**
 
 ### 최근 커밋 (2026-06-25 세션 — 은행거래 버그수정 & 운영 보강)
+- `1e2fcf3` fix(banking): 허용 오차 100원 이하 차액 정산완료 처리
+- `a859b42` feat(banking): 입금 분할 기능 + 허용 오차 정산완료 처리 (bank_transaction_splits 신설)
+- `0df63f0` docs: SESSION_HANDOFF 갱신 — 은행거래 버그수정 및 운영 메모
 - `33dee9c` feat(banking): 입출금 장부 정산이동 컬럼 UI 숨김 (DB 컬럼 유지)
 - `356a7e9` fix(banking): KB 사업자계좌 엑셀 포맷 자동 감지 지원
 - `63cef51` fix(banking): 입금 허용 구간 기반 매출월 매칭 (익월=다음달 1일~말일+7일)
