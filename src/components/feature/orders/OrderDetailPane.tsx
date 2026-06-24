@@ -8,7 +8,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, FileText, MoreHorizontal, Tag } from 'lucide-react';
+import { FileText, MoreHorizontal, Tag } from 'lucide-react';
 import {
   GradeBadge,
   SourceIcon,
@@ -57,7 +57,6 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
     return stockByProduct?.get(productId)?.current ?? 0;
   };
 
-  const [isAdjusting, setIsAdjusting] = useState(false);
 
   // 자동완성 후보 — 코드/이름 모두 대소문자 무시 부분일치 (includes).
   const suggestions: Product[] = useMemo(() => {
@@ -249,92 +248,6 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
     }
   };
 
-  /**
-   * 재고 확인 → 재고부족 품목을 일괄 강제조정.
-   *
-   * 정책:
-   *  - 반품 행은 제외 (재고 차감 대상 아님).
-   *  - quantity > 현재재고 인 행을 newQty = max(0, 현재재고) 로 축소.
-   *  - original_quantity 가 NULL 인 경우에만 quantity 를 백업 (재조정 멱등성).
-   *  - 모든 품목 갱신 후 orders.total_amount 재계산.
-   */
-  const handleStockCheck = async () => {
-    if (!order || !companyId) return;
-
-    const itemsToFix = orderItems.filter((it) => {
-      if (it.is_return) return false;
-      if (!it.product_id) return false;
-      const stock = stockOf(it.product_id);
-      return it.quantity > stock;
-    });
-
-    if (itemsToFix.length === 0) {
-      alert('재고부족 품목이 없습니다.');
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `재고부족 품목 ${itemsToFix.length}개를 재고수량으로 조정하시겠습니까?`,
-    );
-    if (!confirmed) return;
-
-    setIsAdjusting(true);
-    try {
-      // 1) 각 품목 강제조정.
-      for (const it of itemsToFix) {
-        const stock = stockOf(it.product_id);
-        const newQty = Math.max(0, stock);
-        const newAmount = newQty * it.unit_price;
-        // 🟠 original_quantity 는 DB 신규 컬럼이지만 Supabase 자동생성 타입(database.ts)이
-        //    아직 반영되지 않아 컴파일러가 거부함 → payload 타입 단언으로 우회.
-        //    Phase 후속 `supabase gen types` 재실행 시 단언 제거 예정.
-        const updatePayload = {
-          original_quantity: it.original_quantity ?? it.quantity,
-          quantity: newQty,
-          amount: newAmount,
-        } as unknown as { quantity: number; amount: number };
-        const { error } = await supabase
-          .from('order_items')
-          .update(updatePayload)
-          .eq('id', it.id)
-          .eq('company_id', companyId);
-        if (error) {
-          console.error('재고조정 실패:', error);
-          alert('재고조정 중 오류가 발생했습니다: ' + error.message);
-          return;
-        }
-      }
-
-      // 2) orders.total_amount 재계산.
-      const fixedIds = new Set(itemsToFix.map((it) => it.id));
-      const newTotal = orderItems.reduce((sum, it) => {
-        if (fixedIds.has(it.id)) {
-          const stock = stockOf(it.product_id);
-          return sum + Math.max(0, stock) * it.unit_price;
-        }
-        return sum + it.amount;
-      }, 0);
-      const { error: totalErr } = await supabase
-        .from('orders')
-        .update({ total_amount: newTotal })
-        .eq('id', order.id)
-        .eq('company_id', companyId);
-      if (totalErr) {
-        console.error('총액 갱신 실패:', totalErr);
-        alert('총액 갱신 중 오류가 발생했습니다: ' + totalErr.message);
-        return;
-      }
-
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['order-items', order.id] }),
-        queryClient.invalidateQueries({ queryKey: ['orders', companyId] }),
-        queryClient.invalidateQueries({ queryKey: ['inventory-stock', companyId] }),
-      ]);
-    } finally {
-      setIsAdjusting(false);
-    }
-  };
-
   const handleAddReturn = () => {
     if (!companyId || !order) return;
     setEditMode(true);
@@ -368,26 +281,59 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
       return;
     }
 
+    // 🔴 자동 재고조정 — 비반품 신규 행에 대해 quantity > stock 이면 축소,
+    //    원래 수량을 original_quantity 로 저장. 누적 메시지 후 알림.
+    const shortageMsgs: string[] = [];
+    const adjustedNewRows = newRows.map((item) => {
+      if (item.is_return || !item.product_id) {
+        return { item, finalQty: item.quantity, originalQty: null as number | null };
+      }
+      const stock = stockOf(item.product_id);
+      if (item.quantity > stock) {
+        const finalQty = Math.max(0, stock);
+        shortageMsgs.push(
+          `[${item.product_name}] 재고 부족으로 수량이 ${item.quantity}개 → ${finalQty}개로 조정되었습니다.`,
+        );
+        return { item, finalQty, originalQty: item.quantity };
+      }
+      return { item, finalQty: item.quantity, originalQty: null };
+    });
+    const adjustedById = new Map(adjustedNewRows.map((a) => [a.item.id, a]));
+
     setIsSaving(true);
     try {
       const dirtyItems = draftItems.filter((item) => item._dirty);
 
       for (const item of dirtyItems) {
         if (item._isNew) {
-          // 🔴 반품은 quantity/amount 모두 음수로 저장 — calculations.ts 정합성
-          //    (OrderEntry RPC와 동일 패턴).
+          const adj = adjustedById.get(item.id);
+          const finalQty = adj?.finalQty ?? item.quantity;
+          const originalQty = adj?.originalQty ?? null;
+          // 🔴 반품은 quantity/amount 모두 음수로 저장 — calculations.ts 정합성.
           const sign = item.is_return ? -1 : 1;
-          const absQty = Math.abs(item.quantity);
-          const { error } = await supabase.from('order_items').insert({
+          const absQty = Math.abs(finalQty);
+          // 🟠 original_quantity 컬럼은 자동생성 타입에 아직 미반영 → payload 단언 우회.
+          const insertPayload = {
             id: item.id,
             company_id: companyId,
             order_id: item.order_id,
             product_id: item.product_id!,
             quantity: sign * absQty,
+            original_quantity: originalQty,
             unit_price: item.unit_price,
             amount: sign * absQty * item.unit_price,
             is_return: item.is_return,
-          });
+          } as unknown as {
+            id: string;
+            company_id: string;
+            order_id: string;
+            product_id: string;
+            quantity: number;
+            unit_price: number;
+            amount: number;
+            is_return: boolean;
+          };
+          const { error } = await supabase.from('order_items').insert(insertPayload);
           if (error) throw error;
         } else {
           const { error } = await supabase
@@ -402,11 +348,11 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
         }
       }
 
-      // orders.total_amount 재계산: 기존 orderItems + 신규 draft (반품 부호 적용 후).
+      // orders.total_amount 재계산: 기존 orderItems + 신규 draft (조정된 수량 기준).
       const existingTotal = orderItems.reduce((s, it) => s + it.amount, 0);
-      const newTotal = newRows.reduce((s, it) => {
-        const sign = it.is_return ? -1 : 1;
-        return s + sign * Math.abs(it.quantity) * it.unit_price;
+      const newTotal = adjustedNewRows.reduce((s, a) => {
+        const sign = a.item.is_return ? -1 : 1;
+        return s + sign * Math.abs(a.finalQty) * a.item.unit_price;
       }, 0);
       const { error: totalErr } = await supabase
         .from('orders')
@@ -415,11 +361,21 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
         .eq('company_id', companyId);
       if (totalErr) throw totalErr;
 
-      await queryClient.invalidateQueries({ queryKey: ['order-items', order.id] });
-      await queryClient.invalidateQueries({ queryKey: ['orders'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['order-items', order.id] }),
+        queryClient.invalidateQueries({ queryKey: ['orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory-stock', companyId] }),
+      ]);
       setEditMode(false);
       setDraftItems([]);
       setAutoFocus(null);
+
+      if (shortageMsgs.length > 0) {
+        alert(
+          '재고 부족으로 아래 품목의 수량이 자동 조정되었습니다:\n\n' +
+            shortageMsgs.join('\n'),
+        );
+      }
     } catch (err) {
       console.error('저장 실패:', err);
       alert('저장 중 오류가 발생했습니다.');
@@ -537,20 +493,6 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
             {order.total_amount.toLocaleString('ko-KR')}원
           </span>
           <div style={{ flex: 1 }} />
-          <button
-            type="button"
-            onClick={handleStockCheck}
-            disabled={isAdjusting}
-            title="재고부족 품목을 현재 재고수량으로 강제 조정"
-            className="px-2.5 py-1 text-xs font-medium rounded border border-[var(--warning)] text-[var(--warning)] hover:bg-[var(--warning-wash)] transition-colors disabled:opacity-50"
-          >
-            <AlertTriangle
-              size={11}
-              strokeWidth={1.8}
-              style={{ display: 'inline-block', marginRight: 3, verticalAlign: '-1px' }}
-            />
-            {isAdjusting ? '조정 중…' : '재고 확인'}
-          </button>
           <button
             type="button"
             onClick={handleAddReturn}
@@ -778,7 +720,11 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
                               <input
                                 type="number"
                                 min={isNewRow ? 1 : 0}
-                                value={displayQty === 0 ? '' : displayQty}
+                                // 🔴 신규 행만 0 → 빈문자열(placeholder 표시). 기존 행은
+                                //    품절 자동조정 결과 quantity=0 을 명시적으로 보여줘야 함.
+                                value={
+                                  isNewRow && displayQty === 0 ? '' : displayQty
+                                }
                                 placeholder={isNewRow ? '수량' : undefined}
                                 title={
                                   isShortage

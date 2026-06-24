@@ -19,6 +19,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
 import { useCustomers, type Customer } from '@/hooks/queries/useCustomers';
+import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 import { useProducts, type Product } from '@/hooks/queries/useProducts';
 import { calcSupplyPriceByGrade } from '@/utils/calculations';
 
@@ -108,6 +109,8 @@ export function OrderEntryPage() {
 
   const { data: customers = [] } = useCustomers(companyId);
   const { data: products = [] } = useProducts(companyId);
+  // 🟠 저장 시점 재고 자동조정용 — Map<product_id, ProductStockInfo>.
+  const { data: stockSummary } = useInventoryStock(companyId);
 
   // ───── 헤더 ─────
   const [orderType, setOrderType] = useState<OrderType>('일반주문');
@@ -521,6 +524,39 @@ export function OrderEntryPage() {
       return;
     }
 
+    // 🔴 자동 재고조정 — 비반품 행에 대해 quantity > stock 이면 축소,
+    //    원래 수량을 original_quantity 로 RPC 에 전달. 누적 메시지 후 알림.
+    const stockByProduct = stockSummary?.stockByProduct;
+    const shortageMsgs: string[] = [];
+    const adjusted = valid.map((r) => {
+      if (r.is_return) {
+        return { row: r, finalQty: r.quantity, originalQty: null as number | null };
+      }
+      const stock = stockByProduct?.get(r.product_id)?.current ?? 0;
+      if (r.quantity > stock) {
+        const finalQty = Math.max(0, stock);
+        shortageMsgs.push(
+          `[${r.product_name}] ${r.quantity}개 주문 → 재고 ${stock}개 (${finalQty}개로 조정)`,
+        );
+        return { row: r, finalQty, originalQty: r.quantity };
+      }
+      return { row: r, finalQty: r.quantity, originalQty: null };
+    });
+    // 조정 결과 finalQty=0 인 행은 RPC에 보내지 않음 (insert_order amount 합산 무의미).
+    // 다만 사용자에게는 결품 사실을 알리기 위해 메시지는 유지.
+    const itemsForRpc = adjusted.filter((a) => Math.abs(a.finalQty) > 0);
+    if (itemsForRpc.length === 0) {
+      if (shortageMsgs.length > 0) {
+        alert(
+          '모든 품목이 결품 상태로 조정되어 저장할 수 없습니다:\n\n' +
+            shortageMsgs.join('\n'),
+        );
+      } else {
+        alert('주문 항목을 1개 이상 입력해주세요.');
+      }
+      return;
+    }
+
     setIsSaving(true);
     try {
       const { data, error } = await supabase.rpc('insert_order', {
@@ -530,18 +566,30 @@ export function OrderEntryPage() {
         p_source: 'manual',
         p_status: 'confirmed',
         p_memo: memo || null,
-        p_items: valid.map((r) => ({
-          product_id: r.product_id,
-          quantity: r.is_return ? -Math.abs(r.quantity) : r.quantity,
-          unit_price: r.unit_price,
-          amount: r.is_return ? -Math.abs(r.amount) : r.amount,
-          is_return: r.is_return,
+        p_items: itemsForRpc.map((a) => ({
+          product_id: a.row.product_id,
+          quantity: a.row.is_return ? -Math.abs(a.finalQty) : a.finalQty,
+          original_quantity: a.originalQty,
+          unit_price: a.row.unit_price,
+          amount:
+            (a.row.is_return ? -1 : 1) * Math.abs(a.finalQty) * a.row.unit_price,
+          is_return: a.row.is_return,
         })),
       });
       if (error) throw error;
 
       setRecentCustomerIds(writeRecent(customerId));
-      await queryClient.invalidateQueries({ queryKey: ['orders'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory-stock', companyId] }),
+      ]);
+
+      if (shortageMsgs.length > 0) {
+        alert(
+          '재고 부족으로 아래 품목의 수량이 자동 조정되었습니다:\n\n' +
+            shortageMsgs.join('\n'),
+        );
+      }
       navigate('/sales/orders', { state: { selectedOrderId: data } });
     } catch (err) {
       console.error('저장 실패:', err);
@@ -549,7 +597,7 @@ export function OrderEntryPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [companyId, customerId, orderDate, memo, queryClient, navigate]);
+  }, [companyId, customerId, orderDate, memo, queryClient, navigate, stockSummary]);
 
   // ───── Ctrl+S 전역 단축키 ─────
   const handleSaveRef = useRef(handleSave);
