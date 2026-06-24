@@ -16,7 +16,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2 } from 'lucide-react';
+import { LayoutGrid, List, Plus, Trash2 } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
@@ -182,6 +182,22 @@ export function ReceivablesPage() {
   // 필터: 미수금 양수만 / 0 또는 음수까지 / 그룹만
   const [filter, setFilter] = useState<'positive' | 'all' | 'group'>('positive');
 
+  // 뷰 모드: 테이블 / 카드 (localStorage 유지)
+  const [viewMode, setViewMode] = useState<'table' | 'card'>(() => {
+    if (typeof window === 'undefined') return 'table';
+    const saved = window.localStorage.getItem('receivables-view');
+    return saved === 'card' ? 'card' : 'table';
+  });
+
+  const changeViewMode = (mode: 'table' | 'card') => {
+    setViewMode(mode);
+    try {
+      window.localStorage.setItem('receivables-view', mode);
+    } catch {
+      // localStorage 접근 실패 (Private mode 등) — 메모리에만 보관.
+    }
+  };
+
   const filtered = useMemo(() => {
     if (filter === 'all') return summaries;
     if (filter === 'group') return summaries.filter((s) => s.is_group);
@@ -247,22 +263,28 @@ export function ReceivablesPage() {
             </h1>
           </div>
 
-          <div style={{ display: 'flex', gap: 6 }}>
-            <FilterPill
-              active={filter === 'positive'}
-              onClick={() => setFilter('positive')}
-            >
-              미수금 있음
-            </FilterPill>
-            <FilterPill
-              active={filter === 'group'}
-              onClick={() => setFilter('group')}
-            >
-              그룹만
-            </FilterPill>
-            <FilterPill active={filter === 'all'} onClick={() => setFilter('all')}>
-              전체
-            </FilterPill>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <ViewToggle mode={viewMode} onChange={changeViewMode} />
+            <div style={{ display: 'flex', gap: 6 }}>
+              <FilterPill
+                active={filter === 'positive'}
+                onClick={() => setFilter('positive')}
+              >
+                미수금 있음
+              </FilterPill>
+              <FilterPill
+                active={filter === 'group'}
+                onClick={() => setFilter('group')}
+              >
+                그룹만
+              </FilterPill>
+              <FilterPill
+                active={filter === 'all'}
+                onClick={() => setFilter('all')}
+              >
+                전체
+              </FilterPill>
+            </div>
           </div>
         </header>
 
@@ -301,11 +323,17 @@ export function ReceivablesPage() {
           </div>
         )}
 
-        {/* 미수금 목록 */}
+        {/* 미수금 목록 — 목록 또는 카드 */}
         {companyLoading || isLoading ? (
           <EmptyBox label="불러오는 중…" />
         ) : filtered.length === 0 ? (
           <EmptyBox label="표시할 미수금이 없습니다." />
+        ) : viewMode === 'card' ? (
+          <ReceivablesCardGrid
+            rows={filtered}
+            onCardClick={setDrilldownEntity}
+            onPaymentClick={setPaymentTarget}
+          />
         ) : (
           <ReceivablesTable
             rows={filtered}
@@ -628,6 +656,349 @@ const numStyle: React.CSSProperties = {
   fontFamily: 'var(--font-num)',
   fontVariantNumeric: 'tabular-nums',
 };
+
+// ───────────────────────────────────────────────────────────
+// 뷰 토글 (목록 ↔ 카드)
+// ───────────────────────────────────────────────────────────
+
+function ViewToggle({
+  mode,
+  onChange,
+}: {
+  mode: 'table' | 'card';
+  onChange: (mode: 'table' | 'card') => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="뷰 모드"
+      style={{
+        display: 'inline-flex',
+        border: '1px solid var(--line)',
+        borderRadius: 8,
+        overflow: 'hidden',
+        background: 'var(--surface)',
+      }}
+    >
+      <ToggleBtn
+        active={mode === 'table'}
+        onClick={() => onChange('table')}
+        label="목록"
+      >
+        <List size={14} strokeWidth={1.8} />
+      </ToggleBtn>
+      <div style={{ width: 1, background: 'var(--line)' }} />
+      <ToggleBtn
+        active={mode === 'card'}
+        onClick={() => onChange('card')}
+        label="카드"
+      >
+        <LayoutGrid size={14} strokeWidth={1.8} />
+      </ToggleBtn>
+    </div>
+  );
+}
+
+function ToggleBtn({
+  active,
+  onClick,
+  label,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        height: 32,
+        padding: '0 12px',
+        background: active ? 'var(--brand-wash)' : 'transparent',
+        border: 'none',
+        color: active ? 'var(--brand)' : 'var(--ink-3)',
+        fontSize: 12.5,
+        fontWeight: active ? 600 : 500,
+        cursor: 'pointer',
+        fontFamily: 'var(--font-kr)',
+      }}
+    >
+      {children}
+      {label}
+    </button>
+  );
+}
+
+// ───────────────────────────────────────────────────────────
+// 카드 그리드 + 카드
+// ───────────────────────────────────────────────────────────
+
+function ReceivablesCardGrid({
+  rows,
+  onCardClick,
+  onPaymentClick,
+}: {
+  rows: ReceivableSummary[];
+  onCardClick: (e: ReceivableSummary) => void;
+  onPaymentClick: (e: ReceivableSummary) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+        gap: 12,
+      }}
+    >
+      {rows.map((r) => (
+        <ReceivableCard
+          key={r.entity_key}
+          item={r}
+          onClick={() => onCardClick(r)}
+          onPayment={(e) => {
+            e.stopPropagation();
+            onPaymentClick(r);
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ReceivableCard({
+  item,
+  onClick,
+  onPayment,
+}: {
+  item: ReceivableSummary;
+  onClick: () => void;
+  onPayment: (e: React.MouseEvent) => void;
+}) {
+  const isOverdue = item.outstanding > 0;
+  const isCredit = item.outstanding < 0;
+
+  const outstandingColor = isCredit
+    ? 'var(--info, #2563eb)'
+    : isOverdue
+      ? 'var(--danger)'
+      : 'var(--success, #16a34a)';
+
+  const dotColor = isCredit
+    ? 'var(--info, #2563eb)'
+    : isOverdue
+      ? 'var(--danger)'
+      : 'var(--success, #16a34a)';
+
+  return (
+    <div
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      style={{
+        background: 'var(--surface)',
+        border: '1px solid var(--line)',
+        borderRadius: 12,
+        padding: 14,
+        cursor: 'pointer',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+        transition: 'box-shadow .15s, border-color .15s',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.boxShadow = 'var(--shadow-md, 0 4px 12px rgba(0,0,0,.06))';
+        e.currentTarget.style.borderColor = 'var(--brand)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.boxShadow = 'none';
+        e.currentTarget.style.borderColor = 'var(--line)';
+      }}
+    >
+      {/* 헤더: 이름/배지 + 상태 dot */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 8,
+        }}
+      >
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              flexWrap: 'wrap',
+            }}
+          >
+            <span
+              className="disp"
+              style={{
+                fontSize: 13.5,
+                fontWeight: 600,
+                color: 'var(--ink)',
+                lineHeight: 1.3,
+              }}
+            >
+              {item.display_name}
+            </span>
+            {item.is_group && <GroupBadge />}
+          </div>
+          {item.is_group && (
+            <div
+              style={{
+                fontSize: 11,
+                color: 'var(--ink-3)',
+                marginTop: 3,
+              }}
+            >
+              발행: {item.billing_name}
+            </div>
+          )}
+        </div>
+        <span
+          aria-label={
+            isCredit ? '초과 입금' : isOverdue ? '미수금 발생' : '정산 완료'
+          }
+          title={
+            isCredit ? '초과 입금' : isOverdue ? '미수금 발생' : '정산 완료'
+          }
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: 999,
+            background: dotColor,
+            flexShrink: 0,
+            marginTop: 4,
+          }}
+        />
+      </div>
+
+      {/* 금액 영역 */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          fontSize: 12.5,
+        }}
+      >
+        <CardRow label="청구액" value={item.total_billed} muted />
+        <CardRow label="입금액" value={item.total_paid} muted />
+        <div
+          style={{
+            height: 1,
+            background: 'var(--line)',
+            margin: '2px 0',
+          }}
+        />
+        <CardRow
+          label="미수금"
+          value={item.outstanding}
+          emphasis
+          color={outstandingColor}
+        />
+      </div>
+
+      {/* 푸터: 월차감 + 입금 등록 */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          marginTop: 'auto',
+          paddingTop: 4,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            color: item.monthly_deduction > 0 ? 'var(--brand)' : 'var(--ink-3)',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {item.monthly_deduction > 0
+            ? `₩${fmtWon(item.monthly_deduction)}/월 차감`
+            : ''}
+        </span>
+        <button
+          type="button"
+          onClick={onPayment}
+          className="btn-base primary"
+          style={{
+            height: 28,
+            fontSize: 11.5,
+            padding: '0 10px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+          }}
+        >
+          <Plus size={12} /> 입금 등록
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CardRow({
+  label,
+  value,
+  muted,
+  emphasis,
+  color,
+}: {
+  label: string;
+  value: number;
+  muted?: boolean;
+  emphasis?: boolean;
+  color?: string;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'baseline',
+      }}
+    >
+      <span
+        style={{
+          color: muted ? 'var(--ink-3)' : 'var(--ink-2)',
+          fontWeight: emphasis ? 600 : 400,
+        }}
+      >
+        {label}
+      </span>
+      <span
+        className="num"
+        style={{
+          color: color ?? (muted ? 'var(--ink-2)' : 'var(--ink)'),
+          fontWeight: emphasis ? 700 : 500,
+          fontVariantNumeric: 'tabular-nums',
+          fontFamily: 'var(--font-num)',
+        }}
+      >
+        ₩{fmtWon(value)}
+      </span>
+    </div>
+  );
+}
 
 // ───────────────────────────────────────────────────────────
 // 드릴다운 모달 (탭 3개)
