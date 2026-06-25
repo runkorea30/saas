@@ -27,6 +27,7 @@ import { BankingPage } from '@/pages/finance/BankingPage';
 import { ReceivablesPage } from '@/pages/finance/ReceivablesPage';
 import { TaxInvoicesPage } from '@/pages/finance/TaxInvoicesPage';
 import { BillingPage } from '@/pages/sales/BillingPage';
+import { DocumentsPage } from '@/pages/documents/DocumentsPage';
 
 function App() {
   return (
@@ -61,6 +62,8 @@ function App() {
           <Route path="tax-invoices" element={<TaxInvoicesPage />} />
           <Route path="pnl" element={<PlaceholderPage />} />
         </Route>
+
+        <Route path="documents" element={<DocumentsPage />} />
 
         <Route path="settings">
           <Route index element={<Navigate to="/settings/customers" replace />} />

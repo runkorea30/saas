@@ -66,6 +66,12 @@ export const navSections: NavSection[] = [
     ],
   },
   {
+    path: '/documents',
+    label: '문서관리',
+    indexRedirect: '/documents',
+    items: [],
+  },
+  {
     path: '/settings',
     label: '설정',
     indexRedirect: '/settings/customers',

@@ -1597,6 +1597,103 @@ export type Database = {
           },
         ]
       }
+      document_files: {
+        Row: {
+          category: string
+          company_id: string
+          created_at: string | null
+          file_name: string
+          file_path: string
+          file_size: number | null
+          id: string
+          memo: string | null
+          mime_type: string | null
+          uploaded_at: string | null
+        }
+        Insert: {
+          category: string
+          company_id: string
+          created_at?: string | null
+          file_name: string
+          file_path: string
+          file_size?: number | null
+          id?: string
+          memo?: string | null
+          mime_type?: string | null
+          uploaded_at?: string | null
+        }
+        Update: {
+          category?: string
+          company_id?: string
+          created_at?: string | null
+          file_name?: string
+          file_path?: string
+          file_size?: number | null
+          id?: string
+          memo?: string | null
+          mime_type?: string | null
+          uploaded_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_files_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inspection_certificates: {
+        Row: {
+          company_id: string
+          created_at: string | null
+          hs_no: string | null
+          id: string
+          import_req_no: string | null
+          import_valid_until: string | null
+          inspection_no: string | null
+          inspection_valid_until: string | null
+          list_no: string | null
+          product_name: string
+          updated_at: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string | null
+          hs_no?: string | null
+          id?: string
+          import_req_no?: string | null
+          import_valid_until?: string | null
+          inspection_no?: string | null
+          inspection_valid_until?: string | null
+          list_no?: string | null
+          product_name: string
+          updated_at?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string | null
+          hs_no?: string | null
+          id?: string
+          import_req_no?: string | null
+          import_valid_until?: string | null
+          inspection_no?: string | null
+          inspection_valid_until?: string | null
+          list_no?: string | null
+          product_name?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inspection_certificates_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_profiles: {
         Row: {
           created_at: string
