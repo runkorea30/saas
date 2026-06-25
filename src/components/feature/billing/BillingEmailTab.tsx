@@ -259,7 +259,8 @@ export function BillingEmailTab({
     return m;
   }, [monthlyOrders]);
 
-  // 거래처 행 데이터 (정렬: 청구금액 있는 거래처 먼저)
+  // 거래처 행 데이터 — 해당 월 청구금액 0 초과인 거래처만 표시
+  // (반품금액 표시를 위해 totalAmount > 0 기준; 매출 없이 반품만 있는 케이스는 제외).
   const customerRows = useMemo(() => {
     return customers
       .map((c) => {
@@ -271,20 +272,12 @@ export function BillingEmailTab({
           isAlpha: c.name.includes(ALPHA_KEYWORD),
         };
       })
-      .sort((a, b) => {
-        // 청구금액 있는 거래처 우선 → 그 다음 한글 정렬은 useCustomers 에서 이미 적용됨.
-        if (a.totals.totalAmount > 0 && b.totals.totalAmount === 0) return -1;
-        if (a.totals.totalAmount === 0 && b.totals.totalAmount > 0) return 1;
-        return 0;
-      });
+      .filter((r) => r.totals.totalAmount > 0);
   }, [customers, ordersByCustomer]);
 
-  // 발송 가능한 거래처 (이메일 있음 + 청구금액 > 0)
+  // 발송 가능한 거래처 (billing_email 있음 — totalAmount > 0 은 customerRows 에서 이미 보장).
   const eligibleRows = useMemo(
-    () =>
-      customerRows.filter(
-        (r) => r.customer.email && r.totals.totalAmount > 0,
-      ),
+    () => customerRows.filter((r) => Boolean(r.customer.billing_email)),
     [customerRows],
   );
 
@@ -347,11 +340,11 @@ export function BillingEmailTab({
 
     for (const row of targets) {
       const { customer, totals, isAlpha } = row;
-      if (!customer.email) {
+      if (!customer.billing_email) {
         setSendStatus((prev) => ({ ...prev, [customer.id]: 'error' }));
         setSendError((prev) => ({
           ...prev,
-          [customer.id]: '이메일 주소 없음',
+          [customer.id]: '청구서 발송 이메일 없음',
         }));
         continue;
       }
@@ -424,7 +417,7 @@ export function BillingEmailTab({
 
         await sendGmailEmail({
           accessToken,
-          toEmail: customer.email,
+          toEmail: customer.billing_email,
           subject,
           body,
           attachments,
@@ -450,7 +443,7 @@ export function BillingEmailTab({
   // ── 렌더 ─────────────────────────────────────────────────────────────
 
   const eligibleCheckedCount = customerRows.filter(
-    (r) => checkedIds.has(r.customer.id) && r.customer.email && r.totals.totalAmount > 0,
+    (r) => checkedIds.has(r.customer.id) && Boolean(r.customer.billing_email),
   ).length;
 
   return (
@@ -572,7 +565,7 @@ export function BillingEmailTab({
               fontSize: 13,
             }}
           >
-            거래처가 없습니다.
+            해당 월에 청구할 거래처가 없습니다.
           </div>
         ) : (
           <table
@@ -598,7 +591,7 @@ export function BillingEmailTab({
                   />
                 </th>
                 <th style={thStyle('left')}>거래처명</th>
-                <th style={thStyle('left', 220)}>이메일</th>
+                <th style={thStyle('left', 240)}>청구서 이메일</th>
                 <th style={thStyle('right', 140)}>청구금액</th>
                 <th style={thStyle('right', 120)}>반품금액</th>
                 <th style={thStyle('center', 120)}>상태</th>
@@ -607,9 +600,9 @@ export function BillingEmailTab({
             <tbody>
               {customerRows.map((row) => {
                 const { customer, totals, isAlpha } = row;
-                const hasEmail = Boolean(customer.email);
+                const hasBillingEmail = Boolean(customer.billing_email);
                 const hasAmount = totals.totalAmount > 0;
-                const eligible = hasEmail && hasAmount;
+                const eligible = hasBillingEmail && hasAmount;
                 const status = sendStatus[customer.id] ?? 'idle';
                 const err = sendError[customer.id];
                 const checked = checkedIds.has(customer.id);
@@ -658,13 +651,15 @@ export function BillingEmailTab({
                     <td
                       style={{
                         ...tdStyle('left'),
-                        color: hasEmail ? 'var(--ink)' : 'var(--ink-3)',
-                        fontFamily: hasEmail
+                        color: hasBillingEmail
+                          ? 'var(--ink)'
+                          : 'var(--ink-3)',
+                        fontFamily: hasBillingEmail
                           ? 'var(--font-en), var(--font-kr)'
                           : 'var(--font-kr)',
                       }}
                     >
-                      {customer.email ?? '(이메일 없음)'}
+                      {customer.billing_email ?? '(미설정)'}
                     </td>
                     <td
                       style={{
@@ -713,6 +708,7 @@ export function BillingEmailTab({
         }}
       >
         ✓ 발송 계정: <strong>runkorea30@gmail.com</strong> (OAuth 테스트 모드)<br />
+        ✓ 수신처: 거래처별 <strong>청구서 발송 이메일</strong> (설정 → 거래처 편집에서 입력)<br />
         ✓ 일반 거래처: 청구서 PDF 1개 첨부<br />
         ✓ 알파문구 계열: 거래명세서 PDF + 종합청구서 엑셀 2개 첨부<br />
         ✓ 토큰 유효시간 1시간 — 만료 시 재로그인 필요
