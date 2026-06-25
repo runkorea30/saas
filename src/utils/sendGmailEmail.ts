@@ -1,12 +1,19 @@
 /**
  * Gmail REST API 직접 호출 발송 유틸.
  *
- * `gmail.users.messages.send` 엔드포인트에 MIME 멀티파트 메시지를 base64url 인코딩으로 전송.
- * 첨부파일(PDF / XLSX) 1개 이상 포함 가능.
+ * `gmail.users.messages.send` 엔드포인트에 MIME 메시지를 base64url 인코딩으로 전송.
  *
- * 🔴 한글 제목/본문은 RFC 2047 / UTF-8 base64 인코딩으로 처리 (Gmail 깨짐 방지).
- * 🔴 access_token 은 gmailAuth.ts 에서 발급받은 것을 그대로 사용.
+ * 발송 모드:
+ *  - 첨부 0개  → 단일 파트 text/plain MIME (반송률 낮음, 단순)
+ *  - 첨부 1개+ → multipart/mixed MIME
+ *
+ * 🔴 한글 헤더(Subject, filename)는 RFC 2047 UTF-8 base64 형식으로 인코딩.
+ * 🔴 raw 필드는 TextEncoder 기반 UTF-8 → base64url (btoa 직접 사용 시 한글 깨짐).
+ * 🔴 From 헤더 명시 → 일부 수신 메일서버(daum 등)가 미명시 시 반송 가능성.
  */
+
+const FROM_DISPLAY = '런코리아';
+const FROM_ADDRESS = 'runkorea30@gmail.com';
 
 export interface GmailAttachment {
   filename: string;
@@ -24,9 +31,30 @@ export interface SendGmailParams {
   attachments: GmailAttachment[];
 }
 
-/** UTF-8 안전 base64 (한글 포함). */
+// ── 인코딩 헬퍼 ────────────────────────────────────────────────────────
+
+/** Uint8Array → binary string (chunked, stack overflow 회피). */
+function bytesToBinary(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const slice = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, Array.from(slice));
+  }
+  return binary;
+}
+
+/** UTF-8 문자열 → base64. 한글 안전. */
 function utf8ToBase64(s: string): string {
-  return btoa(unescape(encodeURIComponent(s)));
+  return btoa(bytesToBinary(new TextEncoder().encode(s)));
+}
+
+/** UTF-8 문자열 → base64url (Gmail API raw 인코딩 규약). */
+function toBase64Url(s: string): string {
+  return utf8ToBase64(s)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 }
 
 /** RFC 2047 — UTF-8 base64 인코딩된 헤더 값 (한글 제목/파일명용). */
@@ -34,65 +62,97 @@ function encodeHeader(value: string): string {
   return `=?UTF-8?B?${utf8ToBase64(value)}?=`;
 }
 
-/** base64 → base64url (Gmail API raw 인코딩 규약). */
-function toBase64Url(s: string): string {
-  return s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+/** ASCII-only 헤더 확인 — ASCII 만이면 그대로, 그 외 RFC 2047 인코딩. */
+function safeHeader(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  return /^[\x00-\x7F]*$/.test(value) ? value : encodeHeader(value);
 }
 
-/** 첨부 데이터를 76자 단위로 줄바꿈 (MIME 사양). */
+/** 첨부 base64 데이터를 76자 단위로 줄바꿈 (MIME 사양). */
 function chunkBase64(s: string, size = 76): string {
   const lines: string[] = [];
   for (let i = 0; i < s.length; i += size) lines.push(s.slice(i, i + size));
   return lines.join('\r\n');
 }
 
-export async function sendGmailEmail(params: SendGmailParams): Promise<void> {
-  const { accessToken, toEmail, subject, body, attachments } = params;
+// ── MIME 빌더 ─────────────────────────────────────────────────────────
+
+/** 첨부 없는 단순 text/plain MIME. */
+function buildSimpleMime(opts: {
+  toEmail: string;
+  subject: string;
+  body: string;
+}): string {
+  const { toEmail, subject, body } = opts;
+  return [
+    `From: ${FROM_DISPLAY} <${FROM_ADDRESS}>`,
+    `To: ${toEmail}`,
+    `Subject: ${safeHeader(subject)}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: text/plain; charset=UTF-8`,
+    `Content-Transfer-Encoding: base64`,
+    ``,
+    chunkBase64(utf8ToBase64(body)),
+  ].join('\r\n');
+}
+
+/** multipart/mixed MIME — 첨부 1개 이상. */
+function buildMultipartMime(opts: {
+  toEmail: string;
+  subject: string;
+  body: string;
+  attachments: GmailAttachment[];
+}): string {
+  const { toEmail, subject, body, attachments } = opts;
   const boundary = `boundary_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const nl = '\r\n';
 
-  let mime = '';
-  mime += `To: ${toEmail}${nl}`;
-  mime += `Subject: ${encodeHeader(subject)}${nl}`;
-  mime += `MIME-Version: 1.0${nl}`;
-  mime += `Content-Type: multipart/mixed; boundary="${boundary}"${nl}`;
-  mime += nl;
+  const parts: string[] = [
+    `From: ${FROM_DISPLAY} <${FROM_ADDRESS}>`,
+    `To: ${toEmail}`,
+    `Subject: ${safeHeader(subject)}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/plain; charset=UTF-8`,
+    `Content-Transfer-Encoding: base64`,
+    ``,
+    chunkBase64(utf8ToBase64(body)),
+  ];
 
-  // 본문 (text/plain, UTF-8 base64)
-  mime += `--${boundary}${nl}`;
-  mime += `Content-Type: text/plain; charset=UTF-8${nl}`;
-  mime += `Content-Transfer-Encoding: base64${nl}`;
-  mime += nl;
-  mime += chunkBase64(utf8ToBase64(body)) + nl;
-
-  // 첨부파일
   for (const att of attachments) {
-    mime += `--${boundary}${nl}`;
-    mime += `Content-Type: ${att.mimeType}; name="${encodeHeader(att.filename)}"${nl}`;
-    mime += `Content-Transfer-Encoding: base64${nl}`;
-    mime += `Content-Disposition: attachment; filename="${encodeHeader(att.filename)}"${nl}`;
-    mime += nl;
-    mime += chunkBase64(att.base64Data) + nl;
+    parts.push(
+      `--${boundary}`,
+      `Content-Type: ${att.mimeType}; name="${safeHeader(att.filename)}"`,
+      `Content-Transfer-Encoding: base64`,
+      `Content-Disposition: attachment; filename="${safeHeader(att.filename)}"`,
+      ``,
+      chunkBase64(att.base64Data),
+    );
   }
-  mime += `--${boundary}--`;
+  parts.push(`--${boundary}--`);
+  return parts.join(nl);
+}
 
-  const raw = toBase64Url(utf8ToBase64(mime));
+// ── 메인 발송 함수 ─────────────────────────────────────────────────────
 
-  // [DEBUG] Gmail 500 에러 원인 진단용 로그. 원인 파악 후 제거 예정.
+export async function sendGmailEmail(params: SendGmailParams): Promise<void> {
+  const { accessToken, toEmail, subject, body, attachments } = params;
+
+  const mime =
+    attachments.length === 0
+      ? buildSimpleMime({ toEmail, subject, body })
+      : buildMultipartMime({ toEmail, subject, body, attachments });
+
+  const raw = toBase64Url(mime);
+
+  // [DEBUG] 반송 진단용 임시 로그 — 안정화 후 제거.
   /* eslint-disable no-console */
-  console.log('[sendGmailEmail] accessToken(20):', accessToken.slice(0, 20));
   console.log('[sendGmailEmail] toEmail:', toEmail);
   console.log('[sendGmailEmail] subject:', subject);
-  console.log('[sendGmailEmail] body:', body);
-  console.log(
-    '[sendGmailEmail] attachments:',
-    attachments.map((a) => ({
-      filename: a.filename,
-      mimeType: a.mimeType,
-      base64Length: a.base64Data.length,
-    })),
-  );
-  console.log('[sendGmailEmail] MIME ---\n' + mime + '\n--- END MIME');
+  console.log('[sendGmailEmail] attachments count:', attachments.length);
+  console.log('[sendGmailEmail] raw (first 200):', raw.substring(0, 200));
   /* eslint-enable no-console */
 
   const response = await fetch(
@@ -107,23 +167,23 @@ export async function sendGmailEmail(params: SendGmailParams): Promise<void> {
     },
   );
 
-  // [DEBUG] response 상태/본문 전체 출력.
+  let responseBody: unknown = null;
+  try {
+    responseBody = await response.json();
+  } catch {
+    // ignore parse error
+  }
+
   /* eslint-disable no-console */
   console.log('[sendGmailEmail] status:', response.status);
-  let errorBody: unknown = null;
-  try {
-    errorBody = await response.json();
-    console.log(
-      '[sendGmailEmail] response body:',
-      JSON.stringify(errorBody, null, 2),
-    );
-  } catch (e) {
-    console.log('[sendGmailEmail] response body parse failed:', e);
-  }
+  console.log(
+    '[sendGmailEmail] response body:',
+    JSON.stringify(responseBody, null, 2),
+  );
   /* eslint-enable no-console */
 
   if (!response.ok) {
-    const errObj = errorBody as
+    const errObj = responseBody as
       | { error?: { message?: string; status?: string } }
       | null;
     const message =
