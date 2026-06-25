@@ -1,8 +1,9 @@
 /**
  * 청구서 페이지 — 판매 > 청구서.
  *
- * 거래처 + 연/월 선택 후 해당 월 거래내역을 날짜별로 그룹핑한 청구서(혹은 거래명세서)를 미리보고
- * 인쇄/PDF 출력한다. 이메일 발송은 UI만(추후 구현).
+ * 상단 탭 2개:
+ *  - "청구서 미리보기": 단일 거래처 + 연/월 선택 → 인쇄/PDF 출력
+ *  - "이메일 발송": 거래처 다중 선택 → Gmail 첨부 발송 (PDF + 알파문구 한정 엑셀)
  *
  * 🔴 CLAUDE.md §1: company_id 는 useCompany() 훅에서만 획득.
  * 🔴 CLAUDE.md §2: 공급가는 calcSupplyPriceByCustomerGrade (단일 진입점) — BillingPrintView 내부에서 호출.
@@ -17,13 +18,13 @@ import { useCompany } from '@/hooks/useCompany';
 import { useCustomers } from '@/hooks/queries/useCustomers';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
-import { useToast } from '@/components/ui/Toast';
 import { generateAlphaBillingExcel } from '@/utils/generateAlphaBillingExcel';
 import {
   BillingPrintView,
   type BillingDateGroup,
   type BillingItem,
 } from '@/components/feature/billing/BillingPrintView';
+import { BillingEmailTab } from '@/components/feature/billing/BillingEmailTab';
 
 // ── 데이터 ─────────────────────────────────────────────────────────────
 
@@ -119,20 +120,90 @@ const ALPHA_KEYWORD = '알파문구';
 
 // ── 페이지 ───────────────────────────────────────────────────────────────
 
+type TabKey = 'preview' | 'email';
+
 export function BillingPage() {
   const { companyId, isLoading: companyLoading } = useCompany();
-  const { showToast } = useToast();
 
+  const [activeTab, setActiveTab] = useState<TabKey>('preview');
+
+  // 거래처 목록 — 두 탭 공용.
+  const { data: customers = [], isLoading: customersLoading } =
+    useCustomers(companyId);
+
+  return (
+    <div className="max-w-[1400px] mx-auto px-6 py-6">
+      {/* 탭 헤더 */}
+      <div
+        className="no-print"
+        style={{
+          display: 'flex',
+          gap: 4,
+          marginBottom: 16,
+          borderBottom: '1px solid var(--line)',
+        }}
+      >
+        <TabButton
+          active={activeTab === 'preview'}
+          onClick={() => setActiveTab('preview')}
+          label="청구서 미리보기"
+        />
+        <TabButton
+          active={activeTab === 'email'}
+          onClick={() => setActiveTab('email')}
+          label="이메일 발송"
+        />
+      </div>
+
+      {activeTab === 'preview' && (
+        <PreviewTab
+          companyId={companyId}
+          companyLoading={companyLoading}
+          customers={customers}
+          customersLoading={customersLoading}
+        />
+      )}
+
+      {activeTab === 'email' && (
+        <BillingEmailTab
+          companyId={companyId}
+          customers={customers}
+          customersLoading={customersLoading}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── 청구서 미리보기 탭 ───────────────────────────────────────────────────
+
+interface PreviewTabProps {
+  companyId: string | null;
+  companyLoading: boolean;
+  customers: ReturnType<typeof useCustomers>['data'] extends infer T
+    ? T extends undefined
+      ? never
+      : T
+    : never;
+  customersLoading: boolean;
+}
+
+function PreviewTab({
+  companyId,
+  companyLoading,
+  customers,
+  customersLoading,
+}: PreviewTabProps) {
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState<number>(now.getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState<number>(now.getMonth() + 1);
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<number>(
+    now.getMonth() + 1,
+  );
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(
+    null,
+  );
   const [isPrinting, setIsPrinting] = useState(false);
 
-  // 거래처 목록
-  const { data: customers = [], isLoading: customersLoading } = useCustomers(companyId);
-
-  // 주문 데이터
   const { data: orders = [], isLoading: ordersLoading } = useBillingOrders({
     companyId,
     customerId: selectedCustomerId,
@@ -140,7 +211,6 @@ export function BillingPage() {
     month: selectedMonth,
   });
 
-  // 날짜별 그룹핑
   const dateGroups = useMemo<BillingDateGroup[]>(() => {
     const map = new Map<string, BillingItem[]>();
     for (const o of orders) {
@@ -173,13 +243,15 @@ export function BillingPage() {
       .map(([date, items]) => ({ date, items }));
   }, [orders]);
 
-  const selectedCustomer = customers.find((c) => c.id === selectedCustomerId) ?? null;
+  const selectedCustomer =
+    customers.find((c) => c.id === selectedCustomerId) ?? null;
   const isAlpha = selectedCustomer?.name?.includes(ALPHA_KEYWORD) ?? false;
-  const documentTitle: '청구서' | '거래명세서' = isAlpha ? '거래명세서' : '청구서';
+  const documentTitle: '청구서' | '거래명세서' = isAlpha
+    ? '거래명세서'
+    : '청구서';
 
   const hasData = selectedCustomer && dateGroups.length > 0;
 
-  // 연도 옵션: 2023 ~ 올해+1
   const yearOptions = useMemo(() => {
     const list: number[] = [];
     for (let y = now.getFullYear() + 1; y >= 2023; y -= 1) list.push(y);
@@ -189,15 +261,10 @@ export function BillingPage() {
   const handlePrint = () => {
     if (!hasData) return;
     setIsPrinting(true);
-    // 다음 페인트 사이클에 인쇄 → 직후 portal 정리.
     setTimeout(() => {
       window.print();
       setIsPrinting(false);
     }, 300);
-  };
-
-  const handleEmail = () => {
-    showToast({ kind: 'info', text: '이메일 발송 기능은 준비 중입니다.' });
   };
 
   /**
@@ -205,7 +272,6 @@ export function BillingPage() {
    *
    * 단일 거래처(=한 지점) 기준 1행짜리 종합청구서.
    * 청구금액 = is_return=false 항목 amount 합 / 반품금액 = is_return=true 항목 amount 절대값 합.
-   * `orders.total_amount` 는 반품 상쇄가 적용된 순매출이라 청구/반품 분리 표시에 부적합 → items 합산 사용.
    */
   const handleAlphaExcelDownload = () => {
     if (!orders.length || !selectedCustomer) return;
@@ -234,10 +300,8 @@ export function BillingPage() {
     });
   };
 
-  // ── 렌더 ───────────────────────────────────────────────────────────────
-
   return (
-    <div className="max-w-[1400px] mx-auto px-6 py-6">
+    <>
       {/* 상단 필터 바 */}
       <div
         className="no-print"
@@ -253,10 +317,6 @@ export function BillingPage() {
           flexWrap: 'wrap',
         }}
       >
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-2)' }}>
-          청구서
-        </div>
-
         <select
           value={selectedYear}
           onChange={(e) => setSelectedYear(Number(e.target.value))}
@@ -299,16 +359,6 @@ export function BillingPage() {
 
         <div style={{ flex: 1 }} />
 
-        <button
-          type="button"
-          onClick={handleEmail}
-          className="btn-base"
-          disabled={!hasData}
-          title="이메일 발송"
-        >
-          <Mail className="ico-sm" />
-          <span>이메일 발송</span>
-        </button>
         {isAlpha && (
           <button
             type="button"
@@ -388,11 +438,48 @@ export function BillingPage() {
           </div>,
           document.body,
         )}
-    </div>
+    </>
   );
 }
 
 // ── 보조 컴포넌트 / 스타일 ───────────────────────────────────────────────
+
+function TabButton({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: '10px 18px',
+        fontSize: 13,
+        fontWeight: active ? 700 : 500,
+        color: active ? 'var(--ink)' : 'var(--ink-2)',
+        background: 'transparent',
+        border: 'none',
+        borderBottom: active
+          ? '2px solid var(--ink)'
+          : '2px solid transparent',
+        marginBottom: '-1px',
+        cursor: 'pointer',
+        fontFamily: 'var(--font-kr)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+      }}
+    >
+      {label === '이메일 발송' && <Mail size={13} />}
+      {label}
+    </button>
+  );
+}
 
 function EmptyState({ text }: { text: string }) {
   return (
