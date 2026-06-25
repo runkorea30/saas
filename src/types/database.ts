@@ -547,6 +547,7 @@ export type Database = {
       customers: {
         Row: {
           bank_aliases: string | null
+          billing_email: string | null
           business_address: string | null
           business_category: string | null
           business_id: string | null
@@ -574,6 +575,7 @@ export type Database = {
         }
         Insert: {
           bank_aliases?: string | null
+          billing_email?: string | null
           business_address?: string | null
           business_category?: string | null
           business_id?: string | null
@@ -601,6 +603,7 @@ export type Database = {
         }
         Update: {
           bank_aliases?: string | null
+          billing_email?: string | null
           business_address?: string | null
           business_category?: string | null
           business_id?: string | null

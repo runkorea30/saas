@@ -44,6 +44,8 @@ export interface Customer {
   contact1: string | null;
   contact2: string | null;
   email: string | null;
+  /** 청구서/거래명세서 PDF 자동 발송 수신 이메일. tax_email(세금계산서)과 별도. */
+  billing_email: string | null;
   delivery_address: string | null;
   settlement_cycle: string | null;
   bank_aliases: string | null;
@@ -85,7 +87,7 @@ export interface CustomerOrder {
 // ───────────────────────────────────────────────────────────
 
 const CUSTOMER_SELECT = `
-  id, name, grade, contact1, contact2, email, delivery_address,
+  id, name, grade, contact1, contact2, email, billing_email, delivery_address,
   settlement_cycle, bank_aliases, is_active, created_at, group_id,
   business_registration_number, ceo_name,
   business_address, business_type, business_category, tax_email,
@@ -181,6 +183,7 @@ export type CustomerUpdateInput = Partial<{
   contact1: string | null;
   contact2: string | null;
   email: string | null;
+  billing_email: string | null;
   delivery_address: string | null;
   bank_aliases: string | null;
   is_active: boolean;
