@@ -78,6 +78,23 @@ export async function sendGmailEmail(params: SendGmailParams): Promise<void> {
 
   const raw = toBase64Url(utf8ToBase64(mime));
 
+  // [DEBUG] Gmail 500 에러 원인 진단용 로그. 원인 파악 후 제거 예정.
+  /* eslint-disable no-console */
+  console.log('[sendGmailEmail] accessToken(20):', accessToken.slice(0, 20));
+  console.log('[sendGmailEmail] toEmail:', toEmail);
+  console.log('[sendGmailEmail] subject:', subject);
+  console.log('[sendGmailEmail] body:', body);
+  console.log(
+    '[sendGmailEmail] attachments:',
+    attachments.map((a) => ({
+      filename: a.filename,
+      mimeType: a.mimeType,
+      base64Length: a.base64Data.length,
+    })),
+  );
+  console.log('[sendGmailEmail] MIME ---\n' + mime + '\n--- END MIME');
+  /* eslint-enable no-console */
+
   const response = await fetch(
     'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
     {
@@ -90,14 +107,28 @@ export async function sendGmailEmail(params: SendGmailParams): Promise<void> {
     },
   );
 
+  // [DEBUG] response 상태/본문 전체 출력.
+  /* eslint-disable no-console */
+  console.log('[sendGmailEmail] status:', response.status);
+  let errorBody: unknown = null;
+  try {
+    errorBody = await response.json();
+    console.log(
+      '[sendGmailEmail] response body:',
+      JSON.stringify(errorBody, null, 2),
+    );
+  } catch (e) {
+    console.log('[sendGmailEmail] response body parse failed:', e);
+  }
+  /* eslint-enable no-console */
+
   if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      const json = await response.json();
-      detail = json?.error?.message ?? detail;
-    } catch {
-      // ignore
-    }
-    throw new Error(`Gmail 발송 실패 (${response.status}): ${detail}`);
+    const errObj = errorBody as
+      | { error?: { message?: string; status?: string } }
+      | null;
+    const message =
+      errObj?.error?.message ??
+      `Gmail 발송 실패 (${response.status}) ${response.statusText}`;
+    throw new Error(message);
   }
 }
