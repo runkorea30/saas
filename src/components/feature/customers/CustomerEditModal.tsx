@@ -26,6 +26,7 @@ interface FormState {
   contact1: string;
   contact2: string;
   email: string;
+  billing_email: string;
   delivery_address: string;
   bank_aliases: string;
   business_registration_number: string;
@@ -44,6 +45,7 @@ function initFromCustomer(c: Customer): FormState {
     contact1: c.contact1 ?? '',
     contact2: c.contact2 ?? '',
     email: c.email ?? '',
+    billing_email: c.billing_email ?? '',
     delivery_address: c.delivery_address ?? '',
     bank_aliases: c.bank_aliases ?? '',
     business_registration_number: c.business_registration_number ?? '',
@@ -112,6 +114,7 @@ export function CustomerEditModal({ open, customer, companyId, onClose }: Props)
       contact1: form.contact1.trim() || null,
       contact2: form.contact2.trim() || null,
       email: form.email.trim() || null,
+      billing_email: form.billing_email.trim() || null,
       delivery_address: form.delivery_address.trim() || null,
       bank_aliases: form.bank_aliases.trim() || null,
       business_registration_number:
@@ -234,6 +237,20 @@ export function CustomerEditModal({ open, customer, companyId, onClose }: Props)
             value={form.email}
             onChange={(e) => update('email', e.target.value)}
             placeholder="contact@example.com"
+            disabled={busy}
+            style={inputStyle}
+          />
+        </Field>
+
+        <Field
+          label="청구서 발송 이메일"
+          hint="세금계산서용 이메일과 다른 경우 별도 입력"
+        >
+          <input
+            type="email"
+            value={form.billing_email}
+            onChange={(e) => update('billing_email', e.target.value)}
+            placeholder="청구서를 받을 이메일 주소"
             disabled={busy}
             style={inputStyle}
           />
