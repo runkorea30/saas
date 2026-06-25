@@ -14,6 +14,14 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import nodemailer from 'nodemailer';
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb',
+    },
+  },
+};
+
 interface Attachment {
   filename: string;
   /** MIME 타입 — 'application/pdf' 등. */

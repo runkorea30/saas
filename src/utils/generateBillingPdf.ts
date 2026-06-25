@@ -15,7 +15,7 @@ export async function generateBillingPdfBase64(
   element: HTMLElement,
 ): Promise<string> {
   const canvas = await html2canvas(element, {
-    scale: 2,
+    scale: 1.5,
     useCORS: true,
     logging: false,
     backgroundColor: '#ffffff',
@@ -36,8 +36,8 @@ export async function generateBillingPdfBase64(
   if (imgHeight <= pageHeight) {
     // 1페이지에 들어가는 경우.
     pdf.addImage(
-      canvas.toDataURL('image/png'),
-      'PNG',
+      canvas.toDataURL('image/jpeg', 0.85),
+      'JPEG',
       0,
       0,
       imgWidth,
@@ -77,8 +77,8 @@ export async function generateBillingPdfBase64(
       const sliceImgHeight = (sliceHeight * pageWidth) / canvas.width;
       if (!isFirst) pdf.addPage();
       pdf.addImage(
-        sliceCanvas.toDataURL('image/png'),
-        'PNG',
+        sliceCanvas.toDataURL('image/jpeg', 0.85),
+        'JPEG',
         0,
         0,
         imgWidth,
