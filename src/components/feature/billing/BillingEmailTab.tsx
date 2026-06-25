@@ -13,7 +13,15 @@
 import { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useQuery } from '@tanstack/react-query';
-import { CheckCircle2, Loader2, Paperclip, Send, XCircle } from 'lucide-react';
+import {
+  CheckCircle2,
+  Loader2,
+  MessageCircle,
+  Paperclip,
+  Send,
+  X,
+  XCircle,
+} from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
@@ -160,6 +168,37 @@ function buildDateGroups(orders: OrderRow[]): BillingDateGroup[] {
     .map(([date, items]) => ({ date, items }));
 }
 
+/** 카톡 발송용 메시지 템플릿 — 반품금액이 있으면 실청구금액 함께 표시. */
+function buildKakaoMessage(params: {
+  customerName: string;
+  year: number;
+  month: number;
+  totalAmount: number;
+  returnAmount: number;
+}): string {
+  const { customerName, year, month, totalAmount, returnAmount } = params;
+  const netAmount = totalAmount - returnAmount;
+
+  const lines = [
+    '안녕하세요, 런코리아입니다.',
+    `${year}년 ${month}월 청구서를 보내드립니다.`,
+    '',
+    `거래처: ${customerName}`,
+    `청구금액: ${totalAmount.toLocaleString('ko-KR')}원`,
+  ];
+
+  if (returnAmount > 0) {
+    lines.push(`반품금액: -${returnAmount.toLocaleString('ko-KR')}원`);
+    lines.push(`실청구금액: ${netAmount.toLocaleString('ko-KR')}원`);
+  }
+
+  lines.push('');
+  lines.push('확인 부탁드립니다.');
+  lines.push('감사합니다.');
+
+  return lines.join('\n');
+}
+
 /** 거래처 한 명의 청구금액(반품 제외) / 반품금액 / 주문건수 산출. */
 interface CustomerTotals {
   totalAmount: number;
@@ -240,6 +279,17 @@ export function BillingEmailTab({
   const [sendError, setSendError] = useState<Record<string, string>>({});
   const [isSending, setIsSending] = useState(false);
 
+  // 카톡 발송용 메시지 모달 상태
+  const [kakaoModal, setKakaoModal] = useState<{
+    open: boolean;
+    customer: { id: string; name: string; grade: string | null } | null;
+    totals: CustomerTotals | null;
+    isAlpha: boolean;
+  }>({ open: false, customer: null, totals: null, isAlpha: false });
+  const [kakaoMessage, setKakaoMessage] = useState('');
+  const [copySuccess, setCopySuccess] = useState(false);
+  const [pdfDownloading, setPdfDownloading] = useState(false);
+
   const { data: monthlyOrders = [], isLoading: ordersLoading } =
     useMonthlyAllOrders({ companyId, year: selectedYear, month: selectedMonth });
 
@@ -301,6 +351,93 @@ export function BillingEmailTab({
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setCheckedIds(next);
+  };
+
+  const openKakaoModal = (row: (typeof customerRows)[number]) => {
+    const message = buildKakaoMessage({
+      customerName: row.customer.name,
+      year: selectedYear,
+      month: selectedMonth,
+      totalAmount: row.totals.totalAmount,
+      returnAmount: row.totals.returnAmount,
+    });
+    setKakaoMessage(message);
+    setKakaoModal({
+      open: true,
+      customer: {
+        id: row.customer.id,
+        name: row.customer.name,
+        grade: row.customer.grade,
+      },
+      totals: row.totals,
+      isAlpha: row.isAlpha,
+    });
+    setCopySuccess(false);
+  };
+
+  const closeKakaoModal = () => {
+    setKakaoModal({ open: false, customer: null, totals: null, isAlpha: false });
+    setCopySuccess(false);
+  };
+
+  const handleKakaoCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(kakaoMessage);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch {
+      // 클립보드 API 미지원 환경 폴백.
+      const ta = document.createElement('textarea');
+      ta.value = kakaoMessage;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    }
+  };
+
+  const handleKakaoPdfDownload = async () => {
+    if (!kakaoModal.customer || !kakaoModal.totals) return;
+    setPdfDownloading(true);
+
+    const orders = ordersByCustomer.get(kakaoModal.customer.id) ?? [];
+    const groups = buildDateGroups(orders);
+    const documentTitle: '청구서' | '거래명세서' = kakaoModal.isAlpha
+      ? '거래명세서'
+      : '청구서';
+
+    let cleanupFn: (() => void) | null = null;
+    try {
+      const { element, cleanup } = await renderPrintViewOffscreen({
+        customer: kakaoModal.customer,
+        year: selectedYear,
+        month: selectedMonth,
+        groups,
+        documentTitle,
+      });
+      cleanupFn = cleanup;
+
+      const pdfBase64 = await generateBillingPdfBase64(element);
+
+      const binary = atob(pdfBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: PDF_MIME });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${kakaoModal.customer.name}_${selectedYear}년${selectedMonth}월_${documentTitle}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'PDF 생성 실패';
+      showToast({ kind: 'error', text: msg });
+    } finally {
+      cleanupFn?.();
+      setPdfDownloading(false);
+    }
   };
 
   const handleSend = async () => {
@@ -540,6 +677,7 @@ export function BillingEmailTab({
                 <th style={thStyle('right', 140)}>청구금액</th>
                 <th style={thStyle('right', 120)}>반품금액</th>
                 <th style={thStyle('center', 120)}>상태</th>
+                <th style={thStyle('center', 80)}>카톡</th>
               </tr>
             </thead>
             <tbody>
@@ -632,6 +770,28 @@ export function BillingEmailTab({
                     <td style={tdStyle('center')}>
                       <StatusBadge status={status} error={err} />
                     </td>
+                    <td style={tdStyle('center')}>
+                      <button
+                        type="button"
+                        onClick={() => openKakaoModal(row)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          padding: '4px 10px',
+                          borderRadius: 6,
+                          border: '1px solid #FEE500',
+                          background: '#FEE500',
+                          color: '#3C1E1E',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <MessageCircle size={12} />
+                        카톡
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -657,6 +817,130 @@ export function BillingEmailTab({
         ✓ 일반 거래처: 청구서 PDF 1개 첨부<br />
         ✓ 알파문구 계열: 거래명세서 PDF + 종합청구서 엑셀 2개 첨부
       </div>
+
+      {/* 카톡 발송용 메시지 모달 */}
+      {kakaoModal.open && kakaoModal.customer && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.45)',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          onClick={closeKakaoModal}
+        >
+          <div
+            style={{
+              background: 'var(--surface)',
+              borderRadius: 12,
+              padding: 24,
+              width: 480,
+              maxWidth: '90vw',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 16,
+              }}
+            >
+              <div>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontWeight: 700,
+                    fontSize: 15,
+                  }}
+                >
+                  <MessageCircle size={16} />
+                  카톡 발송용 메시지
+                </span>
+                <span
+                  style={{
+                    marginLeft: 10,
+                    fontSize: 13,
+                    color: 'var(--ink-2)',
+                  }}
+                >
+                  {kakaoModal.customer.name} · {selectedYear}년 {selectedMonth}월
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={closeKakaoModal}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--ink-3)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <textarea
+              value={kakaoMessage}
+              onChange={(e) => setKakaoMessage(e.target.value)}
+              rows={10}
+              style={{
+                width: '100%',
+                padding: '12px',
+                borderRadius: 8,
+                border: '1px solid var(--line-strong)',
+                background: 'var(--surface-2)',
+                color: 'var(--ink)',
+                fontSize: 13,
+                fontFamily: 'var(--font-kr)',
+                lineHeight: 1.7,
+                resize: 'vertical',
+                boxSizing: 'border-box',
+              }}
+            />
+
+            <p
+              style={{
+                fontSize: 11,
+                color: 'var(--ink-3)',
+                margin: '6px 0 16px',
+              }}
+            >
+              ✏️ 문구를 직접 수정할 수 있습니다.
+            </p>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                onClick={handleKakaoCopy}
+                className="btn-base primary"
+                style={{ flex: 1 }}
+              >
+                {copySuccess ? '✅ 복사됨!' : '📋 메시지 복사'}
+              </button>
+              <button
+                type="button"
+                onClick={handleKakaoPdfDownload}
+                className="btn-base"
+                disabled={pdfDownloading}
+                style={{ flex: 1 }}
+              >
+                {pdfDownloading ? '생성 중…' : '📄 PDF 다운로드'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
