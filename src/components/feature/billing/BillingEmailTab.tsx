@@ -2,28 +2,25 @@
  * 청구서 이메일 발송 탭.
  *
  * 선택한 연/월에 대해 거래처별 청구금액을 표시하고, 체크된 거래처에 한해
- * Gmail OAuth 로 청구서(PDF) + (알파문구 한정) 종합청구서 엑셀을 첨부 발송한다.
+ * Vercel API Route (Gmail SMTP, nodemailer) 로 청구서(PDF)
+ * + (알파문구 한정) 종합청구서 엑셀을 첨부 발송.
  *
  * 🔴 CLAUDE.md §1: company_id 는 useCompany() 훅에서만 획득.
  * 🔴 CLAUDE.md §5: fetchAllRows() 경유.
- * 🔴 OAuth 토큰: gmailAuth.ts — runkorea30@gmail.com 만 사용 가능 (테스트 모드).
+ * 🟠 발송은 `/api/send-billing-email` 백엔드 프록시 — 한글 MIME 인코딩 / OAuth 만료 부담 없음.
+ *    로컬 `npm run dev` 에서는 동작하지 않음 (Vite). 테스트는 `npx vercel dev` 또는 배포 후.
  */
 import { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useQuery } from '@tanstack/react-query';
-import {
-  CheckCircle2,
-  Loader2,
-  Mail,
-  Paperclip,
-  Send,
-  XCircle,
-} from 'lucide-react';
+import { CheckCircle2, Loader2, Paperclip, Send, XCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
-import { requestGmailAccessToken } from '@/utils/gmailAuth';
-import { sendGmailEmail, type GmailAttachment } from '@/utils/sendGmailEmail';
+import {
+  sendBillingEmail,
+  type BillingEmailAttachment,
+} from '@/utils/sendBillingEmail';
 import { generateBillingPdfBase64 } from '@/utils/generateBillingPdf';
 import { generateAlphaBillingExcelBase64 } from '@/utils/generateAlphaBillingExcel';
 import type { Customer } from '@/hooks/queries/useCustomers';
@@ -242,8 +239,6 @@ export function BillingEmailTab({
   const [sendStatus, setSendStatus] = useState<Record<string, SendStatus>>({});
   const [sendError, setSendError] = useState<Record<string, string>>({});
   const [isSending, setIsSending] = useState(false);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [authedEmail, setAuthedEmail] = useState<string | null>(null);
 
   const { data: monthlyOrders = [], isLoading: ordersLoading } =
     useMonthlyAllOrders({ companyId, year: selectedYear, month: selectedMonth });
@@ -308,25 +303,7 @@ export function BillingEmailTab({
     setCheckedIds(next);
   };
 
-  const handleConnectGmail = async () => {
-    try {
-      const token = await requestGmailAccessToken();
-      setAccessToken(token);
-      // Gmail 계정 식별 — userinfo API 호출 (별도 스코프 없이 토큰만으로는 한계,
-      // 단순히 "연결됨"으로만 표시).
-      setAuthedEmail('Gmail 연결됨');
-      showToast({ kind: 'success', text: 'Gmail 인증 완료' });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Gmail 인증 실패';
-      showToast({ kind: 'error', text: msg });
-    }
-  };
-
   const handleSend = async () => {
-    if (!accessToken) {
-      showToast({ kind: 'info', text: '먼저 Gmail 로그인을 진행하세요.' });
-      return;
-    }
     if (checkedIds.size === 0) {
       showToast({ kind: 'info', text: '발송할 거래처를 선택하세요.' });
       return;
@@ -376,7 +353,7 @@ export function BillingEmailTab({
         const pdfBase64 = await generateBillingPdfBase64(element);
 
         // 2) 첨부 구성
-        const attachments: GmailAttachment[] = [
+        const attachments: BillingEmailAttachment[] = [
           {
             filename: `${customer.name}_${selectedYear}년${selectedMonth}월_${documentTitle}.pdf`,
             mimeType: PDF_MIME,
@@ -406,17 +383,19 @@ export function BillingEmailTab({
           });
         }
 
-        // 4) Gmail 발송
+        // 4) 백엔드 (Vercel API Route → Gmail SMTP) 로 발송
         const subject = `[런코리아] ${selectedYear}년 ${selectedMonth}월 ${documentTitle}`;
-        const body =
-          `${customer.name} 귀중\n\n` +
-          `${selectedYear}년 ${selectedMonth}월 ${documentTitle}를 첨부드립니다.\n` +
-          `금액 확인 부탁드립니다.\n\n` +
-          `런코리아 드림\n` +
-          `운영문의: runkorea30@gmail.com`;
+        const body = [
+          `${customer.name} 귀중`,
+          ``,
+          `${selectedYear}년 ${selectedMonth}월 ${documentTitle}를 첨부드립니다.`,
+          `금액 확인 부탁드립니다.`,
+          ``,
+          `런코리아 드림`,
+          `운영문의: runkorea30@gmail.com`,
+        ].join('\n');
 
-        await sendGmailEmail({
-          accessToken,
+        await sendBillingEmail({
           toEmail: customer.billing_email,
           subject,
           body,
@@ -487,45 +466,11 @@ export function BillingEmailTab({
 
         <div style={{ flex: 1 }} />
 
-        {accessToken ? (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 12px',
-              background: 'var(--success-wash)',
-              border: '1px solid var(--success)',
-              borderRadius: 8,
-              fontSize: 12,
-              color: 'var(--success)',
-              fontWeight: 600,
-            }}
-          >
-            <CheckCircle2 size={14} />
-            <span>{authedEmail ?? 'Gmail 연결됨'}</span>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={handleConnectGmail}
-            className="btn-base"
-            disabled={isSending}
-          >
-            <Mail className="ico-sm" />
-            <span>Gmail 로그인</span>
-          </button>
-        )}
-
         <button
           type="button"
           onClick={handleSend}
           className="btn-base primary"
-          disabled={
-            isSending ||
-            eligibleCheckedCount === 0 ||
-            !accessToken
-          }
+          disabled={isSending || eligibleCheckedCount === 0}
         >
           {isSending ? (
             <Loader2 className="ico-sm animate-spin" />
@@ -707,11 +652,10 @@ export function BillingEmailTab({
           lineHeight: 1.6,
         }}
       >
-        ✓ 발송 계정: <strong>runkorea30@gmail.com</strong> (OAuth 테스트 모드)<br />
+        ✓ 발송 계정: <strong>runkorea30@gmail.com</strong> (Gmail SMTP)<br />
         ✓ 수신처: 거래처별 <strong>청구서 발송 이메일</strong> (설정 → 거래처 편집에서 입력)<br />
         ✓ 일반 거래처: 청구서 PDF 1개 첨부<br />
-        ✓ 알파문구 계열: 거래명세서 PDF + 종합청구서 엑셀 2개 첨부<br />
-        ✓ 토큰 유효시간 1시간 — 만료 시 재로그인 필요
+        ✓ 알파문구 계열: 거래명세서 PDF + 종합청구서 엑셀 2개 첨부
       </div>
     </div>
   );
