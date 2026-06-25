@@ -125,7 +125,7 @@ type TabKey = 'preview' | 'email';
 export function BillingPage() {
   const { companyId, isLoading: companyLoading } = useCompany();
 
-  const [activeTab, setActiveTab] = useState<TabKey>('preview');
+  const [activeTab, setActiveTab] = useState<TabKey>('email');
 
   // 거래처 목록 — 두 탭 공용.
   const { data: customers = [], isLoading: customersLoading } =
@@ -144,14 +144,14 @@ export function BillingPage() {
         }}
       >
         <TabButton
-          active={activeTab === 'preview'}
-          onClick={() => setActiveTab('preview')}
-          label="청구서 미리보기"
-        />
-        <TabButton
           active={activeTab === 'email'}
           onClick={() => setActiveTab('email')}
           label="이메일 발송"
+        />
+        <TabButton
+          active={activeTab === 'preview'}
+          onClick={() => setActiveTab('preview')}
+          label="청구서 미리보기"
         />
       </div>
 

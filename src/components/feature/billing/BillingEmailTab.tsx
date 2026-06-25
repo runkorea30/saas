@@ -718,7 +718,6 @@ export function BillingEmailTab({
                 <th style={thStyle('right', 140)}>청구금액</th>
                 <th style={thStyle('right', 120)}>반품금액</th>
                 <th style={thStyle('center', 120)}>상태</th>
-                <th style={thStyle('center', 80)}>카톡</th>
               </tr>
             </thead>
             <tbody>
@@ -748,29 +747,59 @@ export function BillingEmailTab({
                       />
                     </td>
                     <td style={tdStyle('left')}>
-                      <span style={{ fontWeight: 500 }}>{customer.name}</span>
-                      {isAlpha && (
-                        <span
-                          title="알파문구: PDF + 종합청구서 엑셀 2개 첨부"
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                        }}
+                      >
+                        <span style={{ fontWeight: 500 }}>{customer.name}</span>
+                        {isAlpha && (
+                          <span
+                            title="알파문구: PDF + 종합청구서 엑셀 2개 첨부"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 2,
+                              padding: '1px 6px',
+                              background: 'var(--info-wash)',
+                              color: 'var(--info)',
+                              border: '1px solid var(--info)',
+                              borderRadius: 4,
+                              fontSize: 10.5,
+                              fontWeight: 600,
+                            }}
+                          >
+                            <Paperclip size={9} strokeWidth={2} />
+                            PDF+XLSX
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => openKakaoModal(row)}
+                          title="카톡 발송용 메시지 복사"
                           style={{
-                            marginLeft: 6,
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: 2,
-                            padding: '1px 6px',
-                            background: 'var(--info-wash)',
-                            color: 'var(--info)',
-                            border: '1px solid var(--info)',
-                            borderRadius: 4,
-                            fontSize: 10.5,
-                            fontWeight: 600,
-                            verticalAlign: 'middle',
+                            gap: 3,
+                            padding: '2px 8px',
+                            borderRadius: 5,
+                            border: '1px solid var(--line-strong)',
+                            background: 'var(--surface-2)',
+                            color: 'var(--ink-2)',
+                            fontSize: 11,
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            letterSpacing: '-0.01em',
+                            lineHeight: 1,
+                            whiteSpace: 'nowrap',
                           }}
                         >
-                          <Paperclip size={9} strokeWidth={2} />
-                          PDF+XLSX
-                        </span>
-                      )}
+                          <MessageCircle size={11} strokeWidth={2} />
+                          카톡
+                        </button>
+                      </div>
                     </td>
                     <td
                       style={{
@@ -810,28 +839,6 @@ export function BillingEmailTab({
                     </td>
                     <td style={tdStyle('center')}>
                       <StatusBadge status={status} error={err} />
-                    </td>
-                    <td style={tdStyle('center')}>
-                      <button
-                        type="button"
-                        onClick={() => openKakaoModal(row)}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 4,
-                          padding: '4px 10px',
-                          borderRadius: 6,
-                          border: '1px solid #FEE500',
-                          background: '#FEE500',
-                          color: '#3C1E1E',
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <MessageCircle size={12} />
-                        카톡
-                      </button>
                     </td>
                   </tr>
                 );
