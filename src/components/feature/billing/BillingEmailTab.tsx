@@ -168,35 +168,48 @@ function buildDateGroups(orders: OrderRow[]): BillingDateGroup[] {
     .map(([date, items]) => ({ date, items }));
 }
 
-/** 카톡 발송용 메시지 템플릿 — 반품금액이 있으면 실청구금액 함께 표시. */
-function buildKakaoMessage(params: {
-  customerName: string;
-  year: number;
-  month: number;
-  totalAmount: number;
-  returnAmount: number;
-}): string {
+// 카톡 발송용 메시지 템플릿 — localStorage 저장. 플레이스홀더 치환식.
+const KAKAO_TEMPLATE_KEY = 'kakao_message_template';
+
+const DEFAULT_TEMPLATE = [
+  '안녕하세요, 런코리아입니다.',
+  '{year}년 {month}월 청구서를 보내드립니다.',
+  '',
+  '거래처: {customerName}',
+  '청구금액: {totalAmount}원',
+  '',
+  '확인 부탁드립니다.',
+  '감사합니다.',
+].join('\n');
+
+function loadTemplate(): string {
+  return localStorage.getItem(KAKAO_TEMPLATE_KEY) ?? DEFAULT_TEMPLATE;
+}
+
+function saveTemplate(template: string): void {
+  localStorage.setItem(KAKAO_TEMPLATE_KEY, template);
+}
+
+/** 플레이스홀더 치환 — {year} {month} {customerName} {totalAmount} {returnAmount} {netAmount}. */
+function applyTemplate(
+  template: string,
+  params: {
+    customerName: string;
+    year: number;
+    month: number;
+    totalAmount: number;
+    returnAmount: number;
+  },
+): string {
   const { customerName, year, month, totalAmount, returnAmount } = params;
   const netAmount = totalAmount - returnAmount;
-
-  const lines = [
-    '안녕하세요, 런코리아입니다.',
-    `${year}년 ${month}월 청구서를 보내드립니다.`,
-    '',
-    `거래처: ${customerName}`,
-    `청구금액: ${totalAmount.toLocaleString('ko-KR')}원`,
-  ];
-
-  if (returnAmount > 0) {
-    lines.push(`반품금액: -${returnAmount.toLocaleString('ko-KR')}원`);
-    lines.push(`실청구금액: ${netAmount.toLocaleString('ko-KR')}원`);
-  }
-
-  lines.push('');
-  lines.push('확인 부탁드립니다.');
-  lines.push('감사합니다.');
-
-  return lines.join('\n');
+  return template
+    .replace(/\{year\}/g, String(year))
+    .replace(/\{month\}/g, String(month))
+    .replace(/\{customerName\}/g, customerName)
+    .replace(/\{totalAmount\}/g, totalAmount.toLocaleString('ko-KR'))
+    .replace(/\{returnAmount\}/g, returnAmount.toLocaleString('ko-KR'))
+    .replace(/\{netAmount\}/g, netAmount.toLocaleString('ko-KR'));
 }
 
 /** 거래처 한 명의 청구금액(반품 제외) / 반품금액 / 주문건수 산출. */
@@ -287,6 +300,9 @@ export function BillingEmailTab({
     isAlpha: boolean;
   }>({ open: false, customer: null, totals: null, isAlpha: false });
   const [kakaoMessage, setKakaoMessage] = useState('');
+  const [kakaoTemplate, setKakaoTemplate] = useState<string>(loadTemplate);
+  const [showTemplateEditor, setShowTemplateEditor] = useState(false);
+  const [templateDraft, setTemplateDraft] = useState('');
   const [copySuccess, setCopySuccess] = useState(false);
   const [pdfDownloading, setPdfDownloading] = useState(false);
 
@@ -354,7 +370,7 @@ export function BillingEmailTab({
   };
 
   const openKakaoModal = (row: (typeof customerRows)[number]) => {
-    const message = buildKakaoMessage({
+    const message = applyTemplate(kakaoTemplate, {
       customerName: row.customer.name,
       year: selectedYear,
       month: selectedMonth,
@@ -373,11 +389,36 @@ export function BillingEmailTab({
       isAlpha: row.isAlpha,
     });
     setCopySuccess(false);
+    setShowTemplateEditor(false);
   };
 
   const closeKakaoModal = () => {
     setKakaoModal({ open: false, customer: null, totals: null, isAlpha: false });
     setCopySuccess(false);
+    setShowTemplateEditor(false);
+  };
+
+  const openTemplateEditor = () => {
+    setTemplateDraft(kakaoTemplate);
+    setShowTemplateEditor(true);
+  };
+
+  const saveTemplateDraft = () => {
+    saveTemplate(templateDraft);
+    setKakaoTemplate(templateDraft);
+    setShowTemplateEditor(false);
+    // 현재 열린 거래처가 있으면 즉시 메시지 반영.
+    if (kakaoModal.customer && kakaoModal.totals) {
+      setKakaoMessage(
+        applyTemplate(templateDraft, {
+          customerName: kakaoModal.customer.name,
+          year: selectedYear,
+          month: selectedMonth,
+          totalAmount: kakaoModal.totals.totalAmount,
+          returnAmount: kakaoModal.totals.returnAmount,
+        }),
+      );
+    }
   };
 
   const handleKakaoCopy = async () => {
@@ -890,54 +931,131 @@ export function BillingEmailTab({
               </button>
             </div>
 
-            <textarea
-              value={kakaoMessage}
-              onChange={(e) => setKakaoMessage(e.target.value)}
-              rows={10}
-              style={{
-                width: '100%',
-                padding: '12px',
-                borderRadius: 8,
-                border: '1px solid var(--line-strong)',
-                background: 'var(--surface-2)',
-                color: 'var(--ink)',
-                fontSize: 13,
-                fontFamily: 'var(--font-kr)',
-                lineHeight: 1.7,
-                resize: 'vertical',
-                boxSizing: 'border-box',
-              }}
-            />
+            {!showTemplateEditor && (
+              <>
+                <textarea
+                  value={kakaoMessage}
+                  onChange={(e) => setKakaoMessage(e.target.value)}
+                  rows={10}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    borderRadius: 8,
+                    border: '1px solid var(--line-strong)',
+                    background: 'var(--surface-2)',
+                    color: 'var(--ink)',
+                    fontSize: 13,
+                    fontFamily: 'var(--font-kr)',
+                    lineHeight: 1.7,
+                    resize: 'vertical',
+                    boxSizing: 'border-box',
+                  }}
+                />
 
-            <p
-              style={{
-                fontSize: 11,
-                color: 'var(--ink-3)',
-                margin: '6px 0 16px',
-              }}
-            >
-              ✏️ 문구를 직접 수정할 수 있습니다.
-            </p>
+                <p
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--ink-3)',
+                    margin: '6px 0 16px',
+                  }}
+                >
+                  ✏️ 이 메시지는 임시 수정만 가능합니다. 문구를 영구 저장하려면{' '}
+                  <button
+                    type="button"
+                    onClick={openTemplateEditor}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--info)',
+                      fontSize: 11,
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                      padding: 0,
+                    }}
+                  >
+                    템플릿 수정
+                  </button>
+                  을 클릭하세요.
+                </p>
 
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                type="button"
-                onClick={handleKakaoCopy}
-                className="btn-base primary"
-                style={{ flex: 1 }}
-              >
-                {copySuccess ? '✅ 복사됨!' : '📋 메시지 복사'}
-              </button>
-              <button
-                type="button"
-                onClick={handleKakaoPdfDownload}
-                className="btn-base"
-                disabled={pdfDownloading}
-                style={{ flex: 1 }}
-              >
-                {pdfDownloading ? '생성 중…' : '📄 PDF 다운로드'}
-              </button>
-            </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={handleKakaoCopy}
+                    className="btn-base primary"
+                    style={{ flex: 1 }}
+                  >
+                    {copySuccess ? '✅ 복사됨!' : '📋 메시지 복사'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleKakaoPdfDownload}
+                    className="btn-base"
+                    disabled={pdfDownloading}
+                    style={{ flex: 1 }}
+                  >
+                    {pdfDownloading ? '생성 중…' : '📄 PDF 다운로드'}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {showTemplateEditor && (
+              <>
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--ink-2)',
+                    marginBottom: 6,
+                  }}
+                >
+                  📝 플레이스홀더: {'{year}'} {'{month}'} {'{customerName}'}{' '}
+                  {'{totalAmount}'} {'{returnAmount}'} {'{netAmount}'}
+                </p>
+                <textarea
+                  value={templateDraft}
+                  onChange={(e) => setTemplateDraft(e.target.value)}
+                  rows={10}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    borderRadius: 8,
+                    border: '1px solid var(--info)',
+                    background: 'var(--surface-2)',
+                    color: 'var(--ink)',
+                    fontSize: 13,
+                    fontFamily: 'var(--font-kr)',
+                    lineHeight: 1.7,
+                    resize: 'vertical',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 8,
+                    marginTop: 10,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={saveTemplateDraft}
+                    className="btn-base primary"
+                    style={{ flex: 1 }}
+                  >
+                    💾 템플릿 저장
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowTemplateEditor(false)}
+                    className="btn-base"
+                    style={{ flex: 1 }}
+                  >
+                    취소
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
