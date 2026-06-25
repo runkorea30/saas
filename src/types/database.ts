@@ -1654,7 +1654,6 @@ export type Database = {
           import_valid_until: string | null
           inspection_no: string | null
           inspection_valid_until: string | null
-          list_no: string | null
           product_name: string
           updated_at: string | null
         }
@@ -1667,7 +1666,6 @@ export type Database = {
           import_valid_until?: string | null
           inspection_no?: string | null
           inspection_valid_until?: string | null
-          list_no?: string | null
           product_name: string
           updated_at?: string | null
         }
@@ -1680,7 +1678,6 @@ export type Database = {
           import_valid_until?: string | null
           inspection_no?: string | null
           inspection_valid_until?: string | null
-          list_no?: string | null
           product_name?: string
           updated_at?: string | null
         }
