@@ -32,6 +32,7 @@
 | Phase 3.23 | 주문내역 UI 정리 + 거래명세서 인쇄 + 재고부족 자동조정 + 수동주문 공급가 폴백 | ✅ 완료 (2026-06-25) |
 | Phase 3.24 | 수입 입고 예정일 4탭 카드 (페덱스/해상운송/품절/재고부족) + 제품 일괄삭제/일괄수정/노출금지 | ✅ 완료 (2026-06-25) |
 | Phase 3.25 | 청구서 페이지 (`/sales/billing`) — 거래처+연월 선택, 날짜별 그룹핑, 알파문구 거래명세서 분기, 인쇄 | ✅ 완료 (2026-06-25) |
+| Phase 3.26 | 청구서 이메일 발송 탭 — Gmail SMTP (Vercel API Route + nodemailer), billing_email 기반 거래처 체크박스, 알파문구 PDF+XLSX 첨부 | ✅ 완료 (2026-06-25, 배포 후 발송 검증 필요) |
 | Phase 4 | 나머지 페이지 + Auth 도입 | 대기 |
 
 **페이지 진도: 13 / 14 구현 완료** (`/finance/pnl` 만 남음, `/sales/invoices` 는 placeholder 유지)
@@ -75,10 +76,67 @@
 - **청구서 페이지 후속** (Phase 3.25 + 수정 2건 완료 후 사용자 명시):
   - [x] ~~알파문구 종합청구서 엑셀 다운로드 기능 구현~~ — `fa7fd7d` 로 완료 (단일 거래처/지점 기준 1행 종합청구서)
   - [ ] 브라우저 실 확인 — 알파문구 거래처 + 데이터 있는 월 선택 → 미리보기/인쇄/엑셀 다운로드 동작 확인 (사용자 진행 예정)
-  - [ ] 이메일 발송 기능 구현 (발송 방식 미결정 — Supabase Edge Function + 이메일 서비스 고려)
-  - [ ] 서버사이드 PDF 생성 후 이메일 첨부 발송 (이전 결정사항)
+  - [x] ~~이메일 발송 기능 구현~~ — Phase 3.26 (`58ecb34` → `bf8e976`) Gmail SMTP 방식으로 완료
   - [ ] 발송 기록 DB 저장 (발송 일시, 수신자, 상태)
   - [ ] 매월 3일 자동 발송 스케줄 (pg_cron 또는 Edge Function cron)
+
+- **이메일 발송 — 후속 작업** (Phase 3.26 후속):
+  - [ ] 이메일 발송 실패 원인 파악 및 수정
+    - Vercel 배포 후 테스트 필요 (Deployment created 확인됨)
+    - F12 → Network 탭에서 `/api/send-billing-email` 응답 확인
+    - Vercel Logs 에서 서버사이드 에러 확인
+  - [ ] `BillingEmailTab` "Gmail 연결됨" 버튼 제거 (SMTP 전환 후 불필요)
+    - 프롬프트 파일: `remove_gmail_connect_button_prompt.txt` 이미 작성됨
+  - [ ] 발송 성공/실패 상태 표시 정상화 (현재 성공해도 실패로 표시될 수 있음)
+  - [ ] 발송 이력 DB 저장 (발송 일시, 수신자, 상태) — 추후
+
+- **Gmail 앱 비밀번호 보안** (긴급):
+  - [ ] 채팅창에 노출된 앱 비밀번호 삭제 후 재발급
+    - https://myaccount.google.com/apppasswords 에서 기존 EmailJS 앱 삭제
+    - 새 앱 비밀번호 발급 후 Vercel 환경변수 `GMAIL_APP_PASSWORD` 업데이트
+
+---
+
+## 오늘 추가된 작업 요약 (2026-06-25, 청구서 이메일 발송 탭)
+
+### 청구서 이메일 발송 탭 (Phase 3.26) — `/sales/billing`
+
+이번 세션 4건 커밋 (`58ecb34` → `4ed0dba` → `282ee2b` → `bf8e976`).
+
+#### UI — BillingPage 탭 구성
+- 기존 단일 화면을 **"청구서 미리보기" / "이메일 발송"** 두 탭으로 분리.
+- 이메일 발송 탭: 연/월 선택 + 거래처 체크박스 목록.
+- `customers.billing_email` 이 있는 거래처만 체크박스 활성화 (없으면 disabled + 안내).
+- 청구금액 0원 거래처는 목록에서 숨김.
+- 알파문구 계열은 PDF + XLSX 2개 첨부, 일반 거래처는 PDF 1개 첨부.
+
+#### 발송 방식 — Gmail SMTP (Vercel API Route + nodemailer)
+이전 시도하던 OAuth 방식을 폐기하고 SMTP 로 단순화.
+
+- `api/send-billing-email.ts` (Vercel API Route, nodemailer 사용)
+- `src/utils/sendBillingEmail.ts` (프론트 fetch 래퍼)
+- `BillingEmailTab` 에서 OAuth 발송 코드 제거, SMTP 호출로 전환 (`282ee2b`).
+- 기존 OAuth 관련 코드 정리 (`bf8e976`).
+
+#### DB / 권한 변경
+- `customers.billing_email` 컬럼 추가 (DB 마이그레이션 완료).
+- `customers` 테이블에 anon UPDATE/INSERT/DELETE 권한 추가 + RLS 정책 수정 (거래처 편집 저장 버그 동시 수정).
+
+#### 환경변수 (Vercel)
+- `GMAIL_USER` — 발신 Gmail 주소
+- `GMAIL_APP_PASSWORD` — Gmail 앱 비밀번호 (16자리)
+- 둘 다 Vercel 환경변수 등록 완료.
+
+#### 거래처 편집 저장 버그 수정 (사이드 픽스)
+- **원인**: anon 역할에 `customers` 테이블 UPDATE 권한 없음.
+- **수정**: `GRANT INSERT, UPDATE, DELETE ON customers TO anon` + RLS 정책 추가.
+
+#### 알려진 이슈 / 미해결
+- Vercel 배포는 트리거되었으나 **실제 이메일 발송 검증은 미수행**.
+- 발송 실패 시 원인 파악 절차: F12 Network 탭 + Vercel Logs.
+- `BillingEmailTab` 의 "Gmail 연결됨" 버튼은 OAuth 잔재 → 제거 필요 (`remove_gmail_connect_button_prompt.txt` 작성됨).
+- 성공/실패 상태 표시가 정상 동작 안 할 수 있음 (성공해도 실패로 표시 가능성).
+- **보안 주의**: 채팅창에 노출된 Gmail 앱 비밀번호는 재발급 후 Vercel 환경변수 교체 필요.
 
 ---
 
