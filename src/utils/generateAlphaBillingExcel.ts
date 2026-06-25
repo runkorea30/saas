@@ -15,6 +15,10 @@
  *   자금팀 담당자 섹션 (고정값)
  *
  * 🟠 본 유틸은 알파문구 전용 — 일반 거래처 청구서는 BillingPrintView 인쇄로 처리.
+ *
+ * 사용 함수:
+ *  - `generateAlphaBillingExcel`: 파일로 즉시 다운로드 (UI 버튼)
+ *  - `generateAlphaBillingExcelBase64`: 메모리 base64 반환 (Gmail 첨부)
  */
 import * as XLSX from 'xlsx';
 
@@ -35,9 +39,13 @@ export interface GenerateAlphaBillingExcelParams {
   branches: AlphaBranchItem[];
 }
 
-export function generateAlphaBillingExcel(
+/**
+ * 알파문구 종합청구서 workbook 생성 (공통 빌더).
+ * `generateAlphaBillingExcel` / `generateAlphaBillingExcelBase64` 모두 이 함수를 거친다.
+ */
+function buildAlphaBillingWorkbook(
   params: GenerateAlphaBillingExcelParams,
-): void {
+): XLSX.WorkBook {
   const { year, month, branches } = params;
   const wb = XLSX.utils.book_new();
 
@@ -187,5 +195,21 @@ export function generateAlphaBillingExcel(
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, '청구서');
-  XLSX.writeFile(wb, `알파문구_종합청구서_${year}년${month}월.xlsx`);
+  return wb;
+}
+
+/** 파일로 다운로드 (UI 버튼). */
+export function generateAlphaBillingExcel(
+  params: GenerateAlphaBillingExcelParams,
+): void {
+  const wb = buildAlphaBillingWorkbook(params);
+  XLSX.writeFile(wb, `알파문구_종합청구서_${params.year}년${params.month}월.xlsx`);
+}
+
+/** base64 반환 (Gmail 첨부용 — 순수 base64, data URI prefix 없음). */
+export function generateAlphaBillingExcelBase64(
+  params: GenerateAlphaBillingExcelParams,
+): string {
+  const wb = buildAlphaBillingWorkbook(params);
+  return XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
 }
