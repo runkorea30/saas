@@ -65,3 +65,6 @@ coverage/
 # Misc
 .cache/
 .parcel-cache/
+
+.vercel
+.env*.local
