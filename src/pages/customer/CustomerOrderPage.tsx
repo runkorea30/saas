@@ -18,7 +18,9 @@ import {
   Truck,
   X,
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
+// xlsx-js-style 은 SheetJS xlsx 의 fork — 동일 API + 셀 스타일(s) 지원.
+// parseOrderExcel(read) 과 handleDownloadOrderForm(write+style) 모두 한 import 로 처리.
+import * as XLSX from 'xlsx-js-style';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/Toast';
 import { useCustomerAuth, type CustomerSession } from '@/hooks/useCustomerAuth';
@@ -596,9 +598,10 @@ function LeftPanel({
   /**
    * 현재 거래처 grade 가 반영된 주문서 양식 xlsx 다운로드.
    * - products 활성행 전체를 (category, name) 오름차순 SELECT.
-   * - 카테고리 변경 시 ▶ 헤더 행 삽입 → 제품 행 출력 (수량/합계 빈 칸으로 거래처 작성).
+   * - 행1: 수량합계 / 주문금액 SUM 수식. 행2: 은행계좌. 행3: 빈줄. 행4: 컬럼헤더. 행5+: 데이터.
+   * - 카테고리 변경 시 회색 배경 6칸 헤더 행 → 제품 행(노란 입력셀 + F열 합계수식) 반복.
+   * - 4행까지 freeze panes 로 헤더 스크롤 고정.
    * - 공급가 = calcSupplyPriceByCustomerGrade(sell_price, grade, gradeRates).
-   * - 헤더 4행: 요약 / 은행계좌 / (padding) / 컬럼명 → parseOrderExcel 의 i=4 시작에 맞춤.
    */
   const handleDownloadOrderForm = async () => {
     setDownloading(true);
@@ -619,22 +622,150 @@ function LeftPanel({
         return;
       }
 
-      const rows: (string | number)[][] = [];
-      // Row 0: 수량합계 / 주문금액 요약 (거래처가 직접 작성)
-      rows.push(['', '', '수량합계', '', '주문금액', '']);
-      // Row 1: 은행계좌 안내
-      rows.push(['국민은행 024801-04-301418 예금주 양시혁']);
-      // Row 2: 빈 줄 (parseOrderExcel 가 i=4 부터 읽도록 padding)
-      rows.push([]);
-      // Row 3: 컬럼 헤더
-      rows.push(['제품명', '코드', '수량', '판매가', '공급가', '합계']);
+      // ───── 스타일 상수 ─────
+      const thinBorder = {
+        top: { style: 'thin' },
+        bottom: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' },
+      } as const;
 
+      const categoryStyle = {
+        fill: { patternType: 'solid', fgColor: { rgb: 'FFBFBFBF' } },
+        font: { sz: 14 },
+        alignment: { vertical: 'center' },
+        border: thinBorder,
+      };
+      const headerStyle = {
+        font: { bold: true, sz: 11 },
+        alignment: { horizontal: 'center', vertical: 'center' },
+        border: thinBorder,
+      };
+      const headerYellowStyle = {
+        ...headerStyle,
+        fill: { patternType: 'solid', fgColor: { rgb: 'FFFFFF00' } },
+      };
+      const productNameStyle = {
+        font: { sz: 9 },
+        alignment: { vertical: 'center' },
+        border: thinBorder,
+      };
+      const codeStyle = {
+        font: { sz: 10, bold: true },
+        alignment: { horizontal: 'center', vertical: 'center' },
+        border: thinBorder,
+      };
+      const yellowInputStyle = {
+        fill: { patternType: 'solid', fgColor: { rgb: 'FFFFFF00' } },
+        alignment: { horizontal: 'right', vertical: 'center' },
+        border: thinBorder,
+        numFmt: '#,##0',
+      };
+      const formulaStyle = {
+        alignment: { horizontal: 'right', vertical: 'center' },
+        border: thinBorder,
+        numFmt: '#,##0',
+      };
+
+      // ───── 셀 객체 헬퍼 ─────
+      type CellObj = {
+        v?: string | number;
+        f?: string;
+        t: 's' | 'n';
+        s?: Record<string, unknown>;
+      };
+      const blank = (s?: Record<string, unknown>): CellObj => ({
+        v: '',
+        t: 's',
+        ...(s ? { s } : {}),
+      });
+      const txt = (v: string, s?: Record<string, unknown>): CellObj => ({
+        v,
+        t: 's',
+        ...(s ? { s } : {}),
+      });
+      const num = (v: number, s?: Record<string, unknown>): CellObj => ({
+        v,
+        t: 'n',
+        ...(s ? { s } : {}),
+      });
+      const formula = (f: string, s?: Record<string, unknown>): CellObj => ({
+        f,
+        t: 'n',
+        ...(s ? { s } : {}),
+      });
+
+      // ───── 시트 데이터 구성 ─────
+      const wsData: CellObj[][] = [];
+
+      // 행1: 수량합계 / 주문금액 요약 (수식 자동 계산)
+      const labelBold = {
+        font: { bold: true, sz: 11 },
+        alignment: { horizontal: 'center', vertical: 'center' },
+      };
+      const sumQty = {
+        font: { bold: true, sz: 12 },
+        alignment: { horizontal: 'right', vertical: 'center' },
+        numFmt: '#,##0',
+      };
+      const sumAmount = {
+        font: { bold: true, sz: 12, color: { rgb: 'FFFF0000' } },
+        alignment: { horizontal: 'right', vertical: 'center' },
+        numFmt: '#,##0',
+      };
+      wsData.push([
+        blank(),
+        txt('수량합계', labelBold),
+        formula('SUM(C5:C9999)', sumQty),
+        blank(),
+        txt('주문금액', labelBold),
+        formula('SUM(F5:F9999)', sumAmount),
+      ]);
+
+      // 행2: 은행계좌 안내 (병합 없이 A2 에만 출력)
+      wsData.push([
+        txt('국민은행 024801-04-301418 예금주 양시혁', {
+          font: { bold: true, sz: 11 },
+          alignment: { vertical: 'center' },
+        }),
+        blank(),
+        blank(),
+        blank(),
+        blank(),
+        blank(),
+      ]);
+
+      // 행3: 빈 줄 (헤더 영역 패딩)
+      wsData.push([blank(), blank(), blank(), blank(), blank(), blank()]);
+
+      // 행4: 컬럼 헤더 — 수량/판매가/공급가는 노랑 강조
+      wsData.push([
+        txt('제품명', headerStyle),
+        txt('코드', headerStyle),
+        txt('수량', headerYellowStyle),
+        txt('판매가', headerYellowStyle),
+        txt('공급가', headerYellowStyle),
+        txt('합계', headerStyle),
+      ]);
+
+      // 행5+: 카테고리 헤더 + 제품 행
       let currentCategory = '';
+      let rowNum = 5; // 1-based Excel row number for next data row
+
       for (const p of products) {
         const category = p.category || '기타';
         if (category !== currentCategory) {
           currentCategory = category;
-          rows.push([`▶ ${category}`]);
+          // 카테고리 행 — 6칸 모두 회색 배경
+          wsData.push([
+            txt(category, categoryStyle),
+            blank(categoryStyle),
+            blank(categoryStyle),
+            blank(categoryStyle),
+            blank(categoryStyle),
+            blank(categoryStyle),
+          ]);
+          rowNum++;
         }
         const supplyPrice = calcSupplyPriceByCustomerGrade(
           p.sell_price,
@@ -647,26 +778,37 @@ function LeftPanel({
             grade_e: p.grade_e ?? null,
           },
         );
-        rows.push([
-          p.name,
-          p.code,
-          '', // 수량 — 거래처 입력
-          p.sell_price ?? 0,
-          supplyPrice,
-          '', // 합계 — 거래처 입력
+        wsData.push([
+          txt(p.name, productNameStyle),
+          txt(p.code, codeStyle),
+          // 수량은 빈 칸으로 거래처가 입력 — 입력 후 F열 수식 = C×E 자동 계산
+          blank(yellowInputStyle),
+          num(p.sell_price ?? 0, yellowInputStyle),
+          num(supplyPrice, yellowInputStyle),
+          formula(`C${rowNum}*E${rowNum}`, formulaStyle),
         ]);
+        rowNum++;
       }
 
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.aoa_to_sheet(rows);
+      // ───── 워크시트 + 워크북 ─────
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+      // 컬럼 너비 (원본 샘플 기준)
       ws['!cols'] = [
-        { wch: 45 },
-        { wch: 18 },
-        { wch: 8 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 12 },
+        { wch: 34.25 }, // A 제품명
+        { wch: 18.625 }, // B 코드
+        { wch: 9.0 }, // C 수량
+        { wch: 10.75 }, // D 판매가
+        { wch: 15.625 }, // E 공급가
+        { wch: 13.25 }, // F 합계
       ];
+
+      // 4행까지 freeze panes (행5부터 스크롤)
+      ws['!sheetViews'] = [
+        { state: 'frozen', xSplit: 0, ySplit: 4, topLeftCell: 'A5' },
+      ] as never;
+
+      const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, '주문서');
 
       const today = new Date();
