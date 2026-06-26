@@ -31,6 +31,7 @@ import {
   type CustomerColumn,
 } from '@/hooks/queries/useSalesAnalysis';
 import { getCategoryLabel } from '@/constants/categories';
+import { RefreshButton } from '../components/RefreshButton';
 
 type TabKey = 'monthly' | 'daily' | 'product';
 
@@ -51,11 +52,12 @@ export function SalesAnalysisPage() {
   const [categoryFilter, setCategoryFilter] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const {
-    data: rawRows = [],
-    isLoading,
-    error,
-  } = useSalesAnalysis(companyId, year);
+  const salesQuery = useSalesAnalysis(companyId, year);
+  const { data: rawRows = [], isLoading, error } = salesQuery;
+  const refreshing = salesQuery.isFetching;
+  const handleRefresh = () => {
+    void salesQuery.refetch();
+  };
 
   const customers = useMemo(() => getCustomerList(rawRows), [rawRows]);
   const categories = useMemo(() => getCategoryList(rawRows), [rawRows]);
@@ -118,6 +120,7 @@ export function SalesAnalysisPage() {
           >
             엑셀
           </button>
+          <RefreshButton onClick={handleRefresh} refreshing={refreshing} />
         </div>
         <div className="m-tab-row">
           <button

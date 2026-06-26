@@ -11,6 +11,7 @@ import { useCompany } from '@/hooks/useCompany';
 import { useOrders } from '@/hooks/queries/useOrders';
 import type { Order } from '@/types/orders';
 import { useMediaQuery } from '../hooks/useMediaQuery';
+import { RefreshButton } from '../components/RefreshButton';
 
 type PeriodKey = 'today' | 'week' | 'month' | 'all';
 
@@ -95,7 +96,12 @@ export function OrderListPage() {
   const isUnfolded = useMediaQuery('(min-width: 601px)');
 
   const range = useMemo(() => getRange(period), [period]);
-  const { data: orders = [], isLoading } = useOrders({ companyId, range });
+  const ordersQuery = useOrders({ companyId, range });
+  const { data: orders = [], isLoading } = ordersQuery;
+  const refreshing = ordersQuery.isFetching;
+  const handleRefresh = () => {
+    void ordersQuery.refetch();
+  };
 
   const selected = orders.find((o) => o.id === selectedId) ?? orders[0] ?? null;
   const showDetail = isUnfolded && selected !== null;
@@ -117,7 +123,11 @@ export function OrderListPage() {
         }}
       >
         <header className="m-page-header">
-          <h1 className="m-page-title">주문내역</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <h1 className="m-page-title">주문내역</h1>
+            <div style={{ flex: 1 }} />
+            <RefreshButton onClick={handleRefresh} refreshing={refreshing} />
+          </div>
           <div className="m-tab-row">
             {PERIODS.map((p) => (
               <button

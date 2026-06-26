@@ -46,6 +46,7 @@ import { ImportRowsTable } from '@/components/feature/import/ImportRowsTable';
 import { InvoiceUploadCard } from '@/components/feature/import/InvoiceUploadCard';
 import { RecentInvoicesSection } from '@/components/feature/import/RecentInvoicesSection';
 import { parseInvoicePDF } from '@/utils/invoiceParser';
+import { RefreshButton } from '../components/RefreshButton';
 
 type TabKey = 'verification' | 'receiving' | 'portal';
 
@@ -89,6 +90,14 @@ export function ImportPage() {
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<TabKey>('verification');
+
+  // 새로고침 — products + import-invoices(RecentInvoicesSection) + current-company
+  const refreshing = productsQuery.isFetching;
+  const handleRefresh = () => {
+    void productsQuery.refetch();
+    void queryClient.invalidateQueries({ queryKey: ['import-invoices', companyId] });
+    void queryClient.invalidateQueries({ queryKey: ['current-company'] });
+  };
 
   const [header, setHeader] = useState<ImportInvoiceHeader>(() => ({
     ...DEFAULT_HEADER,
@@ -438,7 +447,11 @@ export function ImportPage() {
     <div>
       {/* 페이지 헤더 */}
       <header className="m-page-header" style={{ paddingBottom: 6 }}>
-        <h1 className="m-page-title">수입/매입</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h1 className="m-page-title">수입/매입</h1>
+          <div style={{ flex: 1 }} />
+          <RefreshButton onClick={handleRefresh} refreshing={refreshing} />
+        </div>
         <div className="m-tab-row">
           <button
             type="button"

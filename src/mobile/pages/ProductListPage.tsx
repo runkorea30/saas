@@ -8,6 +8,7 @@
 import { useMemo, useState } from 'react';
 import { useCompany } from '@/hooks/useCompany';
 import { useProducts, type Product } from '@/hooks/queries/useProducts';
+import { RefreshButton } from '../components/RefreshButton';
 
 function fmtWon(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -15,7 +16,12 @@ function fmtWon(n: number): string {
 
 export function ProductListPage() {
   const { companyId } = useCompany();
-  const { data: products = [], isLoading } = useProducts(companyId);
+  const productsQuery = useProducts(companyId);
+  const { data: products = [], isLoading } = productsQuery;
+  const refreshing = productsQuery.isFetching;
+  const handleRefresh = () => {
+    void productsQuery.refetch();
+  };
   const [query, setQuery] = useState('');
 
   const filtered = useMemo(() => {
@@ -47,7 +53,11 @@ export function ProductListPage() {
   return (
     <div>
       <header className="m-page-header">
-        <h1 className="m-page-title">제품리스트</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h1 className="m-page-title">제품리스트</h1>
+          <div style={{ flex: 1 }} />
+          <RefreshButton onClick={handleRefresh} refreshing={refreshing} />
+        </div>
         <input
           type="text"
           value={query}

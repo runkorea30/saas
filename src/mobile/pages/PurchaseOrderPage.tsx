@@ -28,6 +28,7 @@ import {
 } from '@/utils/calculations';
 import { getCategoryLabel } from '@/constants/categories';
 import { sortByCategory } from '@/utils/sortProducts';
+import { RefreshButton } from '../components/RefreshButton';
 
 const SAVED_QUERY_KEY = 'purchase-order-saved-categories';
 
@@ -70,6 +71,28 @@ export function PurchaseOrderPage() {
   const [orderQty, setOrderQty] = useState<Map<string, number>>(new Map());
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // 새로고침 — usePurchaseOrder 가 노출하지 않는 내부 4개 쿼리를 invalidate.
+  // invalidateQueries 는 자동으로 활성 쿼리를 refetch.
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['products', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory-stock', companyId] }),
+        queryClient.invalidateQueries({
+          queryKey: ['purchase-order-sales', companyId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ['purchase-order-saved-categories', companyId],
+        }),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const filteredProducts = useMemo(() => {
     const base =
@@ -377,6 +400,7 @@ export function PurchaseOrderPage() {
           >
             {year}년 {month}월
           </span>
+          <RefreshButton onClick={() => void handleRefresh()} refreshing={refreshing} />
         </div>
 
         {/* KPI — 가로 스크롤 */}

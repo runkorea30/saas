@@ -16,6 +16,7 @@ import { useCompany } from '@/hooks/useCompany';
 import { useCustomers } from '@/hooks/queries/useCustomers';
 import { useProducts, type Product } from '@/hooks/queries/useProducts';
 import { calcSupplyPriceByCustomerGrade } from '@/utils/calculations';
+import { RefreshButton } from '../components/RefreshButton';
 
 interface EntryRow {
   id: string;
@@ -51,8 +52,14 @@ export function OrderInputPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { companyId } = useCompany();
-  const { data: customers = [] } = useCustomers(companyId);
-  const { data: products = [] } = useProducts(companyId);
+  const customersQuery = useCustomers(companyId);
+  const productsQuery = useProducts(companyId);
+  const { data: customers = [] } = customersQuery;
+  const { data: products = [] } = productsQuery;
+  const refreshing = customersQuery.isFetching || productsQuery.isFetching;
+  const handleRefresh = () => {
+    void Promise.all([customersQuery.refetch(), productsQuery.refetch()]);
+  };
 
   const [customerId, setCustomerId] = useState('');
   const [orderDate, setOrderDate] = useState(todayKstString());
@@ -162,7 +169,11 @@ export function OrderInputPage() {
   return (
     <div style={{ paddingBottom: 80 }}>
       <header className="m-page-header">
-        <h1 className="m-page-title">수동주문입력</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h1 className="m-page-title">수동주문입력</h1>
+          <div style={{ flex: 1 }} />
+          <RefreshButton onClick={handleRefresh} refreshing={refreshing} />
+        </div>
       </header>
 
       <div style={{ padding: '12px 16px', display: 'grid', gap: 10 }}>
