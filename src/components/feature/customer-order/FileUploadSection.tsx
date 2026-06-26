@@ -45,21 +45,21 @@ export function FileUploadSection({
         <SectionHeading title="파일로 주문서 보내기" />
       </div>
 
-      {/* 드롭존 */}
+      {/* 드롭존 — flex-1 로 남은 세로 공간을 모두 점유 (옆 카드 높이와 정렬) */}
       <div
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
         onClick={() => document.getElementById('file-upload-input')?.click()}
-        className={`flex h-14 cursor-pointer items-center gap-3 rounded-lg border border-dashed px-4 transition-colors ${
+        className={`flex flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-4 transition-colors ${
           dragOver
             ? 'border-[#6B1F2A] bg-[#faf2f1]'
             : 'border-[#d9cfc8] bg-[#fdfbfa] hover:bg-[#faf6f4]'
         }`}
       >
         <Upload
-          className="h-[22px] w-[22px] shrink-0 text-[#a98e87]"
-          strokeWidth={1.6}
+          className="h-7 w-7 shrink-0 text-[#a98e87]"
+          strokeWidth={1.4}
         />
         {file ? (
           <span
@@ -84,7 +84,7 @@ export function FileUploadSection({
             </span>
           </span>
         )}
-        <span className="ml-auto text-[11px] text-[#b9aea5]">
+        <span className="text-[11px] text-[#b9aea5]">
           .xlsx · .xls · .csv (최대 10MB)
         </span>
         <input
@@ -97,7 +97,7 @@ export function FileUploadSection({
       </div>
 
       {/* 액션 행 */}
-      <div className="mt-auto flex items-center justify-between pt-3.5">
+      <div className="mt-3 flex items-center justify-between">
         <button
           type="button"
           onClick={onDownload}

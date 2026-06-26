@@ -1013,7 +1013,7 @@ function LeftPanel({
 
       {/* 2행 2~3열 span — 직송 정보 */}
       <div className="col-span-2 col-start-2 row-start-2">
-        <DirectShippingSection onAdd={addShippingRow} defaultOpen={false}>
+        <DirectShippingSection onAdd={addShippingRow}>
           <div className="mb-2 rounded-md border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-[12px] font-medium text-[#991B1B]">
             ⚠ 절대주의: 직송은 직송정보부터 입력하세요. 일반주문시와 구분해주세요
           </div>
