@@ -1,7 +1,29 @@
 /**
  * MochiCraft OPS Mobile PWA — 디자인 토큰 + 공통 스타일.
  * OPS 데스크톱 토큰과 분리된 독립 네임스페이스 (`--m-*`).
+ *
+ * 🔴 OPS 글로벌 스타일 격리 (index.css):
+ *   - body 의 burgundy paper-grain 배경 / Pretendard 폰트 / 두꺼운 스크롤바를
+ *     모바일 진입 시 mobile.tsx 가 부여한 body.mobile-active 클래스로 덮어쓴다.
+ *   - .mobile-app 은 position: fixed; inset: 0 로 전체 뷰포트 점유.
+ *     → OPS Shell / 데스크톱 배경이 시각적으로 노출될 가능성을 차단.
  */
+body.mobile-active {
+  background: #fafaf8 !important;
+  background-image: none !important;
+  color: #1a1a1a;
+  font-family:
+    'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
+    system-ui, sans-serif;
+  overflow: hidden;
+}
+body.mobile-active::-webkit-scrollbar {
+  display: none;
+}
+body.mobile-active #root {
+  height: 100%;
+}
+
 :root {
   --m-primary: #6b1f2a;
   --m-primary-light: #8b3a4a;
@@ -35,7 +57,10 @@
 }
 
 .mobile-app {
-  min-height: 100vh;
+  /* 🔴 OPS Shell / 데스크톱 배경이 깔린 상태에서도 뷰포트 전체를 완전 점유. */
+  position: fixed;
+  inset: 0;
+  z-index: 1;
   background: var(--m-bg);
   color: var(--m-text);
   font-family:
@@ -43,8 +68,18 @@
     system-ui, Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-size: 14px;
   line-height: 1.4;
+  letter-spacing: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+/* 🟠 mobile-app 내부의 모든 요소는 OPS index.css 의
+   `* { @apply border-border; }` 영향을 받지 않도록 border-color 초기값으로 복원. */
+.mobile-app *,
+.mobile-app *::before,
+.mobile-app *::after {
+  border-color: var(--m-border);
 }
 
 /* 접힘 상태 (세로 모드): 콘텐츠 위에 하단탭바 공간 확보 */
