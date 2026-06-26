@@ -443,6 +443,7 @@ export function ReceivablesPage() {
             overdueByEntity={overdueByEntity}
             onCardClick={setDrilldownEntity}
             onPaymentClick={setPaymentTarget}
+            grouped={filter === 'all'}
           />
         ) : (
           <ReceivablesTable
@@ -895,35 +896,147 @@ function ReceivablesCardGrid({
   overdueByEntity,
   onCardClick,
   onPaymentClick,
+  grouped = false,
 }: {
   rows: ReceivableSummary[];
   pendingByEntity: Map<string, number>;
   overdueByEntity: Map<string, number>;
   onCardClick: (e: ReceivableSummary) => void;
   onPaymentClick: (e: ReceivableSummary) => void;
+  /** true: 미수금있음/정산대기/정산완료 3그룹 분리. false: 평면 그리드 (필터 적용 시). */
+  grouped?: boolean;
+}) {
+  // 🟠 3그룹 분류 기준은 ReceivableCard 우상단 점 색상 로직과 동일.
+  //   - hasReceivable: overdueAmount > 0           (붉은 점, 미수금 있음)
+  //   - hasPending   : pending > 0 && overdue = 0  (호박색 점, 정산대기)
+  //   - clean        : 둘 다 0                     (녹색 점, 정산완료)
+  const groups = useMemo(() => {
+    if (!grouped) return null;
+    const hasReceivable: ReceivableSummary[] = [];
+    const hasPending: ReceivableSummary[] = [];
+    const clean: ReceivableSummary[] = [];
+    for (const r of rows) {
+      const overdue = overdueByEntity.get(r.entity_key) ?? 0;
+      const pending = pendingByEntity.get(r.entity_key) ?? 0;
+      if (overdue > 0) hasReceivable.push(r);
+      else if (pending > 0) hasPending.push(r);
+      else clean.push(r);
+    }
+    return { hasReceivable, hasPending, clean };
+  }, [grouped, rows, overdueByEntity, pendingByEntity]);
+
+  const renderCard = (r: ReceivableSummary) => (
+    <ReceivableCard
+      key={r.entity_key}
+      item={r}
+      pendingAmount={pendingByEntity.get(r.entity_key) ?? 0}
+      overdueAmount={overdueByEntity.get(r.entity_key) ?? 0}
+      onClick={() => onCardClick(r)}
+      onPayment={(e) => {
+        e.stopPropagation();
+        onPaymentClick(r);
+      }}
+    />
+  );
+
+  if (!groups) {
+    return <div style={CARD_GRID_STYLE}>{rows.map(renderCard)}</div>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {groups.hasReceivable.length > 0 && (
+        <GroupSection
+          title="미수금 있음"
+          count={groups.hasReceivable.length}
+          color={COLOR_DANGER}
+        >
+          {groups.hasReceivable.map(renderCard)}
+        </GroupSection>
+      )}
+      {groups.hasPending.length > 0 && (
+        <GroupSection
+          title="정산대기"
+          count={groups.hasPending.length}
+          color={COLOR_AMBER}
+        >
+          {groups.hasPending.map(renderCard)}
+        </GroupSection>
+      )}
+      {groups.clean.length > 0 && (
+        <GroupSection
+          title="정산완료"
+          count={groups.clean.length}
+          color={COLOR_SUCCESS}
+        >
+          {groups.clean.map(renderCard)}
+        </GroupSection>
+      )}
+    </div>
+  );
+}
+
+const CARD_GRID_STYLE: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+  gap: 12,
+};
+
+function GroupSection({
+  title,
+  count,
+  color,
+  children,
+}: {
+  title: string;
+  count: number;
+  color: string;
+  children: React.ReactNode;
 }) {
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-        gap: 12,
-      }}
-    >
-      {rows.map((r) => (
-        <ReceivableCard
-          key={r.entity_key}
-          item={r}
-          pendingAmount={pendingByEntity.get(r.entity_key) ?? 0}
-          overdueAmount={overdueByEntity.get(r.entity_key) ?? 0}
-          onClick={() => onCardClick(r)}
-          onPayment={(e) => {
-            e.stopPropagation();
-            onPaymentClick(r);
+    <section>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 10,
+        }}
+      >
+        <span
+          aria-hidden
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            background: color,
+            display: 'inline-block',
           }}
         />
-      ))}
-    </div>
+        <h3
+          style={{
+            margin: 0,
+            fontSize: 12.5,
+            fontWeight: 600,
+            color,
+            letterSpacing: '0.01em',
+          }}
+        >
+          {title}
+        </h3>
+        <span
+          className="num"
+          style={{
+            fontSize: 11.5,
+            color: 'var(--ink-3)',
+            fontFamily: 'var(--font-num)',
+          }}
+        >
+          {count}곳
+        </span>
+      </div>
+      <div style={CARD_GRID_STYLE}>{children}</div>
+    </section>
   );
 }
 
