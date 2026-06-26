@@ -15,7 +15,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Download, FileSpreadsheet, RefreshCw, Save } from 'lucide-react';
+import { CheckCircle, Download, FileSpreadsheet, RefreshCw, Save } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useCompany } from '@/hooks/useCompany';
 import { usePurchaseOrder } from '@/hooks/queries/usePurchaseOrder';
@@ -312,6 +312,66 @@ export function PurchaseOrderPage() {
     }
   };
 
+  /**
+   * 발주완료 — 이번 달 draft 발주서를 모두 'confirmed' 로 전환 + ORDER SHEET xlsx 다운로드.
+   *
+   * 🟠 수입/매입 페이지의 `parseOrderSheet` 가 읽는 ORDER SHEET 포맷(CODE/DESCRIPTION/UNIT/PRICE/QTY/AMOUNT)
+   *    을 그대로 재사용하므로 별도 인보이스 생성 함수 없이 `handleDownloadExcel` 위임.
+   */
+  const handleConfirmPO = async () => {
+    if (!companyId) return;
+    if (savedCategories.size === 0) {
+      showToast({ kind: 'error', text: '저장된 발주서가 없습니다.' });
+      return;
+    }
+    const ok = window.confirm(
+      '발주완료 처리하면 수입/매입 페이지에 업로드할 인보이스 양식(xlsx)이 자동 다운로드됩니다.\n계속하시겠습니까?',
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const monthStartIso = new Date(Date.UTC(year, month - 1, 1)).toISOString();
+      const nextMonthIso = new Date(Date.UTC(year, month, 1)).toISOString();
+      const nowIso = new Date().toISOString();
+
+      const { data: rows, error: selErr } = await supabase
+        .from('purchase_orders')
+        .select('id')
+        .eq('company_id', companyId)
+        .eq('status', 'draft')
+        .gte('po_date', monthStartIso)
+        .lt('po_date', nextMonthIso)
+        .is('deleted_at', null);
+      if (selErr) throw selErr;
+      if (!rows || rows.length === 0) {
+        showToast({ kind: 'error', text: '확정할 draft 발주서가 없습니다.' });
+        return;
+      }
+
+      const ids = rows.map((r) => r.id);
+      const { error: updErr } = await supabase
+        .from('purchase_orders')
+        .update({ status: 'confirmed', updated_at: nowIso })
+        .in('id', ids)
+        .eq('company_id', companyId);
+      if (updErr) throw updErr;
+
+      handleDownloadExcel();
+
+      showToast({
+        kind: 'success',
+        text: `${ids.length}건 발주완료 · 인보이스 양식 다운로드됨`,
+      });
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: e instanceof Error ? e.message : '발주완료 실패',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   /** 엑셀 다운로드 — savedCategories 의 품목만 ORDER SHEET 양식으로. */
   const handleDownloadExcel = () => {
     if (savedCategories.size === 0) {
@@ -467,26 +527,18 @@ export function PurchaseOrderPage() {
                 tone={savedCategories.size > 0 ? 'success' : undefined}
               />
             </div>
-            <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <button
                 type="button"
-                onClick={handleDownloadExcel}
-                disabled={savedCategories.size === 0 || busy}
-                className="btn-base"
+                onClick={handleGenerate}
+                disabled={isLoading || products.length === 0 || busy}
+                className="btn-base primary"
                 style={{ height: 32, fontSize: 12.5 }}
-                title="저장된 카테고리 품목만 ORDER SHEET 양식으로 다운로드"
+                title="당월 제외 6개월 판매량 기반 추천 발주수량 자동 입력"
               >
-                <Download size={13} /> 엑셀 다운로드
-              </button>
-              <button
-                type="button"
-                onClick={handleReset}
-                disabled={busy}
-                className="btn-base"
-                style={{ height: 32, fontSize: 12.5 }}
-                title="이번 달 발주서 저장본 및 입력값 초기화"
-              >
-                <RefreshCw size={13} /> 초기화
+                <FileSpreadsheet size={13} />
+                <StepBadge tone="onPrimary">1단계</StepBadge>
+                발주서 생성
               </button>
               <button
                 type="button"
@@ -496,17 +548,58 @@ export function PurchaseOrderPage() {
                 style={{ height: 32, fontSize: 12.5 }}
                 title="선택된 카테고리(없으면 전체)별로 발주서 저장"
               >
-                <Save size={13} /> {busy ? '저장 중…' : '현재 카테고리 저장'}
+                <Save size={13} />
+                <StepBadge>2단계</StepBadge>
+                {busy ? '저장 중…' : '현재 카테고리 저장'}
               </button>
               <button
                 type="button"
-                onClick={handleGenerate}
-                disabled={isLoading || products.length === 0 || busy}
-                className="btn-base primary"
+                onClick={handleDownloadExcel}
+                disabled={savedCategories.size === 0 || busy}
+                className="btn-base"
                 style={{ height: 32, fontSize: 12.5 }}
-                title="당월 제외 6개월 판매량 기반 추천 발주수량 자동 입력"
+                title="저장된 카테고리 품목만 ORDER SHEET 양식으로 다운로드"
               >
-                <FileSpreadsheet size={13} /> 발주서 생성
+                <Download size={13} />
+                <StepBadge>3단계</StepBadge>
+                엑셀 다운로드
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmPO}
+                disabled={savedCategories.size === 0 || busy}
+                className="btn-base"
+                style={{
+                  height: 32,
+                  fontSize: 12.5,
+                  background: '#15803D',
+                  borderColor: '#15803D',
+                  color: '#ffffff',
+                }}
+                title="저장된 발주서를 'confirmed' 상태로 전환 + 인보이스 양식(xlsx) 다운로드"
+              >
+                <CheckCircle size={13} />
+                <StepBadge tone="onPrimary">4단계</StepBadge>
+                {busy ? '처리 중…' : '발주완료'}
+              </button>
+              <span
+                style={{
+                  width: 1,
+                  height: 18,
+                  background: 'var(--line)',
+                  margin: '0 4px',
+                }}
+                aria-hidden
+              />
+              <button
+                type="button"
+                onClick={handleReset}
+                disabled={busy}
+                className="btn-base"
+                style={{ height: 32, fontSize: 12.5 }}
+                title="이번 달 발주서 저장본 및 입력값 초기화"
+              >
+                <RefreshCw size={13} /> 초기화
               </button>
             </div>
           </div>
@@ -731,6 +824,29 @@ export function PurchaseOrderPage() {
 }
 
 // ───────────────────────────────────────────────────────────
+
+function StepBadge({
+  children,
+  tone,
+}: {
+  children: React.ReactNode;
+  tone?: 'onPrimary';
+}) {
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        fontFamily: 'var(--font-num)',
+        letterSpacing: '0.04em',
+        color: tone === 'onPrimary' ? 'rgba(255,255,255,0.78)' : 'var(--ink-3)',
+        marginLeft: 4,
+        marginRight: 2,
+      }}
+    >
+      {children}
+    </span>
+  );
+}
 
 function CategoryButton({
   label,
