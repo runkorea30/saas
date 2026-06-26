@@ -10,9 +10,8 @@
  *
  * 🟠 공급자 정보(런코리아)는 dogfooding 하드코딩. Phase 5 멀티테넌트에서 companies 로 이전.
  * 🔴 본 컴포넌트는 createPortal 로 body 직속 렌더링. @media print 에서만 표시.
- * 🔴 공급가: calcSupplyPriceByCustomerGrade(sell_price, grade, gradeRates) — grade 없거나 0 이면 unit_price 폴백.
+ * 🔴 공급가 = amount / quantity (DB 설계: amount = 공급가 × 수량, unit_price = 판매가).
  */
-import { calcSupplyPriceByCustomerGrade } from '@/utils/calculations';
 
 const SUPPLIER_INFO = {
   name: '런코리아',
@@ -95,25 +94,12 @@ function isDirectShip(memo?: string | null): boolean {
 }
 
 /**
- * 공급가 = 판매가 × 거래처 등급별 공급율. 폴백 = unit_price.
+ * 공급가 = amount / quantity. 수량 0 (재고부족 자동조정) 인 경우 0 반환.
+ * is_return 행은 quantity·amount 모두 음수 → Math.abs 로 양수 단가 산출.
  */
-function computeSupplyPrice(
-  item: InvoiceItem,
-  customerGrade: string | null | undefined,
-): number {
-  if (!customerGrade || !item.product.sell_price) return item.unit_price;
-  const computed = calcSupplyPriceByCustomerGrade(
-    item.product.sell_price,
-    customerGrade,
-    {
-      grade_a: item.product.grade_a ?? null,
-      grade_b: item.product.grade_b ?? null,
-      grade_c: item.product.grade_c ?? null,
-      grade_d: item.product.grade_d ?? null,
-      grade_e: item.product.grade_e ?? null,
-    },
-  );
-  return computed > 0 ? computed : item.unit_price;
+function computeSupplyPrice(item: InvoiceItem): number {
+  if (!item.quantity) return 0;
+  return Math.round(Math.abs(item.amount / item.quantity));
 }
 
 /**
@@ -350,7 +336,7 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                           );
                         }
                         const it = r.item;
-                        const supplyPrice = computeSupplyPrice(it, g.customer.grade);
+                        const supplyPrice = computeSupplyPrice(it);
                         return (
                           <tr
                             key={r.key}

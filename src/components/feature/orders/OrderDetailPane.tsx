@@ -837,7 +837,16 @@ export function OrderDetailPane({
                           ? draft.supply_price > 0
                             ? draft.supply_price.toLocaleString()
                             : '—'
-                          : item.unit_price.toLocaleString()}
+                          : // 🔴 공급가 = amount / quantity (DB 설계: amount = 공급가 × 수량).
+                            //    unit_price 는 판매가이므로 사용 금지.
+                            (item as OrderItemRow).quantity !== 0
+                            ? Math.round(
+                                Math.abs(
+                                  (item as OrderItemRow).amount /
+                                    (item as OrderItemRow).quantity,
+                                ),
+                              ).toLocaleString()
+                            : '—'}
                       </td>
                       <td className="py-1.5 px-2 text-right font-num font-medium">
                         {rowAmount.toLocaleString()}
