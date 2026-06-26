@@ -8,6 +8,7 @@
  *   - .mobile-app 은 position: fixed; inset: 0 로 전체 뷰포트 점유.
  *     → OPS Shell / 데스크톱 배경이 시각적으로 노출될 가능성을 차단.
  */
+html.mobile-active,
 body.mobile-active {
   background: #fafaf8 !important;
   background-image: none !important;
@@ -16,7 +17,9 @@ body.mobile-active {
     'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
     system-ui, sans-serif;
   overflow: hidden;
+  height: 100%;
 }
+html.mobile-active::-webkit-scrollbar,
 body.mobile-active::-webkit-scrollbar {
   display: none;
 }

@@ -8,7 +8,7 @@
  *   마운트 시 body.mobile-active 클래스를 부여해 mobile.css 에서 명시적으로 리셋.
  *   언마운트 시 다시 OPS 페이지로 돌아갈 때 원상복구.
  */
-import { useEffect } from 'react';
+import { useLayoutEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { useMediaQuery } from './hooks/useMediaQuery';
 import { useMobileTheme } from './hooks/useMobileTheme';
@@ -22,10 +22,13 @@ export function MobileLayout() {
 
   // 🔴 body 에 식별 클래스 부여 → mobile.css 의 body.mobile-active 규칙으로
   //    OPS 글로벌 배경/폰트/스크롤바를 모바일 토큰으로 강제 교체.
-  useEffect(() => {
+  //    useLayoutEffect: 첫 페인트 이전에 적용 → OPS 배경 깜빡임 0 프레임.
+  useLayoutEffect(() => {
     document.body.classList.add('mobile-active');
+    document.documentElement.classList.add('mobile-active');
     return () => {
       document.body.classList.remove('mobile-active');
+      document.documentElement.classList.remove('mobile-active');
     };
   }, []);
 
