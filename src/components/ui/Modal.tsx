@@ -14,7 +14,7 @@
  *   - footer: 하단 액션 영역 (옵션)
  *   - width: 컨텐츠 최대 폭 (기본 480)
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
@@ -37,6 +37,14 @@ export function Modal({
 }: ModalProps) {
   const contentRef = useRef<HTMLDivElement>(null);
 
+  // 🟠 onClose 는 ref 로 받아 effect deps 에서 제외 — 부모가 inline 함수로 넘기면
+  //    매 렌더마다 effect 가 재실행돼 contentRef.focus() 가 input 포커스를 빼앗기는 버그.
+  //    이 effect 는 open 변경 시에만 setup/cleanup 한다.
+  const onCloseRef = useRef(onClose);
+  useLayoutEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
   useEffect(() => {
     if (!open) return;
     const prevActive = document.activeElement as HTMLElement | null;
@@ -45,7 +53,7 @@ export function Modal({
     contentRef.current?.focus();
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
     window.addEventListener('keydown', onKey);
 
@@ -54,7 +62,7 @@ export function Modal({
       document.body.style.overflow = prevOverflow;
       prevActive?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
