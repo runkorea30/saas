@@ -37,11 +37,14 @@ const DELIVERY_FEE = {
 const DELIVERY_FEE_THRESHOLD = 100_000;
 
 /**
- * 제품 행 / 컬럼 헤더 공용 grid 정의.
- * 컬럼 순서: 제품명(1fr) · 수량 · 재고 · 공급가 · 판매가.
- * 빈 공간 최소화: 입력셀·뱃지 폭에 맞춰 컴팩트하게 잡고 제품명을 늘림.
+ * 제품 행 / 컬럼 헤더 공용 flex 셀 너비.
+ * 컬럼 순서: 제품명(flex-1) · 수량 · 재고 · 공급가 · 판매가.
+ * 우측 4 컬럼은 shrink-0 고정 너비 → 창 크기와 무관하게 항상 같은 위치에 stick.
+ * (이전 grid `1fr_..._..._..._...` + gap-3 은 창이 넓어질수록 컬럼 사이 빈 공간이 커지는 문제.)
  */
-const ROW_COLS = 'grid-cols-[1fr_72px_60px_88px_88px]';
+const COL_QTY = 'w-[72px]';
+const COL_STOCK = 'w-[60px]';
+const COL_PRICE = 'w-[88px]';
 
 interface ProductRow {
   id: string;
@@ -436,14 +439,12 @@ export function CustomerOrderInput({
           </div>
 
           {/* 테이블 헤더 — 컬럼: 제품명 / 수량 / 재고 / 공급가 / 판매가 */}
-          <div
-            className={`grid h-9 shrink-0 ${ROW_COLS} items-center gap-3 border-b border-[#ece7e2] bg-white px-[22px] text-[11.5px] font-semibold uppercase tracking-wide text-[#a89e95]`}
-          >
-            <span>제품명</span>
-            <span className="text-center">수량</span>
-            <span className="text-center">재고</span>
-            <span className="text-right">공급가</span>
-            <span className="text-right">판매가</span>
+          <div className="flex h-9 shrink-0 items-center border-b border-[#ece7e2] bg-white px-[22px] text-[11.5px] font-semibold uppercase tracking-wide text-[#a89e95]">
+            <span className="min-w-0 flex-1 pr-3">제품명</span>
+            <span className={`${COL_QTY} shrink-0 text-center`}>수량</span>
+            <span className={`${COL_STOCK} shrink-0 text-center`}>재고</span>
+            <span className={`${COL_PRICE} shrink-0 text-right`}>공급가</span>
+            <span className={`${COL_PRICE} shrink-0 text-right`}>판매가</span>
           </div>
 
           {/* 제품 행 목록 (스크롤) */}
@@ -476,10 +477,10 @@ export function CustomerOrderInput({
               return (
                 <div
                   key={p.id}
-                  className={`grid h-11 ${ROW_COLS} items-center gap-3 border-b border-[#f3efea] px-[22px] text-[13px] transition-colors ${rowBgClass}`}
+                  className={`flex h-11 items-center border-b border-[#f3efea] px-[22px] text-[13px] transition-colors ${rowBgClass}`}
                 >
-                  {/* 제품명 + 코드 */}
-                  <div className="flex min-w-0 flex-col gap-px">
+                  {/* 제품명 + 코드 — flex-1 로 남은 공간 차지, 우측 컬럼은 항상 같은 위치 stick */}
+                  <div className="flex min-w-0 flex-1 flex-col gap-px pr-3">
                     <span
                       className={`truncate text-[13px] font-medium ${
                         isOut ? 'text-[#a89e95] line-through' : 'text-[#2b2521]'
@@ -493,8 +494,8 @@ export function CustomerOrderInput({
                     </span>
                   </div>
 
-                  {/* 수량 입력 — 재고 앞으로 이동 */}
-                  <div className="flex justify-center">
+                  {/* 수량 입력 */}
+                  <div className={`${COL_QTY} flex shrink-0 justify-center`}>
                     <input
                       type="text"
                       inputMode="numeric"
@@ -502,7 +503,7 @@ export function CustomerOrderInput({
                       placeholder="0"
                       disabled={isOut}
                       onChange={(e) => updateQty(p.id, e.target.value)}
-                      className={`h-7 w-[66px] rounded-md px-2 text-right text-[13px] outline-none transition-colors ${
+                      className={`h-7 w-[58px] rounded-md px-2 text-right text-[13px] outline-none transition-colors ${
                         isOut
                           ? 'cursor-not-allowed border border-[#ece6e1] bg-[#f3efec] text-[#c3b9b0]'
                           : qty > 0
@@ -513,7 +514,7 @@ export function CustomerOrderInput({
                   </div>
 
                   {/* 재고 뱃지 */}
-                  <div className="flex justify-center">
+                  <div className={`${COL_STOCK} flex shrink-0 justify-center`}>
                     <span
                       className={`inline-block rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${
                         isOut
@@ -529,12 +530,16 @@ export function CustomerOrderInput({
                   </div>
 
                   {/* 공급가 */}
-                  <span className="text-right text-[12.5px] text-[#7a6f66]">
+                  <span
+                    className={`${COL_PRICE} shrink-0 text-right text-[12.5px] text-[#7a6f66]`}
+                  >
                     {supply > 0 ? krw(supply) : '—'}
                   </span>
 
                   {/* 판매가 */}
-                  <span className="text-right text-[12.5px] font-semibold text-[#2b2521]">
+                  <span
+                    className={`${COL_PRICE} shrink-0 text-right text-[12.5px] font-semibold text-[#2b2521]`}
+                  >
                     {krw(p.sell_price)}
                   </span>
                 </div>
