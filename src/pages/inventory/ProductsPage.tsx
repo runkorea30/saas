@@ -30,6 +30,7 @@ import {
 } from '@/components/feature/products/ProductFilterBar';
 import { ProductListTable } from '@/components/feature/products/ProductListTable';
 import { ProductForm } from '@/components/feature/products/ProductForm';
+import { CategoryManageTab } from '@/components/feature/products/CategoryManageTab';
 import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
@@ -63,6 +64,9 @@ export function ProductsPage() {
 
   // ───── 노출 토글 (is_active) ─────
   const [isTogglingActive, setIsTogglingActive] = useState(false);
+
+  // ───── 탭 (제품목록 / 제품분류 관리) ─────
+  const [tab, setTab] = useState<'products' | 'categories'>('products');
 
   // ───── 필터 상태 ─────
   const [query, setQuery] = useState('');
@@ -577,52 +581,84 @@ export function ProductsPage() {
           </div>
         </header>
 
-        <ProductFilterBar
-          query={query}
-          onQueryChange={setQuery}
-          category={category}
-          onCategoryChange={setCategory}
-          categoryOptions={categoryOptions}
-          stockLessThan={stockLessThan}
-          onStockLessThanChange={setStockLessThan}
-          activeFilter={activeFilter}
-          onActiveFilterChange={setActiveFilter}
-          totalFiltered={filtered.length}
-          totalAll={products.length}
-          onReset={resetFilters}
-          selectedCount={selectedCount}
-        />
-
-        {/* 에러 배너 */}
-        {productsQuery.error && (
-          <div
-            style={{
-              padding: '10px 14px',
-              background: 'var(--danger-wash)',
-              color: 'var(--danger)',
-              borderRadius: 8,
-              fontSize: 12.5,
-              marginBottom: 12,
-            }}
+        {/* 탭 바 — 제품목록 / 제품분류 관리 */}
+        <div
+          role="tablist"
+          style={{
+            display: 'flex',
+            gap: 0,
+            borderBottom: '1px solid var(--line)',
+            marginBottom: 12,
+          }}
+        >
+          <TabButton
+            active={tab === 'products'}
+            onClick={() => setTab('products')}
           >
-            제품 목록 로딩 실패: {productsQuery.error.message}
-          </div>
+            제품목록
+          </TabButton>
+          <TabButton
+            active={tab === 'categories'}
+            onClick={() => setTab('categories')}
+          >
+            제품분류 관리
+          </TabButton>
+        </div>
+
+        {tab === 'products' && (
+          <>
+            <ProductFilterBar
+              query={query}
+              onQueryChange={setQuery}
+              category={category}
+              onCategoryChange={setCategory}
+              categoryOptions={categoryOptions}
+              stockLessThan={stockLessThan}
+              onStockLessThanChange={setStockLessThan}
+              activeFilter={activeFilter}
+              onActiveFilterChange={setActiveFilter}
+              totalFiltered={filtered.length}
+              totalAll={products.length}
+              onReset={resetFilters}
+              selectedCount={selectedCount}
+            />
+
+            {/* 에러 배너 */}
+            {productsQuery.error && (
+              <div
+                style={{
+                  padding: '10px 14px',
+                  background: 'var(--danger-wash)',
+                  color: 'var(--danger)',
+                  borderRadius: 8,
+                  fontSize: 12.5,
+                  marginBottom: 12,
+                }}
+              >
+                제품 목록 로딩 실패: {productsQuery.error.message}
+              </div>
+            )}
+          </>
         )}
         </div>
 
-        {/* 스크롤 영역: 테이블 카드 — 컬럼 헤더 sticky, 본문만 스크롤 */}
+        {/* 스크롤 영역: 탭별 콘텐츠 */}
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          <ProductListTable
-            products={filtered}
-            isLoading={isLoading}
-            onResetFilters={resetFilters}
-            stockByProduct={stockByProduct}
-            onEditClick={openEdit}
-            onDeleteClick={openDelete}
-            checked={checked}
-            onToggleChecked={toggleOneChecked}
-            onTogglePageChecked={togglePageChecked}
-          />
+          {tab === 'products' ? (
+            <ProductListTable
+              products={filtered}
+              isLoading={isLoading}
+              onResetFilters={resetFilters}
+              stockByProduct={stockByProduct}
+              onEditClick={openEdit}
+              onDeleteClick={openDelete}
+              checked={checked}
+              onToggleChecked={toggleOneChecked}
+              onTogglePageChecked={togglePageChecked}
+            />
+          ) : (
+            <CategoryManageTab />
+          )}
         </div>
       </main>
 
@@ -778,6 +814,43 @@ export function ProductsPage() {
         busy={deleteMut.isPending}
       />
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      style={{
+        position: 'relative',
+        padding: '10px 16px',
+        background: 'transparent',
+        border: 'none',
+        fontSize: 13,
+        fontWeight: active ? 600 : 500,
+        color: active ? 'var(--brand)' : 'var(--ink-3)',
+        cursor: 'pointer',
+        // active 탭은 하단 보더로 강조 — 컨테이너 borderBottom 위에 겹쳐서 표시.
+        borderBottom: active
+          ? '2px solid var(--brand)'
+          : '2px solid transparent',
+        marginBottom: -1,
+        transition: 'color .12s',
+      }}
+    >
+      {children}
+    </button>
   );
 }
 
