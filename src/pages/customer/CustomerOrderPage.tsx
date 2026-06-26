@@ -30,6 +30,7 @@ import {
   calcCurrentStockByProduct,
   calcSupplyPriceByCustomerGrade,
 } from '@/utils/calculations';
+// calcCurrentStockByProduct 는 stockByProduct 맵 반환 — OPS 의 useInventoryStock 과 동일 소스.
 import type { Json } from '@/types/database';
 
 // ───────────────────────────────────────────────────────────
@@ -898,9 +899,34 @@ function LeftPanel({
       const isDirect = filledShipping.length > 0;
 
       let createdOrderId: string | null = null;
+      let adjustedCount = 0;
       if (matched.length > 0) {
-        const subtotal = matched.reduce(
-          (s, it) => s + it.qty * it.unit_price_resolved,
+        // 🔴 재고 인식 자동조정 — OPS 와 동일한 calcCurrentStockByProduct 결과 사용.
+        //    finalQty = max(0, min(요청 qty, 현재 재고)). 품절(stock<=0) → 0.
+        //    adjusted=true 인 행에만 original_quantity 저장(원본 추적), 그 외 null.
+        const stockByProduct = await calcCurrentStockByProduct(
+          customer.companyId,
+        );
+        type Adjusted = MatchedItem & {
+          finalQty: number;
+          originalQtyParsed: number;
+          adjusted: boolean;
+        };
+        const adjustedMatched: Adjusted[] = matched.map((it) => {
+          const stock = stockByProduct.get(it.product_id)?.current ?? 0;
+          const originalQty = it.qty;
+          const finalQty = Math.max(0, Math.min(originalQty, stock));
+          return {
+            ...it,
+            finalQty,
+            originalQtyParsed: originalQty,
+            adjusted: finalQty !== originalQty,
+          };
+        });
+        adjustedCount = adjustedMatched.filter((it) => it.adjusted).length;
+
+        const subtotal = adjustedMatched.reduce(
+          (s, it) => s + it.finalQty * it.unit_price_resolved,
           0,
         );
         // 🔴 택배비 4규칙 — 직송/오늘 합산/기존 택배비 유무를 종합 판단.
@@ -964,13 +990,26 @@ function LeftPanel({
         if (orderErr || !order) throw orderErr ?? new Error('주문 생성 실패');
         createdOrderId = order.id;
 
-        const orderItemsPayload = matched.map((it) => ({
+        // 🟠 order_items.original_quantity 컬럼은 자동생성 타입 미반영 → as unknown as 캐스팅.
+        //    OrderDetailPane.handleSave 와 동일 패턴.
+        type ItemInsert = {
+          order_id: string;
+          company_id: string;
+          product_id: string;
+          quantity: number;
+          original_quantity: number | null;
+          unit_price: number;
+          amount: number;
+          is_return: boolean;
+        };
+        const orderItemsPayload: ItemInsert[] = adjustedMatched.map((it) => ({
           order_id: order.id,
           company_id: customer.companyId,
           product_id: it.product_id,
-          quantity: it.qty,
+          quantity: it.finalQty,
+          original_quantity: it.adjusted ? it.originalQtyParsed : null,
           unit_price: it.unit_price_resolved,
-          amount: it.qty * it.unit_price_resolved,
+          amount: it.finalQty * it.unit_price_resolved,
           is_return: false,
         }));
         if (decision.addDeliveryFee) {
@@ -979,6 +1018,7 @@ function LeftPanel({
             company_id: customer.companyId,
             product_id: DELIVERY_FEE_PRODUCT_ID,
             quantity: 1,
+            original_quantity: null,
             unit_price: DELIVERY_FEE_AMOUNT,
             amount: DELIVERY_FEE_AMOUNT,
             is_return: false,
@@ -986,11 +1026,20 @@ function LeftPanel({
         }
         const { error: itemsErr } = await supabase
           .from('order_items')
-          .insert(orderItemsPayload);
+          .insert(orderItemsPayload as unknown as Array<{
+            order_id: string;
+            company_id: string;
+            product_id: string;
+            quantity: number;
+            unit_price: number;
+            amount: number;
+            is_return: boolean;
+          }>);
         // eslint-disable-next-line no-console
         console.log('[customer-file.items]', {
           itemsErr,
           count: orderItemsPayload.length,
+          adjustedCount,
         });
         if (itemsErr) throw itemsErr;
       }
@@ -1016,10 +1065,11 @@ function LeftPanel({
       console.log('[customer-file.uploads]', { uploadErr });
       if (uploadErr) throw uploadErr;
 
-      // 5) 다이얼로그 — 변경사항(코드 미매칭 = 일부 품목 누락) 있으면 호박색 안내 추가.
-      //    createdOrderId 없는 경우(이미지/PDF 만 업로드) 도 '전송됨' 으로 안내.
+      // 5) 다이얼로그 — 변경사항이 1건 이상이면 호박색 안내:
+      //    · 코드 미매칭으로 누락 (unmatchedCount > 0)
+      //    · 재고 인식 자동조정 발생 (adjustedCount > 0)
       void createdOrderId;
-      const hasChanges = unmatchedCount > 0;
+      const hasChanges = unmatchedCount > 0 || adjustedCount > 0;
       setSubmitResult({ show: true, hasChanges });
 
       setFile(null);
