@@ -8,6 +8,7 @@
  *   safety_stock ≤ current < reorder_point 이면 'warning'. 둘 다 NULL 이면 배지 없음.
  * - `last_movement_at` 이 null 이면 `—` 표시.
  */
+import { useEffect, useRef, useState } from 'react';
 import { EmptyState } from '@/components/feature/orders/primitives';
 import { ResizeHandle } from '@/components/common/ResizeHandle';
 import {
@@ -32,6 +33,12 @@ interface Props {
   onSelect: (id: string) => void;
   isLoading: boolean;
   onResetFilters?: () => void;
+  /**
+   * 현재재고 셀 클릭 → 인라인 편집 → 저장 핸들러.
+   * `newStock` 은 사용자가 입력한 **절대값**. 호출자가 delta 변환 후 RPC 전송.
+   * 미지정 시 셀은 read-only.
+   */
+  onSaveStock?: (productId: string, newStock: number) => Promise<void>;
 }
 
 type Align = 'left' | 'right' | 'center';
@@ -66,6 +73,7 @@ export function StockListTable({
   onSelect,
   isLoading,
   onResetFilters,
+  onSaveStock,
 }: Props) {
   const { widths, draggingKey, onResizeStart, resetColumn } = useResizableColumns({
     pageKey: 'inventory-stock',
@@ -172,13 +180,22 @@ export function StockListTable({
                 <CellText value={getCategoryLabel(r.category)} small muted />
                 <CellText value={r.unit} small muted />
 
-                <CellText
-                  value={fmtQty(r.current_stock)}
-                  numeric
-                  align="right"
-                  weight={600}
-                  color={stockColor}
-                />
+                {onSaveStock ? (
+                  <EditableStockCell
+                    productId={r.id}
+                    currentStock={r.current_stock}
+                    color={stockColor}
+                    onSave={onSaveStock}
+                  />
+                ) : (
+                  <CellText
+                    value={fmtQty(r.current_stock)}
+                    numeric
+                    align="right"
+                    weight={600}
+                    color={stockColor}
+                  />
+                )}
 
                 <div style={{ display: 'flex', justifyContent: 'center' }}>
                   <span
@@ -366,6 +383,160 @@ function stockThresholdBadge(
 
 function fmtQty(n: number): string {
   return n.toLocaleString('ko-KR');
+}
+
+/**
+ * 현재재고 인라인 편집 셀.
+ * - 평소: 숫자만 표시. 호버 시 파란 점선 밑줄 + 배경 강조 → 클릭 가능 힌트.
+ * - 클릭: input 으로 전환, 기존 숫자 전체 선택.
+ * - Enter / blur: 저장. Escape: 취소.
+ * - 행 클릭(선택) 이벤트와 충돌 회피 위해 wrapper 에 stopPropagation.
+ * - 저장 중 disabled.
+ * - 0 이상 정수만 허용. 값 동일하면 noop.
+ */
+function EditableStockCell({
+  productId,
+  currentStock,
+  color,
+  onSave,
+}: {
+  productId: string;
+  currentStock: number;
+  color: string;
+  onSave: (productId: string, newStock: number) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(currentStock));
+  const [saving, setSaving] = useState(false);
+  const [hover, setHover] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // 외부에서 currentStock 갱신되면 표시값도 동기화.
+  useEffect(() => {
+    if (!editing) setValue(String(currentStock));
+  }, [currentStock, editing]);
+
+  // 편집 진입 시 포커스 + 전체 선택.
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  const cancel = () => {
+    setEditing(false);
+    setValue(String(currentStock));
+  };
+
+  const commit = async () => {
+    const trimmed = value.trim();
+    const num = Number(trimmed);
+    if (!trimmed || !Number.isFinite(num) || !Number.isInteger(num) || num < 0) {
+      cancel();
+      return;
+    }
+    if (num === currentStock) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(productId, num);
+      setEditing(false);
+    } catch {
+      // 저장 실패 시 편집 모드 유지 → 사용자가 재시도/취소 가능.
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div
+        style={{ display: 'flex', justifyContent: 'flex-end' }}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <input
+          ref={inputRef}
+          type="number"
+          min={0}
+          step={1}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={() => {
+            void commit();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              void commit();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              cancel();
+            }
+          }}
+          disabled={saving}
+          style={{
+            width: '100%',
+            maxWidth: 90,
+            height: 26,
+            padding: '0 8px',
+            border: '1.5px solid var(--brand, #2563EB)',
+            borderRadius: 4,
+            fontSize: 13,
+            fontWeight: 600,
+            textAlign: 'right',
+            fontFamily: 'var(--font-num)',
+            fontVariantNumeric: 'tabular-nums',
+            color: 'var(--ink)',
+            background: '#FFFFFF',
+            outline: 'none',
+            boxSizing: 'border-box',
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="num"
+      role="button"
+      tabIndex={0}
+      title="클릭하여 재고 수정"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={(e) => {
+        e.stopPropagation();
+        setEditing(true);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          setEditing(true);
+        }
+      }}
+      style={{
+        fontSize: 12.5,
+        fontWeight: 600,
+        color,
+        textAlign: 'right',
+        cursor: saving ? 'wait' : 'pointer',
+        padding: '2px 6px',
+        borderRadius: 4,
+        background: hover ? 'var(--brand-wash, #EFF6FF)' : 'transparent',
+        textDecoration: hover ? 'underline dashed' : 'none',
+        textUnderlineOffset: 2,
+        userSelect: 'none',
+        opacity: saving ? 0.6 : 1,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+      }}
+    >
+      {saving ? '저장 중…' : fmtQty(currentStock)}
+    </div>
+  );
 }
 
 function fmtDateShort(iso: string): string {
