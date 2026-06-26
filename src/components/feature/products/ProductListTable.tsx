@@ -9,6 +9,7 @@
  * - 편집/삭제: 행 hover 관계없이 항상 Pencil / Trash2 아이콘 노출.
  * - 재고현황 페이지(StockListTable) 행 높이/호버/숫자 정렬 규칙 계승.
  */
+import { useState } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import { Check, EmptyState } from '@/components/feature/orders/primitives';
 import { ResizeHandle } from '@/components/common/ResizeHandle';
@@ -27,6 +28,8 @@ interface Props {
   stockByProduct: Map<string, ProductStockInfo> | undefined;
   onEditClick: (product: Product) => void;
   onDeleteClick: (product: Product) => void;
+  /** 발주단위 인라인 변경 — productId, 새 unit_order 값(EA/DZ/...) 받음. */
+  onUnitOrderChange: (productId: string, next: string) => void;
   /** 체크박스 상태 — id별 boolean. 미체크 ID는 키가 없거나 false. */
   checked: Record<string, boolean>;
   /** 단일 행 토글. next는 다음 상태(true=체크). */
@@ -46,11 +49,14 @@ const CHECKBOX_COL_PX = 40;
 const ROW_GAP_PX = 10;
 const ROW_PADDING_X_PX = 14;
 
+const UNIT_ORDER_OPTIONS = ['EA', 'DZ', 'BOX', 'SET', 'PC'] as const;
+
 const COLUMN_DEFS: ReadonlyArray<ProductColumnDef> = [
   { key: 'category',       defaultWidth: 140, minWidth: 100, label: '분류',     align: 'left' },
   { key: 'code',           defaultWidth: 130, minWidth: 100, label: '제품코드', align: 'left' },
   { key: 'name',           defaultWidth: 280, minWidth: 160, label: '제품명',   align: 'left' },
   { key: 'unit',           defaultWidth: 60,  minWidth: 48,  label: '단위',     align: 'left' },
+  { key: 'unit_order',     defaultWidth: 80,  minWidth: 60,  label: '발주단위', align: 'left' },
   { key: 'sell_price',     defaultWidth: 100, minWidth: 80,  label: '판매가',   align: 'right' },
   { key: 'supply_price',   defaultWidth: 100, minWidth: 80,  label: '공급가',   align: 'right' },
   { key: 'current_stock',  defaultWidth: 90,  minWidth: 70,  label: '현재재고', align: 'right' },
@@ -65,6 +71,7 @@ export function ProductListTable({
   stockByProduct,
   onEditClick,
   onDeleteClick,
+  onUnitOrderChange,
   checked,
   onToggleChecked,
   onTogglePageChecked,
@@ -243,6 +250,11 @@ export function ProductListTable({
                 </div>
 
                 <CellText value={p.unit} small muted />
+
+                <UnitOrderCell
+                  value={p.unit_order ?? ''}
+                  onChange={(next) => onUnitOrderChange(p.id, next)}
+                />
 
                 <CellText
                   value={fmtWon(p.sell_price)}
@@ -443,6 +455,85 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * 발주단위 인라인 편집 셀.
+ * 기본은 텍스트, 클릭 시 select 로 전환.
+ * change 또는 blur 시 onChange 호출 후 텍스트 모드 복귀.
+ */
+function UnitOrderCell({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const display = value || '—';
+  if (!editing) {
+    return (
+      <div
+        onClick={(e) => {
+          e.stopPropagation();
+          setEditing(true);
+        }}
+        title="클릭하여 변경"
+        style={{
+          fontSize: 11.5,
+          color: value ? 'var(--ink-2)' : 'var(--ink-3)',
+          cursor: 'pointer',
+          padding: '2px 4px',
+          borderRadius: 4,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+        onMouseEnter={(e) =>
+          ((e.currentTarget as HTMLDivElement).style.background =
+            'var(--surface-2)')
+        }
+        onMouseLeave={(e) =>
+          ((e.currentTarget as HTMLDivElement).style.background = 'transparent')
+        }
+      >
+        {display}
+      </div>
+    );
+  }
+  return (
+    <select
+      autoFocus
+      defaultValue={value}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => {
+        const next = e.target.value;
+        setEditing(false);
+        if (next !== value) onChange(next);
+      }}
+      onBlur={() => setEditing(false)}
+      style={{
+        width: '100%',
+        height: 24,
+        padding: '0 4px',
+        border: '1px solid var(--brand)',
+        borderRadius: 4,
+        fontSize: 11.5,
+        background: 'var(--surface)',
+        color: 'var(--ink)',
+        outline: 'none',
+      }}
+    >
+      {value && !UNIT_ORDER_OPTIONS.includes(value as (typeof UNIT_ORDER_OPTIONS)[number]) && (
+        <option value={value}>{value}</option>
+      )}
+      {UNIT_ORDER_OPTIONS.map((opt) => (
+        <option key={opt} value={opt}>
+          {opt}
+        </option>
+      ))}
+    </select>
   );
 }
 

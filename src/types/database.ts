@@ -1234,6 +1234,7 @@ export type Database = {
           sell_price: number
           supply_price: number
           unit: string
+          unit_order: string | null
           unit_price_usd: number | null
           updated_at: string
         }
@@ -1257,6 +1258,7 @@ export type Database = {
           sell_price: number
           supply_price: number
           unit?: string
+          unit_order?: string | null
           unit_price_usd?: number | null
           updated_at?: string
         }
@@ -1280,6 +1282,7 @@ export type Database = {
           sell_price?: number
           supply_price?: number
           unit?: string
+          unit_order?: string | null
           unit_price_usd?: number | null
           updated_at?: string
         }

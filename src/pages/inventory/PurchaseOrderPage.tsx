@@ -127,7 +127,8 @@ export function PurchaseOrderPage() {
     for (const p of products) {
       const qty6mExcl = salesMap.get(p.id) ?? 0;
       const qty3m = calcSalesQty3m(qty6mExcl);
-      const orderQ = calcOrderQty(qty3m, p.unit);
+      // 🟠 unit_order 우선 — 없으면 unit 로 폴백. DZ 면 calcOrderQty 가 /12.
+      const orderQ = calcOrderQty(qty3m, p.unit_order || p.unit);
       if (orderQ > 0) next.set(p.id, orderQ);
     }
     setOrderQty(next);
@@ -340,11 +341,12 @@ export function PurchaseOrderPage() {
         const qty = orderQty.get(p.id) ?? 0;
         if (qty <= 0) continue;
         const price = p.unit_price_usd != null ? Number(p.unit_price_usd) : 0;
-        // 미국 공급사 발주서 — 영문명 우선, 없으면 한글명으로 폴백.
+        // 미국 공급사 발주서 — 영문명/발주단위 우선, 없으면 한글명/판매단위로 폴백.
+        // 수량은 이미 calcOrderQty 로 unit_order 환산을 거친 값이므로 그대로 출력.
         lines.push({
           code: p.code,
           name: p.name_en || p.name,
-          unit: p.unit,
+          unit: p.unit_order || p.unit,
           price: p.unit_price_usd != null ? price : '',
           qty,
           amount: Number((qty * price).toFixed(2)),

@@ -38,6 +38,7 @@ import {
   PRODUCT_CATEGORY_ALL,
   PRODUCT_CATEGORY_DEFAULT,
 } from '@/constants/categories';
+import { sortByCategory } from '@/utils/sortProducts';
 
 /** 편집 대상: 'new' = 신규 생성 모달, Product = 수정 모달, null = 닫힘. */
 type EditTarget = 'new' | Product | null;
@@ -64,6 +65,9 @@ export function ProductsPage() {
 
   // ───── 노출 토글 (is_active) ─────
   const [isTogglingActive, setIsTogglingActive] = useState(false);
+
+  // ───── 발주단위 일괄 변경 ─────
+  const [isBulkUnitOrderUpdating, setIsBulkUnitOrderUpdating] = useState(false);
 
   // ───── 탭 (제품목록 / 제품분류 관리) ─────
   const [tab, setTab] = useState<'products' | 'categories'>('products');
@@ -102,10 +106,10 @@ export function ProductsPage() {
   // 편집 모달에서 카테고리 preset 확장용 (기존 ProductForm이 이 prop을 요구).
   const knownCategories = useMemo(() => categoryOptions, [categoryOptions]);
 
-  // ───── 필터 ─────
+  // ───── 필터 + 정렬 (분류명 → 제품명 오름차순) ─────
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return products.filter((p) => {
+    const list = products.filter((p) => {
       // 검색
       if (q) {
         const inCode = p.code.toLowerCase().includes(q);
@@ -126,6 +130,7 @@ export function ProductsPage() {
       }
       return true;
     });
+    return sortByCategory(list);
   }, [products, query, category, activeFilter, stockLessThan, stockByProduct]);
 
   // ───── 요약 ─────
@@ -349,6 +354,69 @@ export function ProductsPage() {
     }
   };
 
+  /**
+   * 발주단위 인라인 단건 변경 — 행의 select 에서 값을 바꾸면 즉시 호출.
+   * 🟠 useUpdateProduct 는 모든 필드를 요구하므로 여기서는 supabase 를 직접 호출하고
+   *    동일한 ['products', companyId] 키를 무효화.
+   */
+  const handleUnitOrderChange = async (productId: string, next: string) => {
+    if (!companyId) return;
+    try {
+      const { error } = await supabase
+        .from('products')
+        .update({ unit_order: next })
+        .eq('id', productId)
+        .eq('company_id', companyId)
+        .is('deleted_at', null);
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ['products', companyId] });
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: e instanceof Error ? e.message : '발주단위 변경 실패',
+      });
+    }
+  };
+
+  /**
+   * 발주단위 일괄 변경 — 현재 화면에 필터된 제품 전체를 대상으로.
+   * 사용자 요구: 분류/검색/활성 필터가 적용된 `filtered` 만 변경 대상.
+   */
+  const handleBulkUnitOrderUpdate = async (unitOrder: string) => {
+    if (!companyId || isBulkUnitOrderUpdating) return;
+    if (filtered.length === 0) {
+      showToast({ kind: 'error', text: '변경할 제품이 없습니다.' });
+      return;
+    }
+    const confirmed = window.confirm(
+      `현재 필터된 ${filtered.length}개 제품의 발주단위를 ${unitOrder} 로 변경하시겠습니까?`,
+    );
+    if (!confirmed) return;
+    setIsBulkUnitOrderUpdating(true);
+    try {
+      const ids = filtered.map((p) => p.id);
+      const { error } = await supabase
+        .from('products')
+        .update({ unit_order: unitOrder })
+        .in('id', ids)
+        .eq('company_id', companyId)
+        .is('deleted_at', null);
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ['products', companyId] });
+      showToast({
+        kind: 'success',
+        text: `${ids.length}개 제품의 발주단위를 ${unitOrder} 로 변경했습니다`,
+      });
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: e instanceof Error ? e.message : '발주단위 일괄 변경 실패',
+      });
+    } finally {
+      setIsBulkUnitOrderUpdating(false);
+    }
+  };
+
   /** is_active 일괄 토글 — true=노출, false=노출금지. */
   const setBulkActive = async (active: boolean) => {
     if (selectedCount === 0 || !companyId || isTogglingActive) return;
@@ -560,6 +628,48 @@ export function ProductsPage() {
                   </button>
                 </>
               )}
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  marginRight: 4,
+                }}
+                title="현재 필터된 제품 전체의 발주단위를 한 번에 변경"
+              >
+                <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                  발주단위 일괄변경
+                </span>
+                <select
+                  value=""
+                  disabled={isBulkUnitOrderUpdating || filtered.length === 0}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v) void handleBulkUnitOrderUpdate(v);
+                    e.target.value = '';
+                  }}
+                  style={{
+                    height: 30,
+                    padding: '0 8px',
+                    border: '1px solid var(--line-strong)',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    background: '#FFFFFF',
+                    color: 'var(--ink-2)',
+                    cursor:
+                      isBulkUnitOrderUpdating || filtered.length === 0
+                        ? 'not-allowed'
+                        : 'pointer',
+                  }}
+                >
+                  <option value="">선택</option>
+                  <option value="DZ">전체 DZ</option>
+                  <option value="EA">전체 EA</option>
+                  <option value="BOX">전체 BOX</option>
+                  <option value="SET">전체 SET</option>
+                  <option value="PC">전체 PC</option>
+                </select>
+              </div>
               <button
                 type="button"
                 disabled
@@ -652,6 +762,7 @@ export function ProductsPage() {
               stockByProduct={stockByProduct}
               onEditClick={openEdit}
               onDeleteClick={openDelete}
+              onUnitOrderChange={handleUnitOrderChange}
               checked={checked}
               onToggleChecked={toggleOneChecked}
               onTogglePageChecked={togglePageChecked}
