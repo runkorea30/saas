@@ -7,6 +7,7 @@
 import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
+  Download,
   FileUp,
   Loader2,
   LogOut,
@@ -520,6 +521,7 @@ function LeftPanel({
   const [shipping, setShipping] = useState<ShippingRow[]>([emptyShipping()]);
   const [dragOver, setDragOver] = useState(false);
   const [sending, setSending] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   const handleFile = (f: File | null) => {
     setFile(f);
@@ -590,6 +592,94 @@ function LeftPanel({
         return next;
       });
     };
+
+  /**
+   * 현재 거래처 grade 가 반영된 주문서 양식 xlsx 다운로드.
+   * - products 활성행 전체를 (category, name) 오름차순 SELECT.
+   * - 카테고리 변경 시 ▶ 헤더 행 삽입 → 제품 행 출력 (수량/합계 빈 칸으로 거래처 작성).
+   * - 공급가 = calcSupplyPriceByCustomerGrade(sell_price, grade, gradeRates).
+   * - 헤더 4행: 요약 / 은행계좌 / (padding) / 컬럼명 → parseOrderExcel 의 i=4 시작에 맞춤.
+   */
+  const handleDownloadOrderForm = async () => {
+    setDownloading(true);
+    try {
+      const { data: products, error } = await supabase
+        .from('products')
+        .select(
+          'id, code, name, category, unit, sell_price, grade_a, grade_b, grade_c, grade_d, grade_e',
+        )
+        .eq('company_id', customer.companyId)
+        .eq('is_active', true)
+        .is('deleted_at', null)
+        .order('category', { ascending: true })
+        .order('name', { ascending: true });
+      if (error) throw error;
+      if (!products || products.length === 0) {
+        showToast({ kind: 'error', text: '활성 제품이 없습니다.' });
+        return;
+      }
+
+      const rows: (string | number)[][] = [];
+      // Row 0: 수량합계 / 주문금액 요약 (거래처가 직접 작성)
+      rows.push(['', '', '수량합계', '', '주문금액', '']);
+      // Row 1: 은행계좌 안내
+      rows.push(['국민은행 024801-04-301418 예금주 양시혁']);
+      // Row 2: 빈 줄 (parseOrderExcel 가 i=4 부터 읽도록 padding)
+      rows.push([]);
+      // Row 3: 컬럼 헤더
+      rows.push(['제품명', '코드', '수량', '판매가', '공급가', '합계']);
+
+      let currentCategory = '';
+      for (const p of products) {
+        const category = p.category || '기타';
+        if (category !== currentCategory) {
+          currentCategory = category;
+          rows.push([`▶ ${category}`]);
+        }
+        const supplyPrice = calcSupplyPriceByCustomerGrade(
+          p.sell_price,
+          customer.grade,
+          {
+            grade_a: p.grade_a ?? null,
+            grade_b: p.grade_b ?? null,
+            grade_c: p.grade_c ?? null,
+            grade_d: p.grade_d ?? null,
+            grade_e: p.grade_e ?? null,
+          },
+        );
+        rows.push([
+          p.name,
+          p.code,
+          '', // 수량 — 거래처 입력
+          p.sell_price ?? 0,
+          supplyPrice,
+          '', // 합계 — 거래처 입력
+        ]);
+      }
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws['!cols'] = [
+        { wch: 45 },
+        { wch: 18 },
+        { wch: 8 },
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 12 },
+      ];
+      XLSX.utils.book_append_sheet(wb, ws, '주문서');
+
+      const today = new Date();
+      const dateStr = `${today.getFullYear()}년_${String(today.getMonth() + 1).padStart(2, '0')}월${String(today.getDate()).padStart(2, '0')}일`;
+      XLSX.writeFile(wb, `런코리아_주문서_${dateStr}.xlsx`);
+      showToast({ kind: 'success', text: '주문서를 다운로드했습니다.' });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '주문서 생성 실패';
+      showToast({ kind: 'error', text: msg });
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const handleSubmitFile = async () => {
     if (!file) {
@@ -852,7 +942,36 @@ function LeftPanel({
             onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
           />
         </div>
-        <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end' }}>
+        <div
+          style={{
+            marginTop: 10,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <button
+            type="button"
+            onClick={handleDownloadOrderForm}
+            disabled={downloading}
+            title="현재 거래처 등급의 판매가·공급가가 반영된 빈 주문서를 받습니다"
+            style={{
+              ...secondaryBtn,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              opacity: downloading ? 0.55 : 1,
+              cursor: downloading ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {downloading ? (
+              <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
+            ) : (
+              <Download size={13} />
+            )}
+            주문서 다운로드
+          </button>
           <button
             type="button"
             onClick={handleSubmitFile}
