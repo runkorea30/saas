@@ -4,20 +4,9 @@
  * OPS Shell 과 무관한 독립 페이지. 로그인 세션이 없으면 CustomerOrderLogin 렌더.
  * 로그인 후에는 메인(파일/메시지/직송) 또는 직접 입력 모드 노출.
  */
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import {
-  Download,
-  FileUp,
-  Loader2,
-  LogOut,
-  MessageSquare,
-  Pencil,
-  Plus,
-  Trash2,
-  Truck,
-  X,
-} from 'lucide-react';
+import { Loader2, LogOut, Trash2 } from 'lucide-react';
 // xlsx-js-style 은 SheetJS xlsx 의 fork — 동일 API + 셀 스타일(s) 지원.
 // parseOrderExcel(read) 과 handleDownloadOrderForm(write+style) 모두 한 import 로 처리.
 import * as XLSX from 'xlsx-js-style';
@@ -26,6 +15,10 @@ import { useToast } from '@/components/ui/Toast';
 import { useCustomerAuth, type CustomerSession } from '@/hooks/useCustomerAuth';
 import { CustomerOrderLogin } from './CustomerOrderLogin';
 import { CustomerOrderInput } from './CustomerOrderInput';
+import { FileUploadSection } from '@/components/feature/customer-order/FileUploadSection';
+import { MessageSection } from '@/components/feature/customer-order/MessageSection';
+import { DirectOrderEntryCard } from '@/components/feature/customer-order/DirectOrderEntryCard';
+import { DirectShippingSection } from '@/components/feature/customer-order/DirectShippingSection';
 import {
   calcCurrentStockByProduct,
   calcSupplyPriceByCustomerGrade,
@@ -111,8 +104,6 @@ function isParsableExcel(fileName: string): boolean {
   const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
   return PARSABLE_EXTENSIONS.has(ext);
 }
-
-const ACCEPT_EXT = '.xlsx,.xls,.csv,.jpg,.jpeg,.png,.pdf';
 
 /**
  * 직송 정보 테이블의 사용자 입력 7컬럼.
@@ -328,7 +319,7 @@ function CustomerOrderShell({
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F5F5F4' }}>
+    <div className="flex min-h-screen flex-col bg-[#f8f7f5] text-[#312b27]">
       <Header
         customer={customer}
         fontScale={fontScale}
@@ -338,55 +329,29 @@ function CustomerOrderShell({
           showToast({ kind: 'info', text: '로그아웃되었습니다.' });
         }}
       />
-      <main
-        style={{
-          maxWidth: 1280,
-          margin: '0 auto',
-          padding: 20,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-        }}
-      >
-        {/* 상단: 좌측 입력 폼 + 우측 공지사항 */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) 360px',
-            gap: 16,
-          }}
-        >
+      <div className="mx-auto flex w-full max-w-[1440px] flex-1 gap-[18px] p-[18px]">
+        {/* ── 좌측 67%: 입력 폼 그리드 + 오늘/월별 ── */}
+        <div className="flex min-w-0 flex-[0_0_67%] flex-col gap-3">
           <LeftPanel
             customer={customer}
-            fontScale={fontScale}
             onOpenInput={() => setMode('input')}
           />
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 16,
-            }}
-          >
-            <NoticePanel fontScale={fontScale} />
-            <ImportNoticeCard
-              companyId={customer.companyId}
-              fontScale={fontScale}
-            />
+          {/* 오늘 (좌) + 월별 (우) */}
+          <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
+            <TodayOrders customer={customer} fontScale={fontScale} />
+            <MonthlyOrders customer={customer} fontScale={fontScale} />
           </div>
         </div>
-        {/* 하단: 오늘 (좌) + 월별 (우) */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: 16,
-          }}
-        >
-          <TodayOrders customer={customer} fontScale={fontScale} />
-          <MonthlyOrders customer={customer} fontScale={fontScale} />
-        </div>
-      </main>
+
+        {/* ── 우측 33%: 공지사항 + 수입예정 ── */}
+        <aside className="flex min-w-0 flex-1 flex-col gap-3">
+          <NoticePanel fontScale={fontScale} />
+          <ImportNoticeCard
+            companyId={customer.companyId}
+            fontScale={fontScale}
+          />
+        </aside>
+      </div>
     </div>
   );
 }
@@ -509,15 +474,12 @@ function Header({
 
 function LeftPanel({
   customer,
-  fontScale,
   onOpenInput,
 }: {
   customer: CustomerSession;
-  fontScale: number;
   onOpenInput: () => void;
 }) {
   const { showToast } = useToast();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [message, setMessage] = useState('');
   const [shipping, setShipping] = useState<ShippingRow[]>([emptyShipping()]);
@@ -1016,292 +978,137 @@ function LeftPanel({
     }
   };
 
-  const baseFont = 13 * fontScale;
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+  const handleDragLeave = () => setDragOver(false);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* 파일 업로드 */}
-      <Card title="파일로 주문서 보내기" icon={<FileUp size={16} />}>
-        <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
+    <div className="grid grid-cols-3 grid-rows-[auto_auto] gap-3">
+      {/* 1열, 2행 span — 파일 업로드 */}
+      <div className="col-start-1 row-span-2">
+        <FileUploadSection
+          file={file}
+          onFileChange={handleFile}
+          onSubmit={handleSubmitFile}
+          onDownload={handleDownloadOrderForm}
+          sending={sending}
+          downloading={downloading}
           onDrop={onDrop}
-          onClick={() => fileInputRef.current?.click()}
-          style={{
-            cursor: 'pointer',
-            border: `2px dashed ${dragOver ? '#2563EB' : '#D6D3D1'}`,
-            background: dragOver ? '#EFF6FF' : '#FAFAF9',
-            borderRadius: 8,
-            padding: 24,
-            textAlign: 'center',
-            fontSize: baseFont,
-            color: '#44403C',
-          }}
-        >
-          {file ? (
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <FileUp size={16} />
-              <span>{file.name}</span>
-              <button
-                type="button"
-                onClick={() => handleFile(null)}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  color: '#78716C',
-                  padding: 4,
-                }}
-                title="파일 제거"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          ) : (
-            <>
-              <div style={{ marginBottom: 4 }}>
-                파일을 끌어다 놓거나 클릭해서 업로드
-              </div>
-              <div style={{ fontSize: baseFont - 2, color: '#78716C' }}>
-                지원 형식: xlsx, xls, csv, jpg, png, pdf
-              </div>
-            </>
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={ACCEPT_EXT}
-            style={{ display: 'none' }}
-            onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
-          />
-        </div>
-        <div
-          style={{
-            marginTop: 10,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <button
-            type="button"
-            onClick={handleDownloadOrderForm}
-            disabled={downloading}
-            title="현재 거래처 등급의 판매가·공급가가 반영된 빈 주문서를 받습니다"
-            style={{
-              ...secondaryBtn,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              opacity: downloading ? 0.55 : 1,
-              cursor: downloading ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {downloading ? (
-              <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
-            ) : (
-              <Download size={13} />
-            )}
-            주문서 다운로드
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmitFile}
-            disabled={!file || sending}
-            style={{
-              ...primaryBtn,
-              opacity: !file || sending ? 0.55 : 1,
-              cursor: !file || sending ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {sending && (
-              <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
-            )}
-            전송하기
-          </button>
-        </div>
-      </Card>
-
-      {/* 메시지 */}
-      <Card title="전달 메시지" icon={<MessageSquare size={16} />}>
-        <textarea
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder="전달할 메시지를 입력하세요"
-          rows={3}
-          style={{
-            width: '100%',
-            resize: 'vertical',
-            padding: 10,
-            fontSize: baseFont,
-            border: '1px solid #D6D3D1',
-            borderRadius: 6,
-            outline: 'none',
-            fontFamily: 'inherit',
-            background: '#FFFFFF',
-          }}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          dragOver={dragOver}
         />
-      </Card>
+      </div>
 
-      {/* 직송 정보 */}
-      <Card title="직송 정보" icon={<Truck size={16} />}>
-        <div
-          style={{
-            padding: '10px 12px',
-            background: '#FEF2F2',
-            border: '1px solid #FECACA',
-            color: '#991B1B',
-            borderRadius: 6,
-            fontSize: baseFont - 1,
-            marginBottom: 10,
-            fontWeight: 500,
-          }}
-        >
-          ⚠ 절대주의: 직송은 직송정보부터 입력하세요. 일반주문시와 구분해주세요
-        </div>
-        <div style={{ overflowX: 'auto' }}>
-          <table
-            style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: baseFont - 1,
-            }}
-          >
-            <thead>
-              <tr style={{ background: '#FAFAF9' }}>
-                <ShipTh>받는사람</ShipTh>
-                <ShipTh>우편번호</ShipTh>
-                <ShipTh>주소</ShipTh>
-                <ShipTh>연락처1</ShipTh>
-                <ShipTh>연락처2</ShipTh>
-                <ShipTh />
-                <ShipTh>제품</ShipTh>
-                <ShipTh>거래처</ShipTh>
-                <ShipTh>신용</ShipTh>
-                <ShipTh width={36} />
-              </tr>
-            </thead>
-            <tbody>
-              {shipping.map((row, i) => (
-                <tr key={i} style={{ borderTop: '1px solid #F5F5F4' }}>
-                  <ShipTd>
-                    <CellInput
-                      value={row.name}
-                      onChange={(v) => updateShipping(i, 'name', v)}
-                      onPaste={handleShippingPaste(i, 0)}
-                    />
-                  </ShipTd>
-                  <ShipTd>
-                    <CellInput
-                      value={row.zipcode}
-                      onChange={(v) => updateShipping(i, 'zipcode', v)}
-                      onPaste={handleShippingPaste(i, 1)}
-                    />
-                  </ShipTd>
-                  <ShipTd>
-                    <CellInput
-                      value={row.address}
-                      onChange={(v) => updateShipping(i, 'address', v)}
-                      onPaste={handleShippingPaste(i, 2)}
-                    />
-                  </ShipTd>
-                  <ShipTd>
-                    <CellInput
-                      value={row.phone1}
-                      onChange={(v) => updateShipping(i, 'phone1', v)}
-                      onPaste={handleShippingPaste(i, 3)}
-                    />
-                  </ShipTd>
-                  <ShipTd>
-                    <CellInput
-                      value={row.phone2}
-                      onChange={(v) => updateShipping(i, 'phone2', v)}
-                      onPaste={handleShippingPaste(i, 4)}
-                    />
-                  </ShipTd>
-                  <ShipTd>
-                    <CellInput
-                      value={row.blank}
-                      onChange={(v) => updateShipping(i, 'blank', v)}
-                      onPaste={handleShippingPaste(i, 5)}
-                    />
-                  </ShipTd>
-                  <ShipTd>
-                    <CellInput
-                      value={row.product}
-                      onChange={(v) => updateShipping(i, 'product', v)}
-                      onPaste={handleShippingPaste(i, 6)}
-                    />
-                  </ShipTd>
-                  <ShipTd>
-                    <ReadOnlyCell value={customer.customerName} />
-                  </ShipTd>
-                  <ShipTd>
-                    <ReadOnlyCell value={CREDIT_LABEL} />
-                  </ShipTd>
-                  <ShipTd width={36}>
-                    <button
-                      type="button"
-                      onClick={() => removeShippingRow(i)}
-                      title="행 삭제"
-                      style={{
-                        border: 'none',
-                        background: 'transparent',
-                        cursor: 'pointer',
-                        color: '#78716C',
-                        padding: 4,
-                      }}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </ShipTd>
+      {/* 2행1열 — 전달 메시지 */}
+      <div className="col-start-2 row-start-1">
+        <MessageSection value={message} onChange={setMessage} />
+      </div>
+
+      {/* 1행3열 — 주문서 직접 입력 */}
+      <div className="col-start-3 row-start-1">
+        <DirectOrderEntryCard onClick={onOpenInput} />
+      </div>
+
+      {/* 2행 2~3열 span — 직송 정보 */}
+      <div className="col-span-2 col-start-2 row-start-2">
+        <DirectShippingSection onAdd={addShippingRow} defaultOpen={false}>
+          <div className="mb-2 rounded-md border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-[12px] font-medium text-[#991B1B]">
+            ⚠ 절대주의: 직송은 직송정보부터 입력하세요. 일반주문시와 구분해주세요
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-[12px]">
+              <thead>
+                <tr className="bg-[#FAFAF9]">
+                  <ShipTh>받는사람</ShipTh>
+                  <ShipTh>우편번호</ShipTh>
+                  <ShipTh>주소</ShipTh>
+                  <ShipTh>연락처1</ShipTh>
+                  <ShipTh>연락처2</ShipTh>
+                  <ShipTh />
+                  <ShipTh>제품</ShipTh>
+                  <ShipTh>거래처</ShipTh>
+                  <ShipTh>신용</ShipTh>
+                  <ShipTh width={36} />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ marginTop: 8 }}>
-          <button
-            type="button"
-            onClick={addShippingRow}
-            style={{
-              ...secondaryBtn,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              fontSize: baseFont - 1,
-            }}
-          >
-            <Plus size={13} /> 행 추가
-          </button>
-        </div>
-      </Card>
-
-      {/* 직접 입력 진입 */}
-      <button
-        type="button"
-        onClick={onOpenInput}
-        style={{
-          ...primaryBtn,
-          width: '100%',
-          height: 48,
-          fontSize: 14,
-          justifyContent: 'center',
-        }}
-      >
-        <Pencil size={14} /> 주문서 직접 입력
-      </button>
+              </thead>
+              <tbody>
+                {shipping.map((row, i) => (
+                  <tr key={i} className="border-t border-[#F5F5F4]">
+                    <ShipTd>
+                      <CellInput
+                        value={row.name}
+                        onChange={(v) => updateShipping(i, 'name', v)}
+                        onPaste={handleShippingPaste(i, 0)}
+                      />
+                    </ShipTd>
+                    <ShipTd>
+                      <CellInput
+                        value={row.zipcode}
+                        onChange={(v) => updateShipping(i, 'zipcode', v)}
+                        onPaste={handleShippingPaste(i, 1)}
+                      />
+                    </ShipTd>
+                    <ShipTd>
+                      <CellInput
+                        value={row.address}
+                        onChange={(v) => updateShipping(i, 'address', v)}
+                        onPaste={handleShippingPaste(i, 2)}
+                      />
+                    </ShipTd>
+                    <ShipTd>
+                      <CellInput
+                        value={row.phone1}
+                        onChange={(v) => updateShipping(i, 'phone1', v)}
+                        onPaste={handleShippingPaste(i, 3)}
+                      />
+                    </ShipTd>
+                    <ShipTd>
+                      <CellInput
+                        value={row.phone2}
+                        onChange={(v) => updateShipping(i, 'phone2', v)}
+                        onPaste={handleShippingPaste(i, 4)}
+                      />
+                    </ShipTd>
+                    <ShipTd>
+                      <CellInput
+                        value={row.blank}
+                        onChange={(v) => updateShipping(i, 'blank', v)}
+                        onPaste={handleShippingPaste(i, 5)}
+                      />
+                    </ShipTd>
+                    <ShipTd>
+                      <CellInput
+                        value={row.product}
+                        onChange={(v) => updateShipping(i, 'product', v)}
+                        onPaste={handleShippingPaste(i, 6)}
+                      />
+                    </ShipTd>
+                    <ShipTd>
+                      <ReadOnlyCell value={customer.customerName} />
+                    </ShipTd>
+                    <ShipTd>
+                      <ReadOnlyCell value={CREDIT_LABEL} />
+                    </ShipTd>
+                    <ShipTd width={36}>
+                      <button
+                        type="button"
+                        onClick={() => removeShippingRow(i)}
+                        title="행 삭제"
+                        className="cursor-pointer border-none bg-transparent p-1 text-[#78716C] hover:text-[#dc2626]"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </ShipTd>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </DirectShippingSection>
+      </div>
     </div>
   );
 }
@@ -2620,21 +2427,6 @@ function ReadOnlyCell({ value }: { value: string }) {
     </div>
   );
 }
-
-const primaryBtn: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  height: 36,
-  padding: '0 16px',
-  background: '#2563EB',
-  color: '#FFFFFF',
-  border: 'none',
-  borderRadius: 6,
-  fontSize: 13,
-  fontWeight: 600,
-  cursor: 'pointer',
-};
 
 const secondaryBtn: React.CSSProperties = {
   height: 32,
