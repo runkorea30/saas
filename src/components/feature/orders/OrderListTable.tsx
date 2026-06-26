@@ -421,9 +421,27 @@ export function OrderListTable(props: OrderListTableProps) {
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'flex-end',
+                      gap: 4,
                       minWidth: 0,
                     }}
                   >
+                    {o.is_direct_shipping && (
+                      <span
+                        title="직송 주문"
+                        style={{
+                          fontSize: 9.5,
+                          fontWeight: 600,
+                          background: '#dcfce7',
+                          color: '#15803d',
+                          padding: '1px 6px',
+                          borderRadius: 999,
+                          letterSpacing: '0.04em',
+                          flexShrink: 0,
+                        }}
+                      >
+                        직송
+                      </span>
+                    )}
                     {hasReturn && (
                       <span
                         title="반품 포함"
@@ -465,6 +483,25 @@ export function OrderListTable(props: OrderListTableProps) {
                     >
                       {customerName}
                     </div>
+                    {o.is_direct_shipping && (
+                      <span
+                        title="직송 주문"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          fontSize: 9.5,
+                          fontWeight: 600,
+                          background: '#dcfce7',
+                          color: '#15803d',
+                          padding: '1px 6px',
+                          borderRadius: 999,
+                          letterSpacing: '0.04em',
+                          flexShrink: 0,
+                        }}
+                      >
+                        직송
+                      </span>
+                    )}
                     {hasReturn && (
                       <span
                         title="반품 포함"

@@ -25,6 +25,18 @@ import type { CustomerSession } from '@/hooks/useCustomerAuth';
 const LOW_STOCK_THRESHOLD = 10;
 
 /**
+ * 택배비 자동추가 — 직접 입력 주문은 직송 UI 가 없어 항상 비-직송.
+ * 합계 < 10만원 + 이미 0000 코드 미포함 일 때만 추가.
+ */
+const DELIVERY_FEE = {
+  productId: 'cf9040dd-c363-469d-99d4-bb7eaec6264a',
+  code: '0000',
+  name: '택배비',
+  price: 4000,
+};
+const DELIVERY_FEE_THRESHOLD = 100_000;
+
+/**
  * 제품 행 / 컬럼 헤더 공용 grid 정의.
  * 컬럼 순서: 제품명(1fr) · 수량 · 재고 · 공급가 · 판매가.
  * 빈 공간 최소화: 입력셀·뱃지 폭에 맞춰 컴팩트하게 잡고 제품명을 늘림.
@@ -217,10 +229,19 @@ export function CustomerOrderInput({
           };
         });
       // 🔴 거래처 주문은 공급가 기준 (sell_price 아님).
-      const totalAmount = items.reduce(
+      const subtotal = items.reduce(
         (s, it) => s + it.qty * it.supply_price,
         0,
       );
+      // 🔴 택배비 자동추가: 합계 < 10만원 + 0000 미포함 (직접 입력은 항상 비-직송).
+      const hasDeliveryAlready = items.some(
+        (it) => it.code === DELIVERY_FEE.code,
+      );
+      const needsDeliveryFee =
+        subtotal < DELIVERY_FEE_THRESHOLD && !hasDeliveryAlready;
+      const totalAmount = needsDeliveryFee
+        ? subtotal + DELIVERY_FEE.price
+        : subtotal;
 
       // eslint-disable-next-line no-console
       console.log('[customer-order.submit]', {
@@ -272,6 +293,17 @@ export function CustomerOrderInput({
         amount: it.qty * it.supply_price,
         is_return: false,
       }));
+      if (needsDeliveryFee) {
+        orderItemsPayload.push({
+          order_id: order.id,
+          company_id: customer.companyId,
+          product_id: DELIVERY_FEE.productId,
+          quantity: 1,
+          unit_price: DELIVERY_FEE.price,
+          amount: DELIVERY_FEE.price,
+          is_return: false,
+        });
+      }
       const { error: itemsErr } = await supabase
         .from('order_items')
         .insert(orderItemsPayload);

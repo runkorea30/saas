@@ -45,6 +45,22 @@ export interface OrderItem {
   product: OrderProductRef | null;
 }
 
+/**
+ * 주문 직송 정보 1행. orders.shipping_info JSONB 에 배열로 저장.
+ * 거래처 포털의 ShippingRow + customer/credit 자동필드를 보존한 그대로.
+ */
+export interface OrderShippingEntry {
+  name?: string | null;
+  zipcode?: string | null;
+  address?: string | null;
+  phone1?: string | null;
+  phone2?: string | null;
+  blank?: string | null;
+  product?: string | null;
+  customer?: string | null;
+  credit?: string | null;
+}
+
 export interface Order {
   id: string;
   order_date: string; // ISO
@@ -54,6 +70,10 @@ export interface Order {
   status: OrderStatus;
   source: OrderSource;
   memo: string | null;
+  /** 직송 여부 — true 이면 OPS 주문내역에서 "직송" 뱃지 표시. */
+  is_direct_shipping?: boolean | null;
+  /** 직송 정보 배열. JSONB 컬럼 — Supabase 가 객체로 디시리얼라이즈해서 반환. */
+  shipping_info?: OrderShippingEntry[] | null;
   created_by: string | null;
   customer: OrderCustomerRef | null;
   creator: OrderCreatorRef | null;

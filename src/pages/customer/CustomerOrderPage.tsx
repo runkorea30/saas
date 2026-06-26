@@ -145,6 +145,18 @@ const emptyShipping = (): ShippingRow => ({
 const CREDIT_LABEL = '신용';
 
 // ───────────────────────────────────────────────────────────
+// 택배비 자동추가 — 합계 < 10만원 이고 직송이 아니면 택배비 행을 추가.
+// dogfooding 단계 하드코딩. 멀티테넌트 도입 시 회사별 설정으로 이동.
+// ───────────────────────────────────────────────────────────
+const DELIVERY_FEE = {
+  productId: 'cf9040dd-c363-469d-99d4-bb7eaec6264a',
+  code: '0000',
+  name: '택배비',
+  price: 4000,
+};
+const DELIVERY_FEE_THRESHOLD = 100_000;
+
+// ───────────────────────────────────────────────────────────
 // 주문 내역 데이터 모델
 // ───────────────────────────────────────────────────────────
 
@@ -875,27 +887,67 @@ function LeftPanel({
             unit_price_resolved: unitPrice,
           };
         });
+      // 직송 행 — 사용자가 입력한 행만 추출. 1개 이상이면 직송 주문 으로 간주.
+      const filledShipping = shipping
+        .filter((s) => s.name || s.address || s.phone1 || s.product)
+        .map((s) => ({
+          ...s,
+          customer: customer.customerName,
+          credit: CREDIT_LABEL,
+        }));
+      const isDirect = filledShipping.length > 0;
+
       let createdOrderId: string | null = null;
       if (matched.length > 0) {
-        const totalAmount = matched.reduce(
+        const subtotal = matched.reduce(
           (s, it) => s + it.qty * it.unit_price_resolved,
           0,
         );
+        // 🔴 택배비 자동추가: 직송 아님 + 합계 < 10만원 + 이미 택배비 코드 미포함.
+        const hasDeliveryAlready = matched.some(
+          (it) => it.code === DELIVERY_FEE.code,
+        );
+        const needsDeliveryFee =
+          !isDirect && subtotal < DELIVERY_FEE_THRESHOLD && !hasDeliveryAlready;
+        const totalAmount = needsDeliveryFee
+          ? subtotal + DELIVERY_FEE.price
+          : subtotal;
+
+        // 🟠 orders 의 shipping_info/is_direct_shipping 컬럼은 자동생성 타입에 아직 미반영
+        //    → as unknown as ... 캐스팅으로 INSERT.
+        const orderPayload = {
+          company_id: customer.companyId,
+          customer_id: customer.customerId,
+          order_date: new Date().toISOString(),
+          status: 'draft',
+          source: 'portal',
+          memo: message || null,
+          shipping_info: isDirect ? (filledShipping as unknown as Json) : null,
+          is_direct_shipping: isDirect,
+          total_amount: totalAmount,
+        } as unknown as {
+          company_id: string;
+          customer_id: string;
+          order_date: string;
+          status: string;
+          source: string;
+          memo: string | null;
+          total_amount: number;
+        };
         const { data: order, error: orderErr } = await supabase
           .from('orders')
-          .insert({
-            company_id: customer.companyId,
-            customer_id: customer.customerId,
-            order_date: new Date().toISOString(),
-            status: 'draft',
-            source: 'portal',
-            memo: `파일업로드: ${file.name}`,
-            total_amount: totalAmount,
-          })
+          .insert(orderPayload)
           .select('id')
           .single();
         // eslint-disable-next-line no-console
-        console.log('[customer-file.order]', { order, orderErr, totalAmount });
+        console.log('[customer-file.order]', {
+          order,
+          orderErr,
+          subtotal,
+          totalAmount,
+          needsDeliveryFee,
+          isDirect,
+        });
         if (orderErr || !order) throw orderErr ?? new Error('주문 생성 실패');
         createdOrderId = order.id;
 
@@ -908,6 +960,17 @@ function LeftPanel({
           amount: it.qty * it.unit_price_resolved,
           is_return: false,
         }));
+        if (needsDeliveryFee) {
+          orderItemsPayload.push({
+            order_id: order.id,
+            company_id: customer.companyId,
+            product_id: DELIVERY_FEE.productId,
+            quantity: 1,
+            unit_price: DELIVERY_FEE.price,
+            amount: DELIVERY_FEE.price,
+            is_return: false,
+          });
+        }
         const { error: itemsErr } = await supabase
           .from('order_items')
           .insert(orderItemsPayload);
@@ -920,13 +983,6 @@ function LeftPanel({
       }
 
       // 4) customer_order_uploads — 모든 경우(엑셀/이미지/PDF) 기록
-      const filledShipping = shipping
-        .filter((s) => s.name || s.address || s.phone1 || s.product)
-        .map((s) => ({
-          ...s,
-          customer: customer.customerName,
-          credit: CREDIT_LABEL,
-        }));
       const { error: uploadErr } = await supabase
         .from('customer_order_uploads')
         .insert({

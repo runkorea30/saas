@@ -554,22 +554,125 @@ export function OrderDetailPane({
         {order.memo && (
           <div
             style={{
-              marginTop: 6,
-              padding: '5px 8px',
-              background: 'var(--surface-2)',
-              border: '1px solid var(--line)',
+              marginTop: 8,
+              padding: '6px 10px',
+              background: '#fffbeb',
+              border: '1px solid #fde68a',
               borderRadius: 6,
               display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              fontSize: 11,
-              color: 'var(--ink-2)',
+              flexDirection: 'column',
+              gap: 2,
             }}
           >
-            <Tag size={10} color="var(--ink-3)" strokeWidth={1.6} />
-            <span>{order.memo}</span>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 10,
+                fontWeight: 600,
+                color: '#b45309',
+                letterSpacing: '0.04em',
+              }}
+            >
+              <Tag size={10} strokeWidth={1.8} />
+              전달메시지
+            </div>
+            <div style={{ fontSize: 12, color: '#78350f', lineHeight: 1.45 }}>
+              {order.memo}
+            </div>
           </div>
         )}
+        {order.is_direct_shipping &&
+          order.shipping_info &&
+          order.shipping_info.length > 0 && (
+            <div
+              style={{
+                marginTop: 8,
+                padding: '6px 10px',
+                background: '#f0fdf4',
+                border: '1px solid #bbf7d0',
+                borderRadius: 6,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: '#15803d',
+                  letterSpacing: '0.04em',
+                }}
+              >
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    background: '#dcfce7',
+                    color: '#15803d',
+                    padding: '1px 6px',
+                    borderRadius: 999,
+                    fontSize: 9.5,
+                  }}
+                >
+                  직송
+                </span>
+                직송 정보 ({order.shipping_info.length}건)
+              </div>
+              {order.shipping_info.map((row, i) => (
+                <div
+                  key={i}
+                  style={{
+                    background: '#fff',
+                    border: '1px solid #d1fae5',
+                    borderRadius: 5,
+                    padding: '5px 8px',
+                    fontSize: 11.5,
+                    color: 'var(--ink)',
+                    display: 'grid',
+                    gridTemplateColumns: '52px 1fr',
+                    gap: '2px 8px',
+                  }}
+                >
+                  {row.name && (
+                    <>
+                      <span style={{ color: 'var(--ink-3)' }}>받는사람</span>
+                      <span style={{ fontWeight: 500 }}>{row.name}</span>
+                    </>
+                  )}
+                  {row.phone1 && (
+                    <>
+                      <span style={{ color: 'var(--ink-3)' }}>연락처</span>
+                      <span style={{ fontFamily: 'var(--font-num)' }}>
+                        {row.phone1}
+                        {row.phone2 ? ` · ${row.phone2}` : ''}
+                      </span>
+                    </>
+                  )}
+                  {row.address && (
+                    <>
+                      <span style={{ color: 'var(--ink-3)' }}>주소</span>
+                      <span>
+                        {row.zipcode ? `(${row.zipcode}) ` : ''}
+                        {row.address}
+                      </span>
+                    </>
+                  )}
+                  {row.product && (
+                    <>
+                      <span style={{ color: 'var(--ink-3)' }}>제품</span>
+                      <span>{row.product}</span>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
       </div>
 
       {/* Items: 편집 가능한 6컬럼 테이블 */}

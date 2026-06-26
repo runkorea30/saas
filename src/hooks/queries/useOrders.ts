@@ -21,6 +21,8 @@ const ORDER_SELECT = `
   status,
   source,
   memo,
+  is_direct_shipping,
+  shipping_info,
   created_by,
   customer:customers ( id, name, grade ),
   creator:user_profiles ( id, name ),
