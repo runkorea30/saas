@@ -621,6 +621,7 @@ export function OrderDetailPane({
                         <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">주소</th>
                         <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">연락처1</th>
                         <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">연락처2</th>
+                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold"></th>
                         <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">제품</th>
                         <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">거래처</th>
                         <th className="whitespace-nowrap px-2 py-1.5 text-left font-semibold">신용</th>
@@ -643,6 +644,9 @@ export function OrderDetailPane({
                           </td>
                           <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
                             {cell(row.phone2 ?? (row as Record<string, unknown>)['연락처2'])}
+                          </td>
+                          <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
+                            {cell(row.blank ?? (row as Record<string, unknown>)['메모'])}
                           </td>
                           <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
                             {cell(row.product ?? (row as Record<string, unknown>)['제품'])}
