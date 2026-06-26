@@ -28,12 +28,16 @@ import { ReceivablesPage } from '@/pages/finance/ReceivablesPage';
 import { TaxInvoicesPage } from '@/pages/finance/TaxInvoicesPage';
 import { BillingPage } from '@/pages/sales/BillingPage';
 import { DocumentsPage } from '@/pages/documents/DocumentsPage';
+import { MobileApp } from '@/mobile/MobileApp';
 
 function App() {
   return (
     <Routes>
       {/* 거래처 전용 주문서 페이지 — OPS Shell 바깥 독립 라우트 */}
       <Route path="/customer-order" element={<CustomerOrderPage />} />
+
+      {/* 모바일 PWA — OPS Shell 바깥 독립 라우트 */}
+      <Route path="/mobile/*" element={<MobileApp />} />
 
       <Route element={<Shell />}>
         <Route index element={<HomePage />} />
