@@ -45,7 +45,6 @@ body.mobile-active #root {
   --m-stock-low: #f59e0b;
   --m-stock-out: #ef4444;
   --m-nav-height: 64px;
-  --m-rail-width: 80px;
 }
 
 .mobile-app.dark {
@@ -85,21 +84,11 @@ body.mobile-active #root {
   border-color: var(--m-border);
 }
 
-/* 접힘 상태 (세로 모드): 콘텐츠 위에 하단탭바 공간 확보 */
-.mobile-app.is-folded .mobile-content {
-  flex: 1;
-  padding-bottom: calc(var(--m-nav-height) + env(safe-area-inset-bottom, 0px));
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-/* 펼침 상태 (가로/태블릿): 좌측 사이드레일 + 우측 콘텐츠 */
-.mobile-app.is-unfolded {
-  flex-direction: row;
-}
-.mobile-app.is-unfolded .mobile-content {
+/* 콘텐츠 영역: 화면 너비 100% + 하단탭바 공간 확보 */
+.mobile-content {
   flex: 1;
   min-width: 0;
+  padding-bottom: calc(var(--m-nav-height) + env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -212,46 +201,6 @@ body.mobile-active #root {
   height: 4px;
   border-radius: 999px;
   background: var(--m-primary);
-}
-
-/* ─────────────────── 사이드레일 ─────────────────── */
-.m-rail {
-  width: var(--m-rail-width);
-  flex-shrink: 0;
-  background: var(--m-surface);
-  border-right: 1px solid var(--m-border);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 14px 0;
-  gap: 6px;
-}
-.m-rail-logo {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--m-primary);
-  letter-spacing: 0.04em;
-  margin-bottom: 8px;
-}
-.m-rail-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  width: 64px;
-  padding: 8px 4px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--m-text-secondary);
-  cursor: pointer;
-  font-size: 10.5px;
-}
-.m-rail-item.is-active {
-  color: var(--m-primary);
-  background: var(--m-primary-wash);
-  border-color: var(--m-primary);
 }
 
 /* ─────────────────── 더보기 시트 ─────────────────── */

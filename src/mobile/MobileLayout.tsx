@@ -1,7 +1,6 @@
 /**
- * 모바일 PWA 레이아웃.
- * - 접힘(≤600px): 하단 탭바 (BottomNav)
- * - 펼침(>600px): 좌측 사이드레일 (SideRail) + 우측 콘텐츠
+ * 모바일 PWA 레이아웃 — 모든 화면 너비에서 하단 BottomNav 만 사용.
+ * 콘텐츠 영역이 화면 너비 100% 점유.
  *
  * 🟠 OPS 글로벌 스타일 격리:
  *   index.css 가 body 에 burgundy paper-grain 배경 + Pretendard 폰트를 강제하므로
@@ -10,14 +9,11 @@
  */
 import { useLayoutEffect } from 'react';
 import { Outlet } from 'react-router-dom';
-import { useMediaQuery } from './hooks/useMediaQuery';
 import { useMobileTheme } from './hooks/useMobileTheme';
 import { BottomNav } from './components/BottomNav';
-import { SideRail } from './components/SideRail';
 import { IconMoon, IconSun } from './components/MobileIcons';
 
 export function MobileLayout() {
-  const isFolded = useMediaQuery('(max-width: 600px)');
   const { isDark, toggle } = useMobileTheme();
 
   // 🔴 body 에 식별 클래스 부여 → mobile.css 의 body.mobile-active 규칙으로
@@ -33,12 +29,7 @@ export function MobileLayout() {
   }, []);
 
   return (
-    <div
-      className={`mobile-app ${isDark ? 'dark' : ''} ${
-        isFolded ? 'is-folded' : 'is-unfolded'
-      }`}
-    >
-      {!isFolded && <SideRail />}
+    <div className={`mobile-app ${isDark ? 'dark' : ''}`}>
       <main className="mobile-content" style={{ position: 'relative' }}>
         <button
           type="button"
@@ -50,7 +41,7 @@ export function MobileLayout() {
         </button>
         <Outlet />
       </main>
-      {isFolded && <BottomNav />}
+      <BottomNav />
     </div>
   );
 }

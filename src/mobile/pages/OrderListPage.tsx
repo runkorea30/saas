@@ -108,10 +108,10 @@ export function OrderListPage() {
         minHeight: '100%',
       }}
     >
-      {/* 좌측(또는 단일) 리스트 */}
+      {/* 좌측(또는 단일) 리스트 — 펼침 시 35% */}
       <div
         style={{
-          flex: isUnfolded ? '0 0 360px' : '1 1 auto',
+          flex: isUnfolded ? '0 0 35%' : '1 1 auto',
           borderRight: isUnfolded ? '1px solid var(--m-border)' : 'none',
           minHeight: 0,
         }}
