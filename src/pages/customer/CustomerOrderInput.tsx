@@ -1,13 +1,14 @@
 /**
- * 거래처 주문서 직접 입력 화면.
+ * 거래처 주문서 직접 입력 화면 — 사이드바 카테고리 + 컴팩트 제품 행 + 고정 푸터.
  *
- * 🔴 CLAUDE.md §2: 공급가 = `calcSupplyPriceByGrade(sell_price, gradeRate)`.
+ * 🔴 CLAUDE.md §2: 공급가 = `calcSupplyPriceByCustomerGrade(sell_price, grade, gradeRates)`.
  * 🟠 useProducts 는 grade_a~e 컬럼을 select 하지 않으므로 인라인 쿼리 사용.
- * 🟠 재고는 `useInventoryStock(companyId)` 재활용.
+ * 🟠 재고는 `useInventoryStock(companyId)` 재활용. 재고 표시 3단계:
+ *    품절(stock ≤ 0) / 부족(0 < stock < LOW_THRESHOLD) / 재고(그 이상).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Loader2, Search } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
@@ -19,6 +20,9 @@ import {
 } from '@/constants/categories';
 import { useToast } from '@/components/ui/Toast';
 import type { CustomerSession } from '@/hooks/useCustomerAuth';
+
+/** 재고 부족 임계값 — stock < 이 값이면 '부족' 뱃지. */
+const LOW_STOCK_THRESHOLD = 10;
 
 interface ProductRow {
   id: string;
@@ -51,13 +55,11 @@ async function fetchActiveProducts(companyId: string): Promise<ProductRow[]> {
 interface CustomerOrderInputProps {
   customer: CustomerSession;
   onBack: () => void;
-  fontScale: number;
 }
 
 export function CustomerOrderInput({
   customer,
   onBack,
-  fontScale,
 }: CustomerOrderInputProps) {
   const { showToast } = useToast();
   const productsQuery = useQuery<ProductRow[]>({
@@ -68,26 +70,70 @@ export function CustomerOrderInput({
   const stockQuery = useInventoryStock(customer.companyId);
 
   const [qtyMap, setQtyMap] = useState<Map<string, number>>(new Map());
-  /** 기본 카테고리 — 운영 데이터 기본값(constants/categories) 사용. */
   const [category, setCategory] = useState<string>(PRODUCT_CATEGORY_DEFAULT);
-  const [fixedWidth, setFixedWidth] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [busy, setBusy] = useState(false);
 
   const products = productsQuery.data ?? [];
-  const categories = useMemo(() => {
-    const set = new Set<string>();
-    for (const p of products) if (p.category) set.add(p.category);
-    return Array.from(set).sort();
+
+  // 사이드바 카테고리 옵션: '전체' + 실제 카테고리(빈문자열 제외) 오름차순. 각 항목 카운트 포함.
+  const categoryOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of products) {
+      if (!p.category) continue;
+      counts.set(p.category, (counts.get(p.category) ?? 0) + 1);
+    }
+    const list = Array.from(counts.entries())
+      .sort(([a], [b]) => a.localeCompare(b, 'ko'))
+      .map(([id, count]) => ({ id, label: getCategoryLabel(id), count }));
+    return [
+      { id: PRODUCT_CATEGORY_ALL, label: '전체', count: products.length },
+      ...list,
+    ];
   }, [products]);
 
-  const filtered = useMemo(() => {
+  // 활성 카테고리 라벨 — 헤더 타이틀 표시용.
+  const activeCategoryLabel = useMemo(
+    () => categoryOptions.find((c) => c.id === category)?.label ?? '전체',
+    [categoryOptions, category],
+  );
+
+  // 카테고리 필터 (검색 적용 전).
+  const activeProducts = useMemo(() => {
     if (category === PRODUCT_CATEGORY_ALL) return products;
     return products.filter((p) => p.category === category);
   }, [products, category]);
 
+  // 검색 + 카테고리 적용된 최종 표시 목록.
+  const filteredProducts = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return activeProducts;
+    return activeProducts.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.code.toLowerCase().includes(q),
+    );
+  }, [activeProducts, searchQuery]);
+
+  // 주문 합계 요약 (전체 qtyMap 기준 — 필터링과 무관, 헤더 chip/푸터 공용).
+  const orderSummary = useMemo(() => {
+    let count = 0;
+    let total = 0;
+    for (const p of products) {
+      const qty = qtyMap.get(p.id) ?? 0;
+      if (qty <= 0) continue;
+      const supply = calcSupplyPriceByCustomerGrade(
+        p.sell_price,
+        customer.grade,
+        p,
+      );
+      count += 1;
+      total += qty * supply;
+    }
+    return { count, total };
+  }, [products, qtyMap, customer.grade]);
+
   // 🟡 dogfooding 진단 — Phase 2 Auth 도입 시 제거.
-  // customer.grade 가 null/비표준이면 공급가가 전부 0으로 표시되는 흔한 원인.
-  // (예: 컬럼 추가 전에 로그인해 localStorage 세션이 stale 인 경우)
   useEffect(() => {
     if (!customer.grade) {
       // eslint-disable-next-line no-console
@@ -97,8 +143,8 @@ export function CustomerOrderInput({
       );
       return;
     }
-    if (filtered.length === 0) return;
-    const p0 = filtered[0];
+    if (activeProducts.length === 0) return;
+    const p0 = activeProducts[0];
     // eslint-disable-next-line no-console
     console.log('[customer-order.sample-pricing]', {
       customerGrade: customer.grade,
@@ -117,7 +163,7 @@ export function CustomerOrderInput({
         p0,
       ),
     });
-  }, [customer.grade, filtered]);
+  }, [customer.grade, activeProducts]);
 
   const stockOf = (productId: string): number => {
     return stockQuery.data?.stockByProduct.get(productId)?.current ?? 0;
@@ -131,10 +177,8 @@ export function CustomerOrderInput({
     setQtyMap(next);
   };
 
-  const filledCount = qtyMap.size;
-
   const handleSubmit = async () => {
-    if (filledCount === 0) {
+    if (orderSummary.count === 0) {
       showToast({ kind: 'error', text: '주문 수량이 입력된 품목이 없습니다.' });
       return;
     }
@@ -159,13 +203,11 @@ export function CustomerOrderInput({
           };
         });
       // 🔴 거래처 주문은 공급가 기준 (sell_price 아님).
-      //    sell_price 는 카탈로그용 표시값. 실 거래 금액 = qty × supply_price.
       const totalAmount = items.reduce(
         (s, it) => s + it.qty * it.supply_price,
         0,
       );
 
-      // 🟡 dogfooding 디버그 — Phase 2 Auth 도입 시 제거 권장.
       // eslint-disable-next-line no-console
       console.log('[customer-order.submit]', {
         company_id: customer.companyId,
@@ -174,7 +216,7 @@ export function CustomerOrderInput({
         totalAmount,
       });
 
-      // 1) customer_order_uploads — 거래처 포털 자체 이력 (items JSON 포함)
+      // 1) customer_order_uploads — 거래처 포털 자체 이력
       const { error: uploadErr } = await supabase
         .from('customer_order_uploads')
         .insert({
@@ -188,9 +230,7 @@ export function CustomerOrderInput({
       console.log('[customer-order.uploads]', { uploadErr });
       if (uploadErr) throw uploadErr;
 
-      // 2) orders 헤더 — OPS 대시보드 주문내역과 연동
-      //    status 는 DB CHECK 제약(draft|confirmed|shipped|done|canceled) 에 따라 'draft'
-      //    source 는 'portal' (거래처 자체 입력)
+      // 2) orders 헤더
       const { data: order, error: orderErr } = await supabase
         .from('orders')
         .insert({
@@ -208,8 +248,7 @@ export function CustomerOrderInput({
       console.log('[customer-order.order]', { order, orderErr });
       if (orderErr || !order) throw orderErr ?? new Error('주문 생성 실패');
 
-      // 3) order_items — unit_price 에는 공급가, amount 에는 qty × 공급가 저장.
-      //    실 컬럼명은 unit_price/amount (sell_price/supply_price 아님).
+      // 3) order_items — unit_price 에는 공급가 저장, amount = qty × 공급가.
       const orderItemsPayload = items.map((it) => ({
         order_id: order.id,
         company_id: customer.companyId,
@@ -244,304 +283,248 @@ export function CustomerOrderInput({
     }
   };
 
-  const fontSize = 13 * fontScale;
-  const headerFont = 26 * fontScale;
+  const krw = (n: number) => `${n.toLocaleString('ko-KR')}원`;
+  const submitDisabled = busy || orderSummary.count === 0;
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F5F5F4', padding: 20 }}>
-      <div style={{ maxWidth: 1280, margin: '0 auto' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            flexWrap: 'wrap',
-            marginBottom: 16,
-          }}
-        >
+    <div className="flex h-screen flex-col bg-[#f8f7f5] text-[#312b27]">
+      {/* ── 상단 고정 헤더 ── */}
+      <header className="flex h-[60px] shrink-0 items-center justify-between border-b border-[#ece7e2] bg-white px-[22px]">
+        <div className="flex items-center gap-4">
           <button
             type="button"
             onClick={onBack}
             disabled={busy}
-            style={{
-              ...secondaryBtn,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
+            className="inline-flex items-center gap-1.5 rounded-md border border-[#e3dcd5] bg-white px-3 py-1.5 text-[13px] text-[#5f574f] hover:bg-[#faf6f4] disabled:opacity-55"
           >
-            <ArrowLeft size={14} /> 돌아가기
+            <ArrowLeft className="h-3.5 w-3.5" />
+            돌아가기
           </button>
-          <h1
-            style={{
-              fontSize: headerFont,
-              fontWeight: 600,
-              margin: 0,
-              color: '#1C1917',
-            }}
-          >
+          <span className="text-base font-bold text-[#2b2521]">
             주문서 직접 입력
-          </h1>
-          <div style={{ flex: 1 }} />
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            style={selectStyle}
-          >
-            <option value={PRODUCT_CATEGORY_ALL}>전체 분류</option>
-            {categories.map((c) => (
-              <option key={c} value={c}>
-                {getCategoryLabel(c)}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => setFixedWidth(true)}
-            style={{
-              ...secondaryBtn,
-              background: fixedWidth ? '#1C1917' : '#FFFFFF',
-              color: fixedWidth ? '#FFFFFF' : '#1C1917',
-            }}
-          >
-            컬럼간격고정
-          </button>
-          <button
-            type="button"
-            onClick={() => setFixedWidth(false)}
-            style={secondaryBtn}
-          >
-            컬럼간격초기화
-          </button>
+          </span>
+          <span className="pl-1 text-[12.5px] text-[#9a8f86]">
+            {activeCategoryLabel} · {filteredProducts.length}개 품목
+          </span>
+        </div>
+        <div className="flex items-center gap-3.5">
+          {/* 주문 건수 + 금액 chip */}
+          <div className="flex items-center gap-2 rounded-full border border-[#ecdcd5] bg-[#f6efea] px-4 py-1.5">
+            <span className="text-[12.5px] text-[#8a7066]">
+              {orderSummary.count}건
+            </span>
+            <span className="h-[11px] w-px bg-[#dcc7be]" />
+            <span className="text-[13px] font-bold text-[#6B1F2A]">
+              {krw(orderSummary.total)}
+            </span>
+          </div>
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={busy || filledCount === 0}
-            style={{
-              ...primaryBtn,
-              opacity: busy || filledCount === 0 ? 0.55 : 1,
-              cursor: busy || filledCount === 0 ? 'not-allowed' : 'pointer',
-            }}
+            disabled={submitDisabled}
+            className="inline-flex items-center gap-1.5 rounded-md bg-[#6B1F2A] px-4 py-1.5 text-[13.5px] font-semibold text-white shadow-[0_2px_8px_rgba(107,31,42,0.20)] hover:bg-[#5c1a24] disabled:cursor-not-allowed disabled:opacity-55"
           >
-            {busy && (
-              <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
-            )}{' '}
-            주문서 만들기 ({filledCount})
+            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            주문서 만들기
           </button>
         </div>
+      </header>
 
-        <div
-          style={{
-            background: '#FFFFFF',
-            border: '1px solid #E7E5E4',
-            borderRadius: 10,
-            overflow: 'hidden',
-          }}
-        >
-          <div style={{ overflowX: 'auto' }}>
-            <table
-              style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                fontSize,
-                tableLayout: fixedWidth ? 'fixed' : 'auto',
-              }}
-            >
-              <thead>
-                <tr
-                  style={{
-                    background: '#FAFAF9',
-                    borderBottom: '1px solid #E7E5E4',
-                  }}
-                >
-                  <ThCustomer width={fixedWidth ? 120 : undefined}>코드</ThCustomer>
-                  <ThCustomer align="left">제품명</ThCustomer>
-                  <ThCustomer width={fixedWidth ? 80 : undefined}>재고</ThCustomer>
-                  <ThCustomer width={fixedWidth ? 100 : undefined} align="right">수량</ThCustomer>
-                  <ThCustomer width={fixedWidth ? 110 : undefined} align="right">공급가</ThCustomer>
-                  <ThCustomer width={fixedWidth ? 110 : undefined} align="right">판매가</ThCustomer>
-                </tr>
-              </thead>
-              <tbody>
-                {productsQuery.isLoading && (
-                  <tr>
-                    <td
-                      colSpan={6}
-                      style={{ padding: 40, textAlign: 'center', color: '#78716C' }}
-                    >
-                      불러오는 중…
-                    </td>
-                  </tr>
-                )}
-                {!productsQuery.isLoading && filtered.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={6}
-                      style={{ padding: 40, textAlign: 'center', color: '#78716C' }}
-                    >
-                      표시할 제품이 없습니다.
-                    </td>
-                  </tr>
-                )}
-                {filtered.map((p) => {
-                  const stock = stockOf(p.id);
-                  const supply = calcSupplyPriceByCustomerGrade(
-                    p.sell_price,
-                    customer.grade,
-                    p,
-                  );
-                  const qty = qtyMap.get(p.id) ?? 0;
-                  return (
-                    <tr
-                      key={p.id}
-                      style={{ borderBottom: '1px solid #F5F5F4' }}
-                    >
-                      <TdCustomer>{p.code}</TdCustomer>
-                      <TdCustomer align="left">{p.name}</TdCustomer>
-                      <TdCustomer>
-                        <StockBadge stock={stock} />
-                      </TdCustomer>
-                      <TdCustomer align="right">
-                        <input
-                          type="number"
-                          min={0}
-                          step={1}
-                          value={qty === 0 ? '' : qty}
-                          onChange={(e) => updateQty(p.id, e.target.value)}
-                          placeholder="0"
-                          style={{
-                            width: 80,
-                            height: 28,
-                            padding: '0 8px',
-                            border: '1px solid #D6D3D1',
-                            borderRadius: 4,
-                            fontSize: 13,
-                            textAlign: 'right',
-                            background: stock <= 0 ? '#FAFAF9' : '#FFFFFF',
-                          }}
-                          disabled={stock <= 0}
-                        />
-                      </TdCustomer>
-                      <TdCustomer align="right">
-                        {supply > 0
-                          ? supply.toLocaleString('ko-KR') + '원'
-                          : '—'}
-                      </TdCustomer>
-                      <TdCustomer align="right">
-                        {p.sell_price.toLocaleString('ko-KR')}원
-                      </TdCustomer>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+      {/* ── 본문: 사이드바 + 제품 영역 ── */}
+      <div className="flex min-h-0 flex-1">
+        {/* 카테고리 사이드바 */}
+        <nav className="w-52 shrink-0 overflow-y-auto border-r border-[#ece7e2] bg-white py-3">
+          <div className="px-[18px] pb-2.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#b3a89f]">
+            카테고리
           </div>
-        </div>
+          {categoryOptions.map((cat) => {
+            const isActive = cat.id === category;
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => setCategory(cat.id)}
+                className={`my-px flex w-full items-center justify-between border-l-[3px] px-[18px] py-2.5 text-left text-[12.5px] transition-colors ${
+                  isActive
+                    ? 'border-[#6B1F2A] bg-[#f9f0f1] font-semibold text-[#6B1F2A]'
+                    : 'border-transparent font-medium text-[#6b6058] hover:bg-[#faf6f5]'
+                }`}
+              >
+                <span className="truncate">{cat.label}</span>
+                <span
+                  className={`shrink-0 rounded-full px-[7px] py-px text-[10.5px] ${
+                    isActive
+                      ? 'bg-[#6B1F2A] text-white'
+                      : 'bg-[#f1ece7] text-[#a89e95]'
+                  }`}
+                >
+                  {cat.count}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* 제품 목록 영역 */}
+        <main className="flex min-w-0 flex-1 flex-col">
+          {/* 카테고리 타이틀 + 검색 */}
+          <div className="flex h-12 shrink-0 items-center justify-between border-b border-[#ece7e2] bg-[#faf8f6] px-[22px]">
+            <div className="flex items-baseline gap-2.5">
+              <span className="text-[15px] font-bold text-[#2b2521]">
+                {activeCategoryLabel}
+              </span>
+              <span className="text-xs text-[#9a8f86]">
+                {activeProducts.length}개 품목
+              </span>
+            </div>
+            <div className="flex items-center gap-2 rounded-lg border border-[#e3dcd5] bg-white px-3 py-1.5">
+              <Search className="h-[13px] w-[13px] text-[#a89e95]" />
+              <input
+                type="text"
+                placeholder="제품명 또는 코드 검색"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-auto w-48 border-0 bg-transparent p-0 text-[12.5px] text-[#2b2521] placeholder:text-[#b9aea5] outline-none"
+              />
+            </div>
+          </div>
+
+          {/* 테이블 헤더 */}
+          <div className="grid h-9 shrink-0 grid-cols-[1fr_76px_92px_110px_110px] items-center border-b border-[#ece7e2] bg-white px-[22px] text-[11.5px] font-semibold uppercase tracking-wide text-[#a89e95]">
+            <span>제품명</span>
+            <span className="text-center">재고</span>
+            <span className="text-center">수량</span>
+            <span className="text-right">공급가</span>
+            <span className="text-right">판매가</span>
+          </div>
+
+          {/* 제품 행 목록 (스크롤) */}
+          <div className="min-h-0 flex-1 overflow-y-auto bg-white">
+            {productsQuery.isLoading && (
+              <div className="py-10 text-center text-[13px] text-[#78716C]">
+                불러오는 중…
+              </div>
+            )}
+            {!productsQuery.isLoading && filteredProducts.length === 0 && (
+              <div className="py-10 text-center text-[13px] text-[#78716C]">
+                표시할 제품이 없습니다.
+              </div>
+            )}
+            {filteredProducts.map((p) => {
+              const stock = stockOf(p.id);
+              const isOut = stock <= 0;
+              const isLow = !isOut && stock < LOW_STOCK_THRESHOLD;
+              const supply = calcSupplyPriceByCustomerGrade(
+                p.sell_price,
+                customer.grade,
+                p,
+              );
+              const qty = qtyMap.get(p.id) ?? 0;
+              const rowBgClass = isOut
+                ? 'opacity-60'
+                : qty > 0
+                  ? 'bg-[#edf7ef]'
+                  : 'hover:bg-[#f9f0f1]';
+              return (
+                <div
+                  key={p.id}
+                  className={`grid h-11 grid-cols-[1fr_76px_92px_110px_110px] items-center border-b border-[#f3efea] px-[22px] text-[13px] transition-colors ${rowBgClass}`}
+                >
+                  {/* 제품명 + 코드 */}
+                  <div className="flex min-w-0 flex-col gap-px">
+                    <span
+                      className={`truncate text-[13px] font-medium ${
+                        isOut ? 'text-[#a89e95] line-through' : 'text-[#2b2521]'
+                      }`}
+                      title={p.name}
+                    >
+                      {p.name}
+                    </span>
+                    <span className="font-mono text-[10.5px] text-[#bdb3aa]">
+                      {p.code}
+                    </span>
+                  </div>
+
+                  {/* 재고 뱃지 */}
+                  <div className="flex justify-center">
+                    <span
+                      className={`inline-block rounded-md px-2.5 py-0.5 text-[11px] font-semibold ${
+                        isOut
+                          ? 'bg-[#fdeaea] text-[#c0392b]'
+                          : isLow
+                            ? 'bg-[#fef3e2] text-[#b45309]'
+                            : 'bg-[#e7f6ec] text-[#16803c]'
+                      }`}
+                      title={`현재 재고 ${stock}`}
+                    >
+                      {isOut ? '품절' : isLow ? '부족' : '재고'}
+                    </span>
+                  </div>
+
+                  {/* 수량 입력 */}
+                  <div className="flex justify-center">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={qty > 0 ? String(qty) : ''}
+                      placeholder="0"
+                      disabled={isOut}
+                      onChange={(e) => updateQty(p.id, e.target.value)}
+                      className={`h-7 w-[66px] rounded-md px-2 text-right text-[13px] outline-none transition-colors ${
+                        isOut
+                          ? 'cursor-not-allowed border border-[#ece6e1] bg-[#f3efec] text-[#c3b9b0]'
+                          : qty > 0
+                            ? 'border-[1.5px] border-[#16a34a] bg-white font-semibold text-[#15803d]'
+                            : 'border border-[#ddd5cf] bg-white focus:border-[#6B1F2A]'
+                      }`}
+                    />
+                  </div>
+
+                  {/* 공급가 */}
+                  <span className="text-right text-[12.5px] text-[#7a6f66]">
+                    {supply > 0 ? krw(supply) : '—'}
+                  </span>
+
+                  {/* 판매가 */}
+                  <span className="text-right text-[12.5px] font-semibold text-[#2b2521]">
+                    {krw(p.sell_price)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 하단 고정 푸터 */}
+          <footer className="flex h-16 shrink-0 items-center justify-between border-t border-[#ece7e2] bg-white px-6 shadow-[0_-3px_12px_rgba(40,20,10,0.04)]">
+            <div className="flex items-center gap-[18px]">
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-[12.5px] text-[#9a8f86]">선택 품목</span>
+                <span className="text-base font-bold text-[#6B1F2A]">
+                  {orderSummary.count}
+                </span>
+                <span className="text-[12.5px] text-[#9a8f86]">개</span>
+              </div>
+              <span className="h-[18px] w-px bg-[#e6ddd6]" />
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-[12.5px] text-[#9a8f86]">합계</span>
+                <span className="text-xl font-bold text-[#2b2521]">
+                  {krw(orderSummary.total)}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={submitDisabled}
+              className="inline-flex items-center gap-2 rounded-md bg-[#6B1F2A] px-7 py-3 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(107,31,42,0.20)] hover:bg-[#5c1a24] disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+              주문서 만들기
+              <ArrowRight className="h-[15px] w-[15px]" />
+            </button>
+          </footer>
+        </main>
       </div>
     </div>
   );
 }
-
-// ───────────────────────────────────────────────────────────
-
-function StockBadge({ stock }: { stock: number }) {
-  const isInStock = stock > 0;
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        padding: '2px 8px',
-        borderRadius: 999,
-        fontSize: 11,
-        fontWeight: 600,
-        background: isInStock ? '#DCFCE7' : '#FEE2E2',
-        color: isInStock ? '#166534' : '#B91C1C',
-      }}
-    >
-      {isInStock ? '재고' : '품절'}
-    </span>
-  );
-}
-
-function ThCustomer({
-  children,
-  align = 'center',
-  width,
-}: {
-  children: React.ReactNode;
-  align?: 'left' | 'center' | 'right';
-  width?: number;
-}) {
-  return (
-    <th
-      style={{
-        padding: '10px 12px',
-        fontSize: 12,
-        fontWeight: 600,
-        color: '#44403C',
-        textAlign: align,
-        whiteSpace: 'nowrap',
-        width: width != null ? width : undefined,
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-
-function TdCustomer({
-  children,
-  align = 'center',
-}: {
-  children: React.ReactNode;
-  align?: 'left' | 'center' | 'right';
-}) {
-  return (
-    <td
-      style={{
-        padding: '8px 12px',
-        textAlign: align,
-        color: '#1C1917',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {children}
-    </td>
-  );
-}
-
-const primaryBtn: React.CSSProperties = {
-  height: 36,
-  padding: '0 14px',
-  background: '#2563EB',
-  color: '#FFFFFF',
-  border: 'none',
-  borderRadius: 6,
-  fontSize: 13,
-  fontWeight: 600,
-  cursor: 'pointer',
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-};
-
-const secondaryBtn: React.CSSProperties = {
-  height: 36,
-  padding: '0 12px',
-  background: '#FFFFFF',
-  color: '#1C1917',
-  border: '1px solid #D6D3D1',
-  borderRadius: 6,
-  fontSize: 13,
-  cursor: 'pointer',
-};
-
-const selectStyle: React.CSSProperties = {
-  height: 36,
-  padding: '0 10px',
-  border: '1px solid #D6D3D1',
-  borderRadius: 6,
-  fontSize: 13,
-  background: '#FFFFFF',
-  color: '#1C1917',
-};

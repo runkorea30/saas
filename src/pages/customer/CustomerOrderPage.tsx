@@ -313,7 +313,6 @@ function CustomerOrderShell({
       <CustomerOrderInput
         customer={customer}
         onBack={() => setMode('main')}
-        fontScale={fontScale}
       />
     );
   }
