@@ -209,15 +209,15 @@ export function ProductForm({
         label="제품코드"
         error={errors.code}
         required
-        hint={isEdit ? undefined : '예: AGL-ACR-WHT-4oz'}
+        hint={isEdit ? '코드 변경 시 동일 코드 중복은 서버에서 차단됩니다.' : '예: AGL-ACR-WHT-4oz'}
       >
         <input
           type="text"
           value={form.code}
-          disabled={isEdit || busy}
+          disabled={busy}
           onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
-          placeholder={isEdit ? undefined : 'AGL-ACR-WHT-4oz'}
-          style={inputStyle(!!errors.code, isEdit || !!busy)}
+          placeholder="AGL-ACR-WHT-4oz"
+          style={inputStyle(!!errors.code, !!busy)}
           autoFocus={!isEdit}
         />
       </Field>
