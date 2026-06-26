@@ -68,6 +68,8 @@ function createEmptyRow(): ImportRowInput {
   };
 }
 
+type TabKey = 'verification' | 'receiving' | 'portal';
+
 const DEFAULT_HEADER: ImportInvoiceHeader = {
   invoiceNumber: '',
   supplierName: 'Angelus Shoe Polish Co.',
@@ -86,6 +88,8 @@ export function ImportReceivingPage() {
   const createMut = useCreateImportWithLots(companyId);
   const { showToast } = useToast();
   const queryClient = useQueryClient();
+
+  const [activeTab, setActiveTab] = useState<TabKey>('verification');
 
   const [header, setHeader] = useState<ImportInvoiceHeader>(() => ({
     ...DEFAULT_HEADER,
@@ -501,6 +505,32 @@ export function ImportReceivingPage() {
           </h1>
         </header>
 
+        {/* 탭 헤더 */}
+        <div
+          style={{
+            display: 'flex',
+            gap: 4,
+            marginBottom: 16,
+            borderBottom: '1px solid var(--line)',
+          }}
+        >
+          <TabButton
+            active={activeTab === 'verification'}
+            onClick={() => setActiveTab('verification')}
+            label="인보이스 검증"
+          />
+          <TabButton
+            active={activeTab === 'receiving'}
+            onClick={() => setActiveTab('receiving')}
+            label="입고 처리"
+          />
+          <TabButton
+            active={activeTab === 'portal'}
+            onClick={() => setActiveTab('portal')}
+            label="거래처 안내 설정"
+          />
+        </div>
+
         {productsQuery.error && (
           <div
             style={{
@@ -516,20 +546,25 @@ export function ImportReceivingPage() {
           </div>
         )}
 
-        <InvoiceUploadCard
-          disabled={busy}
-          products={productsQuery.data}
-          onFill={(rows, headerPatch) => {
-            setRowInputs(rows.length > 0 ? rows : [createEmptyRow()]);
-            setHeader((h) => ({ ...h, ...headerPatch }));
-            showToast({
-              kind: 'success',
-              text: `${rows.length}개 행이 입력 폼에 채워졌습니다. 검수 후 [입고확정] 을 눌러 주세요.`,
-            });
-          }}
-        />
+        {activeTab === 'verification' && (
+          <InvoiceUploadCard
+            disabled={busy}
+            products={productsQuery.data}
+            onFill={(rows, headerPatch) => {
+              setRowInputs(rows.length > 0 ? rows : [createEmptyRow()]);
+              setHeader((h) => ({ ...h, ...headerPatch }));
+              setActiveTab('receiving');
+              showToast({
+                kind: 'success',
+                text: `${rows.length}개 행이 입력 폼에 채워졌습니다. [입고 처리] 탭에서 검수 후 [입고확정] 을 눌러 주세요.`,
+              });
+            }}
+          />
+        )}
 
-        <ImportHeaderForm value={header} onChange={setHeader} disabled={busy} />
+        {activeTab === 'receiving' && (
+          <>
+            <ImportHeaderForm value={header} onChange={setHeader} disabled={busy} />
 
         <ImportSummaryBar
           total={summary.total}
@@ -593,7 +628,12 @@ export function ImportReceivingPage() {
           </button>
         </div>
 
+            <RecentInvoicesSection companyId={companyId} />
+          </>
+        )}
+
         {/* ───── 거래처 포털 수입 안내 설정 ───── */}
+        {activeTab === 'portal' && (
         <section
           style={{
             background: 'var(--surface)',
@@ -968,8 +1008,7 @@ export function ImportReceivingPage() {
             {noticeSaving ? '저장 중…' : '저장'}
           </button>
         </section>
-
-        <RecentInvoicesSection companyId={companyId} />
+        )}
       </main>
 
       {/* 운송비 0 확인 */}
@@ -1032,5 +1071,40 @@ export function ImportReceivingPage() {
         busy={busy}
       />
     </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────
+
+function TabButton({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: '10px 18px',
+        fontSize: 13,
+        fontWeight: active ? 700 : 500,
+        color: active ? 'var(--ink)' : 'var(--ink-2)',
+        background: 'transparent',
+        border: 'none',
+        borderBottom: active
+          ? '2px solid var(--ink)'
+          : '2px solid transparent',
+        marginBottom: '-1px',
+        cursor: 'pointer',
+        fontFamily: 'var(--font-kr)',
+      }}
+    >
+      {label}
+    </button>
   );
 }
