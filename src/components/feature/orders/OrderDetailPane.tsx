@@ -16,6 +16,7 @@ import {
   fmtDateTime,
 } from './primitives';
 import { calcSupplyPriceByCustomerGrade } from '@/utils/calculations';
+import { syncOrderTotal } from '@/utils/orderTotal';
 import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
 import { useOrderItems, type OrderItemRow } from '@/hooks/queries/useOrderItems';
@@ -140,6 +141,8 @@ export function OrderDetailPane({
         .eq('id', id)
         .eq('company_id', companyId);
       if (error) throw error;
+      // 🔴 아이템 변경 시 orders.total_amount 재동기화 (DB SUM 기준).
+      await syncOrderTotal({ companyId, orderId: order.id });
       await queryClient.invalidateQueries({ queryKey: ['order-items', order.id] });
       await queryClient.invalidateQueries({ queryKey: ['orders'] });
     } catch (err) {
@@ -378,18 +381,9 @@ export function OrderDetailPane({
         }
       }
 
-      // orders.total_amount 재계산: 기존 orderItems + 신규 draft (조정된 수량 기준).
-      const existingTotal = orderItems.reduce((s, it) => s + it.amount, 0);
-      const newTotal = adjustedNewRows.reduce((s, a) => {
-        const sign = a.item.is_return ? -1 : 1;
-        return s + sign * Math.abs(a.finalQty) * a.item.unit_price;
-      }, 0);
-      const { error: totalErr } = await supabase
-        .from('orders')
-        .update({ total_amount: existingTotal + newTotal })
-        .eq('id', order.id)
-        .eq('company_id', companyId);
-      if (totalErr) throw totalErr;
+      // 🔴 orders.total_amount 재동기화 — DB 의 order_items.amount SUM 기준.
+      //    이전: 클라이언트 reduce 로 계산했으나 staleness/부분 실패 시 어긋났음.
+      await syncOrderTotal({ companyId, orderId: order.id });
 
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['order-items', order.id] }),

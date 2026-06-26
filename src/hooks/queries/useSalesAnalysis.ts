@@ -13,6 +13,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
+import { compareCategoryThenName } from '@/utils/sortProducts';
 
 // ───────────────────────────────────────────────────────────
 // 타입
@@ -238,7 +239,8 @@ export function pivotDaily(
 
 /**
  * 제품별판매 (제품 × 월) 피벗 — 수량 기준.
- * - 카테고리/검색/거래처/월 필터 모두 적용. 합계 내림차순.
+ * - 카테고리/검색/거래처/월 필터 모두 적용.
+ * - 정렬: 분류명 → 제품명 한글 오름차순 (재고현황/발주서/제품리스트와 통일).
  */
 export function pivotByProduct(
   rows: SalesRawRow[],
@@ -279,7 +281,9 @@ export function pivotByProduct(
     row.monthly[m] = (row.monthly[m] ?? 0) + r.quantity;
     row.total += r.quantity;
   }
-  return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  return Array.from(map.values()).sort((a, b) =>
+    compareCategoryThenName(a.category, a.product_name, b.category, b.product_name),
+  );
 }
 
 // ───────────────────────────────────────────────────────────

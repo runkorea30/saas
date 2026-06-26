@@ -13,6 +13,7 @@ import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 import { calcSupplyPriceByCustomerGrade } from '@/utils/calculations';
+import { syncOrderTotal } from '@/utils/orderTotal';
 import {
   DELIVERY_FEE_PRODUCT_ID,
   DELIVERY_FEE_AMOUNT,
@@ -329,6 +330,12 @@ export function CustomerOrderInput({
         count: orderItemsPayload.length,
       });
       if (itemsErr) throw itemsErr;
+
+      // 🔴 orders.total_amount 안전망 — items INSERT 후 DB SUM 으로 재동기화.
+      await syncOrderTotal({
+        companyId: customer.companyId,
+        orderId: order.id,
+      });
 
       // 직접 입력은 품절 품목 입력이 disabled 되어 INSERT 시점에 조정이 발생할 일이 없음
       // → hasChanges 는 항상 false. 다이얼로그 닫기 시 onBack() 호출.

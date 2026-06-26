@@ -13,6 +13,7 @@
  *    deleted_at IS NULL 행만 합산.
  */
 import { supabase } from '@/lib/supabase';
+import { syncOrderTotal } from '@/utils/orderTotal';
 
 export const DELIVERY_FEE_PRODUCT_ID = 'cf9040dd-c363-469d-99d4-bb7eaec6264a';
 export const DELIVERY_FEE_AMOUNT = 4000;
@@ -126,30 +127,14 @@ export async function removeDeliveryFeeFromOrder(args: {
     return;
   }
 
-  const { data: remaining, error: sumErr } = await supabase
-    .from('order_items')
-    .select('amount')
-    .eq('order_id', args.orderId)
-    .eq('company_id', args.companyId)
-    .is('deleted_at', null);
-  if (sumErr) {
+  // 🔴 orders.total_amount 재동기화 — 공용 유틸 사용 (SUM 로직 단일화).
+  try {
+    await syncOrderTotal({
+      companyId: args.companyId,
+      orderId: args.orderId,
+    });
+  } catch (e) {
     // eslint-disable-next-line no-console
-    console.error('[deliveryFee] remaining amount fetch failed', sumErr);
-    return;
-  }
-
-  const newTotal = (remaining ?? []).reduce(
-    (s, it) => s + (Number(it.amount) || 0),
-    0,
-  );
-
-  const { error: updErr } = await supabase
-    .from('orders')
-    .update({ total_amount: newTotal })
-    .eq('id', args.orderId)
-    .eq('company_id', args.companyId);
-  if (updErr) {
-    // eslint-disable-next-line no-console
-    console.error('[deliveryFee] orders.total_amount update failed', updErr);
+    console.error('[deliveryFee] syncOrderTotal failed', e);
   }
 }

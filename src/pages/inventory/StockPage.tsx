@@ -7,7 +7,7 @@
  * 🔴 CLAUDE.md §1: company_id 는 useCompany() 에서만.
  * 🔴 CLAUDE.md §2: 현재재고/상태 분류는 calculations.ts 단일 진입점.
  * 🟠 CTA "기초재고 투입": 헤더·Detail Pane 두 곳. 헤더는 선택된 행 없으면 disabled.
- * 🟡 기본 정렬: 제품코드(code) 오름차순 — 필터/리패치 후에도 동일 순서 유지.
+ * 🟡 기본 정렬: 분류명(category) → 제품명(name) 오름차순 — 필터/리패치 후에도 동일 순서 유지.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Package, Plus, Upload } from 'lucide-react';
@@ -20,6 +20,7 @@ import { useInventoryDetail } from '@/hooks/queries/useInventoryDetail';
 import { useCreateOpeningLot } from '@/hooks/queries/useCreateOpeningLot';
 import { useCreateAdjustment } from '@/hooks/queries/useCreateAdjustment';
 import { classifyStockStatus } from '@/utils/calculations';
+import { sortByCategory } from '@/utils/sortProducts';
 import {
   StockFilterBar,
   type StockFilterValue,
@@ -124,9 +125,8 @@ export function StockPage() {
       }
       return true;
     });
-    // 제품코드(code) 오름차순 고정 — 한/영/숫자 혼재 대응 localeCompare(ko).
-    list.sort((a, b) => a.code.localeCompare(b.code, 'ko'));
-    return list;
+    // 분류명 → 제품명 오름차순. sortProducts 공용 유틸 사용.
+    return sortByCategory(list);
   }, [rows, stockFilter, categorySel, query]);
 
   // ───── 요약 ─────
@@ -226,11 +226,9 @@ export function StockPage() {
   };
 
   // ───── 엑셀 다운로드/업로드 ─────
-  /** 화면과 동일한 정렬(코드 오름차순)로 xlsx 다운로드. */
+  /** 화면과 동일한 정렬(분류명 → 제품명 오름차순)로 xlsx 다운로드. */
   const handleDownloadExcel = () => {
-    const sorted = [...products].sort((a, b) =>
-      a.code.localeCompare(b.code, 'ko'),
-    );
+    const sorted = sortByCategory(products);
     const header = ['제품코드', '제품명', '분류', '단위', '현재재고'];
     const body = sorted.map((p) => [
       p.code,
@@ -359,6 +357,40 @@ export function StockPage() {
         kind: 'error',
         text: `${excelDiffs.length - failures.length}건 성공, ${failures.length}건 실패: ${failures.slice(0, 3).join(' / ')}${failures.length > 3 ? ' …' : ''}`,
       });
+    }
+  };
+
+  /**
+   * 현재재고 인라인 편집 저장 — 절대값 입력 → delta 변환 → 기존 RPC 재사용.
+   *
+   * 🟠 useCreateAdjustment 의 quantity 는 부호 포함 정수(0 금지).
+   *    동일값은 EditableStockCell 에서 미리 차단되므로 여기에 도달하지 않음.
+   * 🟡 메모는 인라인 편집임을 식별 가능하도록 고정 문자열.
+   */
+  const handleInlineStockSave = async (productId: string, newStock: number) => {
+    const target = products.find((p) => p.id === productId);
+    const oldStock = stockByProduct?.get(productId)?.current ?? 0;
+    const delta = newStock - oldStock;
+    if (delta === 0) return;
+    try {
+      await adjustMut.mutateAsync({
+        product_id: productId,
+        quantity: delta,
+        memo: '인라인 재고 수정',
+        transaction_date: new Date().toISOString(),
+      });
+      const sign = delta > 0 ? '+' : '';
+      const label = target?.name ?? '제품';
+      showToast({
+        kind: 'success',
+        text: `「${label}」 재고 ${sign}${delta.toLocaleString('ko-KR')}${target?.unit ?? ''} → ${newStock.toLocaleString('ko-KR')}${target?.unit ?? ''}`,
+      });
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: e instanceof Error ? e.message : '재고 저장 실패',
+      });
+      throw e;
     }
   };
 
@@ -569,6 +601,7 @@ export function StockPage() {
             onSelect={setSelectedId}
             isLoading={isLoading}
             onResetFilters={resetFilters}
+            onSaveStock={handleInlineStockSave}
           />
 
           {/* 스플릿 핸들 */}

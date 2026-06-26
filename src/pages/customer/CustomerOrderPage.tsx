@@ -4,7 +4,7 @@
  * OPS Shell 과 무관한 독립 페이지. 로그인 세션이 없으면 CustomerOrderLogin 렌더.
  * 로그인 후에는 메인(파일/메시지/직송) 또는 직접 입력 모드 노출.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, LogOut, Trash2 } from 'lucide-react';
 // xlsx-js-style 은 SheetJS xlsx 의 fork — 동일 API + 셀 스타일(s) 지원.
@@ -30,6 +30,7 @@ import {
   calcCurrentStockByProduct,
   calcSupplyPriceByCustomerGrade,
 } from '@/utils/calculations';
+import { syncOrderTotal } from '@/utils/orderTotal';
 // calcCurrentStockByProduct 는 stockByProduct 맵 반환 — OPS 의 useInventoryStock 과 동일 소스.
 import type { Json } from '@/types/database';
 
@@ -1042,6 +1043,13 @@ function LeftPanel({
           adjustedCount,
         });
         if (itemsErr) throw itemsErr;
+
+        // 🔴 orders.total_amount 안전망 — items INSERT 후 DB SUM 으로 재동기화.
+        //    초기 INSERT 의 클라이언트 산술과 items SUM 이 어긋날 가능성 차단.
+        await syncOrderTotal({
+          companyId: customer.companyId,
+          orderId: order.id,
+        });
       }
 
       // 4) customer_order_uploads — 모든 경우(엑셀/이미지/PDF) 기록
@@ -1363,11 +1371,10 @@ function ImportNoticeCard({
     staleTime: 60_000,
   });
 
-  // ② 재고 (품절/재고부족 탭 전용) — 활성 탭이 stock 인 경우에만 fetch.
-  const stockNeeded = tab === 'soldout' || tab === 'low';
+  // ② 재고 스냅샷 — 페덱스/해상운송의 품절 뱃지 + 품절/재고부족 탭 데이터에 공통 사용.
+  //    4탭 모두 stockItems 가 필요하므로 항상 fetch (5분 캐시로 중복 fetch 회피).
   const { data: stockItems } = useQuery<ImportNoticeProduct[]>({
     queryKey: ['customer-stock-snapshot', companyId],
-    enabled: stockNeeded,
     queryFn: async () => {
       const [stockMap, prodRes] = await Promise.all([
         calcCurrentStockByProduct(companyId),
@@ -1394,6 +1401,13 @@ function ImportNoticeCard({
     },
     staleTime: 60_000,
   });
+
+  /** code → 현재 재고 수량. 페덱스/해상운송 탭의 품절(≤0) 뱃지 판정에 사용. */
+  const stockByCode = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const it of stockItems ?? []) map.set(it.code, it.qty ?? 0);
+    return map;
+  }, [stockItems]);
 
   const activeShipment: ImportNoticeShipment | null =
     tab === 'fedex' ? (notice?.fedex ?? null)
@@ -1573,6 +1587,9 @@ function ImportNoticeCard({
         baseFont={baseFont}
         emptyText={tab === 'soldout' ? '품절 제품 없음' : tab === 'low' ? '재고부족 제품 없음' : '입고 예정 제품 없음'}
         showQty={tab === 'low'}
+        soldOutCodes={
+          tab === 'fedex' || tab === 'sea' ? stockByCode : null
+        }
       />
     </section>
   );
@@ -1713,11 +1730,17 @@ function ProductList({
   baseFont,
   emptyText,
   showQty,
+  soldOutCodes,
 }: {
   items: ImportNoticeProduct[];
   baseFont: number;
   emptyText: string;
   showQty: boolean;
+  /**
+   * code → 현재 재고 맵. null 이면 품절 뱃지 미노출.
+   * 페덱스/해상운송 탭에서만 전달 — 입고 예정 제품 중 현재 재고가 0 이하면 "품절" 뱃지 표시.
+   */
+  soldOutCodes: Map<string, number> | null;
 }) {
   // 카테고리 그룹핑 (items 는 이미 카테고리→코드 정렬됨)
   const grouped = new Map<string, ImportNoticeProduct[]>();
@@ -1789,7 +1812,48 @@ function ProductList({
                   >
                     {p.code}
                   </span>
-                  <span style={{ color: '#1F2937', flex: 1 }}>{p.name}</span>
+                  <span
+                    style={{
+                      color: '#1F2937',
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      minWidth: 0,
+                    }}
+                  >
+                    <span
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {p.name}
+                    </span>
+                    {soldOutCodes && (soldOutCodes.get(p.code) ?? 1) <= 0 && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '1px 6px',
+                          borderRadius: 999,
+                          fontSize: 9,
+                          fontWeight: 600,
+                          background: '#FEE2E2',
+                          color: '#B91C1C',
+                          border: '1px solid #FECACA',
+                          flexShrink: 0,
+                          whiteSpace: 'nowrap',
+                          fontFamily:
+                            'var(--font-sans, -apple-system, system-ui)',
+                          letterSpacing: 0,
+                        }}
+                      >
+                        품절
+                      </span>
+                    )}
+                  </span>
                   {showQty && (
                     <span
                       style={{
