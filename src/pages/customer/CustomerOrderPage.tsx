@@ -25,6 +25,7 @@ import { FileUploadSection } from '@/components/feature/customer-order/FileUploa
 import { MessageSection } from '@/components/feature/customer-order/MessageSection';
 import { DirectOrderEntryCard } from '@/components/feature/customer-order/DirectOrderEntryCard';
 import { DirectShippingSection } from '@/components/feature/customer-order/DirectShippingSection';
+import { SubmitSuccessDialog } from '@/components/feature/customer-order/SubmitSuccessDialog';
 import {
   calcCurrentStockByProduct,
   calcSupplyPriceByCustomerGrade,
@@ -491,6 +492,11 @@ function LeftPanel({
   const [dragOver, setDragOver] = useState(false);
   const [sending, setSending] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  // 전송 완료 다이얼로그 — hasChanges=true 면 호박색 안내 문구 추가.
+  const [submitResult, setSubmitResult] = useState<{
+    show: boolean;
+    hasChanges: boolean;
+  } | null>(null);
 
   const handleFile = (f: File | null) => {
     setFile(f);
@@ -1010,20 +1016,11 @@ function LeftPanel({
       console.log('[customer-file.uploads]', { uploadErr });
       if (uploadErr) throw uploadErr;
 
-      // 5) 토스트 — 케이스별 메시지
-      if (createdOrderId) {
-        const skipMsg =
-          unmatchedCount > 0 ? ` (코드 미매칭 ${unmatchedCount}건 제외)` : '';
-        showToast({
-          kind: 'success',
-          text: `주문서 ${matched.length}품목 전송 완료${skipMsg}`,
-        });
-      } else {
-        showToast({
-          kind: 'success',
-          text: '주문서가 전송되었습니다. 담당자가 확인 후 처리합니다.',
-        });
-      }
+      // 5) 다이얼로그 — 변경사항(코드 미매칭 = 일부 품목 누락) 있으면 호박색 안내 추가.
+      //    createdOrderId 없는 경우(이미지/PDF 만 업로드) 도 '전송됨' 으로 안내.
+      void createdOrderId;
+      const hasChanges = unmatchedCount > 0;
+      setSubmitResult({ show: true, hasChanges });
 
       setFile(null);
       setMessage('');
@@ -1171,6 +1168,12 @@ function LeftPanel({
           </div>
         </DirectShippingSection>
       </div>
+
+      <SubmitSuccessDialog
+        open={!!submitResult?.show}
+        hasChanges={submitResult?.hasChanges ?? false}
+        onClose={() => setSubmitResult(null)}
+      />
     </div>
   );
 }

@@ -25,6 +25,7 @@ import {
   PRODUCT_CATEGORY_ALL,
 } from '@/constants/categories';
 import { useToast } from '@/components/ui/Toast';
+import { SubmitSuccessDialog } from '@/components/feature/customer-order/SubmitSuccessDialog';
 import type { CustomerSession } from '@/hooks/useCustomerAuth';
 
 /** 재고 부족 임계값 — stock < 이 값이면 '부족' 뱃지. */
@@ -89,6 +90,11 @@ export function CustomerOrderInput({
   const [category, setCategory] = useState<string>(PRODUCT_CATEGORY_DEFAULT);
   const [searchQuery, setSearchQuery] = useState('');
   const [busy, setBusy] = useState(false);
+  // 전송 완료 다이얼로그 — 닫히면 onBack() 으로 메인 화면 복귀.
+  const [submitResult, setSubmitResult] = useState<{
+    show: boolean;
+    hasChanges: boolean;
+  } | null>(null);
 
   // 한글 콜레이션 보장 위해 클라이언트에서 제품명 오름차순으로 재정렬.
   //   서버 정렬은 DB 콜레이션에 의존해 한글 순서가 흐트러질 수 있음.
@@ -324,11 +330,9 @@ export function CustomerOrderInput({
       });
       if (itemsErr) throw itemsErr;
 
-      showToast({
-        kind: 'success',
-        text: `주문서 ${items.length}품목 전송 완료`,
-      });
-      onBack();
+      // 직접 입력은 품절 품목 입력이 disabled 되어 INSERT 시점에 조정이 발생할 일이 없음
+      // → hasChanges 는 항상 false. 다이얼로그 닫기 시 onBack() 호출.
+      setSubmitResult({ show: true, hasChanges: false });
     } catch (e) {
       showToast({
         kind: 'error',
@@ -585,6 +589,15 @@ export function CustomerOrderInput({
           </footer>
         </main>
       </div>
+
+      <SubmitSuccessDialog
+        open={!!submitResult?.show}
+        hasChanges={submitResult?.hasChanges ?? false}
+        onClose={() => {
+          setSubmitResult(null);
+          onBack();
+        }}
+      />
     </div>
   );
 }
