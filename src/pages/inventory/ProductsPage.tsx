@@ -387,16 +387,30 @@ export function ProductsPage() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div
+      style={{
+        // 🟠 Shell: TopNav h-14(56) + SectionNav h-11(44) = 100px 고정 영역.
+        //    이 페이지만 fixed-viewport 로 동작 — 본문은 상단 헤더/필터 sticky + 테이블 바디만 스크롤.
+        height: 'calc(100vh - 100px)',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+    >
       <main
         style={{
           flex: 1,
-          padding: '20px 32px 80px',
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '20px 32px 20px',
           maxWidth: 1720,
           width: '100%',
           margin: '0 auto',
         }}
       >
+        {/* 고정 영역: 페이지 헤더 + 필터 + 에러 배너 */}
+        <div style={{ flexShrink: 0 }}>
         {/* 페이지 헤더 */}
         <header style={{ marginBottom: 14 }}>
           <div
@@ -594,18 +608,22 @@ export function ProductsPage() {
             제품 목록 로딩 실패: {productsQuery.error.message}
           </div>
         )}
+        </div>
 
-        <ProductListTable
-          products={filtered}
-          isLoading={isLoading}
-          onResetFilters={resetFilters}
-          stockByProduct={stockByProduct}
-          onEditClick={openEdit}
-          onDeleteClick={openDelete}
-          checked={checked}
-          onToggleChecked={toggleOneChecked}
-          onTogglePageChecked={togglePageChecked}
-        />
+        {/* 스크롤 영역: 테이블 카드 — 컬럼 헤더 sticky, 본문만 스크롤 */}
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <ProductListTable
+            products={filtered}
+            isLoading={isLoading}
+            onResetFilters={resetFilters}
+            stockByProduct={stockByProduct}
+            onEditClick={openEdit}
+            onDeleteClick={openDelete}
+            checked={checked}
+            onToggleChecked={toggleOneChecked}
+            onTogglePageChecked={togglePageChecked}
+          />
+        </div>
       </main>
 
       {/* 생성/수정 모달 */}

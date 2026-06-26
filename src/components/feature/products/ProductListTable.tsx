@@ -91,10 +91,22 @@ export function ProductListTable({
         border: '1px solid var(--line)',
         borderRadius: 10,
         overflow: 'hidden',
+        // 🟠 부모 flex 컨테이너의 잔여 높이를 모두 차지 — 본문 스크롤은 내부 div 가 담당.
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
       }}
     >
-      <div style={{ overflowX: 'auto' }}>
-        {/* 헤더 */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          overflowX: 'auto',
+        }}
+      >
+        {/* 헤더 — 스크롤 시 상단 고정 */}
         <div
           style={{
             display: 'grid',
@@ -109,6 +121,9 @@ export function ProductListTable({
             letterSpacing: '0.04em',
             textTransform: 'uppercase',
             background: 'var(--surface-2)',
+            position: 'sticky',
+            top: 0,
+            zIndex: 2,
           }}
         >
           {/* 체크박스 헤더 */}
