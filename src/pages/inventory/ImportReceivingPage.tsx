@@ -41,6 +41,7 @@ import { ImportHeaderForm } from '@/components/feature/import/ImportHeaderForm';
 import { ImportSummaryBar } from '@/components/feature/import/ImportSummaryBar';
 import { ImportRowsTable } from '@/components/feature/import/ImportRowsTable';
 import { InvoiceUploadCard } from '@/components/feature/import/InvoiceUploadCard';
+import { RecentInvoicesSection } from '@/components/feature/import/RecentInvoicesSection';
 import { parseInvoicePDF } from '@/utils/invoiceParser';
 
 // ───────────────────────────────────────────────────────────
@@ -967,6 +968,8 @@ export function ImportReceivingPage() {
             {noticeSaving ? '저장 중…' : '저장'}
           </button>
         </section>
+
+        <RecentInvoicesSection companyId={companyId} />
       </main>
 
       {/* 운송비 0 확인 */}
