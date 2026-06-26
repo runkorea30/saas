@@ -22,6 +22,7 @@ export interface Product {
   id: string;
   code: string;
   name: string;
+  name_en: string | null;
   category: string;
   sell_price: number;
   supply_price: number;
@@ -59,7 +60,7 @@ export interface ProductUpdateArgs {
 }
 
 const PRODUCT_SELECT =
-  'id, code, name, category, sell_price, supply_price, unit_price_usd, unit, is_active, safety_stock, reorder_point, grade_a, grade_b, grade_c, grade_d, grade_e, created_at, updated_at';
+  'id, code, name, name_en, category, sell_price, supply_price, unit_price_usd, unit, is_active, safety_stock, reorder_point, grade_a, grade_b, grade_c, grade_d, grade_e, created_at, updated_at';
 
 // ───────────────────────────────────────────────────────────
 // 에러 매핑

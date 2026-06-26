@@ -1228,6 +1228,7 @@ export type Database = {
           id: string
           is_active: boolean
           name: string
+          name_en: string | null
           reorder_point: number | null
           safety_stock: number | null
           sell_price: number
@@ -1250,6 +1251,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           name: string
+          name_en?: string | null
           reorder_point?: number | null
           safety_stock?: number | null
           sell_price: number
@@ -1272,6 +1274,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           name?: string
+          name_en?: string | null
           reorder_point?: number | null
           safety_stock?: number | null
           sell_price?: number

@@ -222,6 +222,22 @@ export function ProductListTable({
                 >
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <CellText value={p.name} bold ink="ink" />
+                    {p.name_en && (
+                      <div
+                        className="num"
+                        style={{
+                          fontSize: 11,
+                          color: 'var(--ink-3)',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          marginTop: 1,
+                        }}
+                        title={p.name_en}
+                      >
+                        {p.name_en}
+                      </div>
+                    )}
                   </div>
                   {inactive && <HiddenBadge />}
                 </div>
