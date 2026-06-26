@@ -65,6 +65,8 @@ export function PurchaseOrderPage() {
     salesMap,
     stockMap,
     savedCategories,
+    savedItemCount,
+    savedTotalUsd,
     categories,
     isLoading,
     error,
@@ -462,10 +464,11 @@ export function PurchaseOrderPage() {
                 value={`${year}년 ${month}월`}
                 sub="(최근 6개월 판매 기준)"
               />
-              <SummaryItem label="발주 품목" value={`${filledCount}개`} />
+              {/* 🔴 상단 KPI는 DB 저장된 purchase_orders + items 기준 — 미저장 입력 제외. */}
+              <SummaryItem label="발주 품목" value={`${savedItemCount}개`} />
               <SummaryItem
                 label="총합계 USD"
-                value={`$${formatUsd(totalUsd)}`}
+                value={`$${formatUsd(savedTotalUsd)}`}
                 tone="brand"
               />
               <SummaryItem

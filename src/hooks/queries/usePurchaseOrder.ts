@@ -64,15 +64,27 @@ async function fetchSalesQty6mExcluding(
   return map;
 }
 
-interface POTemplateRow {
+interface POHeaderRow {
+  id: string;
   template_id: string | null;
+  total_amount: number | null;
+}
+
+export interface SavedSnapshot {
+  /** 이번 달 draft 발주서로 저장된 카테고리 distinct 셋. */
+  categories: Set<string>;
+  /** 저장된 발주서들의 total_amount 합 (USD). */
+  totalUsd: number;
+  /** 저장된 발주서 아이템 중 quantity > 0 인 행 개수. */
+  itemCount: number;
 }
 
 /**
- * 이번 달 draft 발주서로 저장된 카테고리 distinct 셋.
- * po_date 가 [이번 달 1일, 다음 달 1일) 인 status='draft' 행 기준.
+ * 이번 달 draft 발주서 + 그 아이템 카운트 + total_amount 합산 스냅샷.
+ * 🔴 상단 KPI (발주 품목 / 총합계 USD / 저장된 분류) 는 모두 이 함수 결과에서 산출 —
+ *    사용자가 입력 중인 미저장 수량은 카운트되지 않는다.
  */
-async function fetchSavedCategories(companyId: string): Promise<Set<string>> {
+async function fetchSavedSnapshot(companyId: string): Promise<SavedSnapshot> {
   const now = new Date();
   const currentMonthStart = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
@@ -81,10 +93,11 @@ async function fetchSavedCategories(companyId: string): Promise<Set<string>> {
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
   );
 
-  const rows = await fetchAllRows<POTemplateRow>(() =>
+  // 1) 저장된 발주서 헤더 — id / template_id / total_amount
+  const orderRows = await fetchAllRows<POHeaderRow>(() =>
     supabase
       .from('purchase_orders')
-      .select('template_id')
+      .select('id, template_id, total_amount')
       .eq('company_id', companyId)
       .eq('status', 'draft')
       .is('deleted_at', null)
@@ -92,11 +105,28 @@ async function fetchSavedCategories(companyId: string): Promise<Set<string>> {
       .lt('po_date', nextMonthStart.toISOString()),
   );
 
-  const set = new Set<string>();
-  for (const r of rows) {
-    if (r.template_id) set.add(r.template_id);
+  const categories = new Set<string>();
+  let totalUsd = 0;
+  for (const r of orderRows) {
+    if (r.template_id) categories.add(r.template_id);
+    totalUsd += Number(r.total_amount ?? 0);
   }
-  return set;
+
+  // 2) 저장된 아이템 중 quantity > 0 카운트 — 발주 품목 수.
+  let itemCount = 0;
+  if (orderRows.length > 0) {
+    const ids = orderRows.map((r) => r.id);
+    const { count, error } = await supabase
+      .from('purchase_order_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('company_id', companyId)
+      .in('purchase_order_id', ids)
+      .gt('quantity', 0);
+    if (error) throw error;
+    itemCount = count ?? 0;
+  }
+
+  return { categories, totalUsd, itemCount };
 }
 
 export interface UsePurchaseOrderResult {
@@ -107,6 +137,10 @@ export interface UsePurchaseOrderResult {
   stockMap: Map<string, number>;
   /** 이번 달 저장된 카테고리 셋. */
   savedCategories: Set<string>;
+  /** 🔴 저장된 발주서 아이템 중 quantity > 0 개수 — 상단 KPI "발주 품목" 용. */
+  savedItemCount: number;
+  /** 🔴 저장된 발주서들의 total_amount 합 (USD) — 상단 KPI "총합계 USD" 용. */
+  savedTotalUsd: number;
   categories: string[];
   isLoading: boolean;
   error: Error | null;
@@ -123,10 +157,12 @@ export function usePurchaseOrder(
     queryFn: () => fetchSalesQty6mExcluding(companyId!),
     staleTime: 60_000,
   });
-  const savedQuery = useQuery<Set<string>>({
+  // 🟠 queryKey 는 호환성 유지를 위해 기존 'saved-categories' 그대로 둔다.
+  //    페이지의 invalidate 호출과 동일 키를 공유.
+  const savedQuery = useQuery<SavedSnapshot>({
     queryKey: ['purchase-order-saved-categories', companyId],
     enabled: Boolean(companyId),
-    queryFn: () => fetchSavedCategories(companyId!),
+    queryFn: () => fetchSavedSnapshot(companyId!),
     staleTime: 15_000,
   });
 
@@ -149,11 +185,14 @@ export function usePurchaseOrder(
     (salesQuery.error as Error | null) ??
     (savedQuery.error as Error | null);
 
+  const saved = savedQuery.data;
   return {
     products,
     salesMap: salesQuery.data ?? new Map(),
     stockMap,
-    savedCategories: savedQuery.data ?? new Set(),
+    savedCategories: saved?.categories ?? new Set(),
+    savedItemCount: saved?.itemCount ?? 0,
+    savedTotalUsd: saved?.totalUsd ?? 0,
     categories,
     isLoading:
       productsQuery.isLoading ||
