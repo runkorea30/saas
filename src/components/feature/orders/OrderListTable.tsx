@@ -24,7 +24,7 @@ import {
 } from '@/hooks/useResizableColumns';
 import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
-import type { Order } from '@/types/orders';
+import type { OrderWithGroupInfo } from '@/types/orders';
 
 type Align = 'left' | 'right' | 'center';
 
@@ -46,7 +46,7 @@ const COLUMN_DEFS: ReadonlyArray<OrderColumnDef> = [
 ];
 
 export interface OrderListTableProps {
-  orders: Order[];
+  orders: OrderWithGroupInfo[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   checked: Record<string, boolean>;
@@ -238,6 +238,7 @@ export function OrderListTable(props: OrderListTableProps) {
             const hasReturn = o.items.some((it) => it.is_return);
             const customerName = o.customer?.name ?? '—';
             const showTrash = hoveredId === o.id || deletingId === o.id;
+            const isAdd = o.isAdditional;
             return (
               <div
                 key={o.id}
@@ -257,7 +258,9 @@ export function OrderListTable(props: OrderListTableProps) {
                     ? 'var(--brand-wash)'
                     : isChecked
                       ? 'var(--surface-2)'
-                      : 'transparent',
+                      : isAdd
+                        ? 'var(--surface-2)'
+                        : 'transparent',
                   cursor: 'pointer',
                   alignItems: 'center',
                   transition: 'background .12s',
@@ -269,9 +272,8 @@ export function OrderListTable(props: OrderListTableProps) {
                 onMouseLeave={(e) => {
                   setHoveredId((cur) => (cur === o.id ? null : cur));
                   if (!sel)
-                    e.currentTarget.style.background = isChecked
-                      ? 'var(--surface-2)'
-                      : 'transparent';
+                    e.currentTarget.style.background =
+                      isChecked || isAdd ? 'var(--surface-2)' : 'transparent';
                 }}
               >
                 {showTrash && (
@@ -308,85 +310,152 @@ export function OrderListTable(props: OrderListTableProps) {
                   <Check on={isChecked} onChange={() => onToggleChecked(o.id)} />
                 </div>
 
-                {/* 주문일 */}
-                <div
-                  style={{
-                    fontFamily: 'var(--font-num)',
-                    fontSize: 11.5,
-                    color: 'var(--ink-2)',
-                    lineHeight: 1.35,
-                    minWidth: 0,
-                    overflow: 'hidden',
-                  }}
-                >
+                {/* 주문일 — 추가주문은 └ 추가 / 본주문은 날짜·시간 표시 */}
+                {isAdd ? (
                   <div
                     style={{
-                      color: 'var(--ink)',
-                      fontWeight: 500,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                    title={fmtDate(d)}
-                  >
-                    {fmtDate(d)}
-                  </div>
-                  <div
-                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      paddingLeft: 16,
                       color: 'var(--ink-3)',
-                      fontSize: 10.5,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                    title={`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} · ${o.id.slice(0, 6)}`}
-                  >
-                    {String(d.getHours()).padStart(2, '0')}:
-                    {String(d.getMinutes()).padStart(2, '0')} · {o.id.slice(0, 6)}
-                  </div>
-                </div>
-
-                {/* 거래처 */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    minWidth: 0,
-                  }}
-                >
-                  <GradeBadge grade={o.customer?.grade ?? null} size="sm" />
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 500,
-                      color: 'var(--ink)',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      flex: 1,
+                      fontFamily: 'var(--font-num)',
+                      fontSize: 11.5,
                       minWidth: 0,
+                      overflow: 'hidden',
+                      whiteSpace: 'nowrap',
+                      textOverflow: 'ellipsis',
                     }}
-                    title={customerName}
+                    title={`추가주문 · ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} · ${o.id.slice(0, 6)}`}
                   >
-                    {customerName}
-                  </div>
-                  {hasReturn && (
+                    <span style={{ fontSize: 13, color: 'var(--ink-4)' }}>└</span>
                     <span
-                      title="반품 포함"
                       style={{
-                        fontSize: 9.5,
-                        color: 'var(--danger)',
-                        fontWeight: 500,
-                        fontFamily: 'var(--font-num)',
+                        fontSize: 10.5,
+                        color: 'var(--ink-3)',
                         letterSpacing: '0.04em',
-                        flexShrink: 0,
                       }}
                     >
-                      RET
+                      추가
                     </span>
-                  )}
-                </div>
+                    <span
+                      style={{
+                        marginLeft: 6,
+                        fontSize: 10.5,
+                        color: 'var(--ink-4)',
+                      }}
+                    >
+                      {String(d.getHours()).padStart(2, '0')}:
+                      {String(d.getMinutes()).padStart(2, '0')}
+                    </span>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      fontFamily: 'var(--font-num)',
+                      fontSize: 11.5,
+                      color: 'var(--ink-2)',
+                      lineHeight: 1.35,
+                      minWidth: 0,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div
+                      style={{
+                        color: 'var(--ink)',
+                        fontWeight: 500,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                      title={fmtDate(d)}
+                    >
+                      {fmtDate(d)}
+                    </div>
+                    <div
+                      style={{
+                        color: 'var(--ink-3)',
+                        fontSize: 10.5,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                      title={`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} · ${o.id.slice(0, 6)}`}
+                    >
+                      {String(d.getHours()).padStart(2, '0')}:
+                      {String(d.getMinutes()).padStart(2, '0')} · {o.id.slice(0, 6)}
+                    </div>
+                  </div>
+                )}
+
+                {/* 거래처 — 추가주문은 비워둠 (RET 만 표시) */}
+                {isAdd ? (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'flex-end',
+                      minWidth: 0,
+                    }}
+                  >
+                    {hasReturn && (
+                      <span
+                        title="반품 포함"
+                        style={{
+                          fontSize: 9.5,
+                          color: 'var(--danger)',
+                          fontWeight: 500,
+                          fontFamily: 'var(--font-num)',
+                          letterSpacing: '0.04em',
+                          flexShrink: 0,
+                        }}
+                      >
+                        RET
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      minWidth: 0,
+                    }}
+                  >
+                    <GradeBadge grade={o.customer?.grade ?? null} size="sm" />
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 500,
+                        color: 'var(--ink)',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        flex: 1,
+                        minWidth: 0,
+                      }}
+                      title={customerName}
+                    >
+                      {customerName}
+                    </div>
+                    {hasReturn && (
+                      <span
+                        title="반품 포함"
+                        style={{
+                          fontSize: 9.5,
+                          color: 'var(--danger)',
+                          fontWeight: 500,
+                          fontFamily: 'var(--font-num)',
+                          letterSpacing: '0.04em',
+                          flexShrink: 0,
+                        }}
+                      >
+                        RET
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {/* 수량 */}
                 <div

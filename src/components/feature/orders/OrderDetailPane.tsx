@@ -23,7 +23,14 @@ import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 import { useProducts, type Product } from '@/hooks/queries/useProducts';
 import type { Order, OrderItemDraft } from '@/types/orders';
 
-export function OrderDetailPane({ order }: { order: Order | null }) {
+export function OrderDetailPane({
+  order,
+  isAdditional = false,
+}: {
+  order: Order | null;
+  /** 같은 날짜·같은 거래처 묶음에서 본주문 이후에 생성된 추가주문 여부 — true 면 헤더에 배지 표시. */
+  isAdditional?: boolean;
+}) {
   const { companyId } = useCompany();
   const queryClient = useQueryClient();
 
@@ -458,6 +465,24 @@ export function OrderDetailPane({ order }: { order: Order | null }) {
           </span>
           <StatusBadge status={order.status} />
           <SourceIcon source={order.source} />
+          {isAdditional && (
+            <span
+              title="같은 날짜·같은 거래처의 추가 주문"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '1px 6px',
+                borderRadius: 999,
+                fontSize: 10.5,
+                fontWeight: 600,
+                background: '#fef3c7',
+                color: '#92400e',
+                letterSpacing: '0.04em',
+              }}
+            >
+              추가주문
+            </span>
+          )}
           <div style={{ flex: 1 }} />
           <button
             type="button"

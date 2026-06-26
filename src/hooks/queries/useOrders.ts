@@ -16,6 +16,7 @@ import type { DateRange, Order } from '@/types/orders';
 const ORDER_SELECT = `
   id,
   order_date,
+  created_at,
   total_amount,
   status,
   source,

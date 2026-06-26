@@ -29,7 +29,7 @@ import {
   periodRange,
 } from '@/components/feature/orders/primitives';
 import type { OrderStatus } from '@/types/common';
-import type { Order, PeriodKey } from '@/types/orders';
+import type { Order, OrderWithGroupInfo, PeriodKey } from '@/types/orders';
 
 const PERIOD_OPTIONS: { id: PeriodKey; label: string }[] = [
   { id: 'today', label: '오늘' },
@@ -141,20 +141,62 @@ export function OrdersPage() {
     return { count, gross, net: gross, returns, avg };
   }, [filtered]);
 
+  // ───── 그룹핑 (같은 날짜+거래처) ─────
+  // 같은 날짜·같은 거래처 주문이 2건 이상이면 묶음으로 표시.
+  // 묶음 내부: created_at 오름차순 → 첫 번째가 본주문(isAdditional=false), 나머지가 추가주문.
+  // 묶음 자체의 정렬: 묶음에서 가장 늦은(=최신) 주문의 order_date+created_at 기준 내림차순
+  //   → 서버의 (order_date DESC, created_at DESC) 정렬과 자연스럽게 일관됨.
+  const groupedOrders: OrderWithGroupInfo[] = useMemo(() => {
+    const groupMap = new Map<string, Order[]>();
+    for (const o of filtered) {
+      const dateKey = o.order_date.slice(0, 10);
+      const customerKey = o.customer?.id ?? `__no_customer_${o.id}`;
+      const key = `${dateKey}__${customerKey}`;
+      if (!groupMap.has(key)) groupMap.set(key, []);
+      groupMap.get(key)!.push(o);
+    }
+    const groups = Array.from(groupMap.values());
+    for (const g of groups) {
+      g.sort(
+        (a, b) =>
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      );
+    }
+    groups.sort((a, b) => {
+      // 묶음의 마지막(가장 늦은) 주문 기준 — order_date DESC, then created_at DESC.
+      const aLast = a[a.length - 1];
+      const bLast = b[b.length - 1];
+      if (aLast.order_date !== bLast.order_date) {
+        return aLast.order_date < bLast.order_date ? 1 : -1;
+      }
+      return aLast.created_at < bLast.created_at ? 1 : -1;
+    });
+    const flat: OrderWithGroupInfo[] = [];
+    for (const g of groups) {
+      g.forEach((o, idx) =>
+        flat.push({ ...o, isAdditional: idx > 0, groupSize: g.length }),
+      );
+    }
+    return flat;
+  }, [filtered]);
+
   // ───── 페이지네이션 ─────
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(groupedOrders.length / PER_PAGE));
   const curPage = Math.min(page, totalPages);
-  const pageRows = filtered.slice((curPage - 1) * PER_PAGE, curPage * PER_PAGE);
+  const pageRows = groupedOrders.slice(
+    (curPage - 1) * PER_PAGE,
+    curPage * PER_PAGE,
+  );
 
   useEffect(() => {
     setPage(1);
   }, [period, custom, statusSel, customerSel]);
 
   useEffect(() => {
-    if (!selectedId || !filtered.find((o) => o.id === selectedId)) {
-      setSelectedId(filtered[0]?.id ?? null);
+    if (!selectedId || !groupedOrders.find((o) => o.id === selectedId)) {
+      setSelectedId(groupedOrders[0]?.id ?? null);
     }
-  }, [filtered, selectedId]);
+  }, [groupedOrders, selectedId]);
 
   // OrderEntryPage 저장 후 라우터 state 로 전달된 신규 주문을 우선 선택.
   useEffect(() => {
@@ -163,7 +205,8 @@ export function OrdersPage() {
     }
   }, [incomingOrderId, orders]);
 
-  const selectedOrder: Order | null = filtered.find((o) => o.id === selectedId) ?? null;
+  const selectedOrder: OrderWithGroupInfo | null =
+    groupedOrders.find((o) => o.id === selectedId) ?? null;
 
   // ───── 체크박스 일괄 ─────
   const pageIds = pageRows.map((o) => o.id);
@@ -198,7 +241,18 @@ export function OrdersPage() {
 
   const handlePrintInvoice = () => {
     // 체크된 주문만 추출 — filtered 전체에서 가져와야 페이지네이션을 넘어선 선택도 포함.
-    const selected = filtered.filter((o) => checked[o.id]);
+    //   거래처 → created_at 오름차순으로 미리 정렬해두면 아래 push 가 그대로 본주문→추가주문 순서가 됨.
+    const selected = filtered
+      .filter((o) => checked[o.id])
+      .slice()
+      .sort((a, b) => {
+        const ac = a.customer?.id ?? '';
+        const bc = b.customer?.id ?? '';
+        if (ac !== bc) return ac.localeCompare(bc);
+        return (
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+      });
     if (selected.length === 0) return;
 
     // customer_id 기준 그룹핑.
@@ -243,14 +297,9 @@ export function OrdersPage() {
         })),
       });
     }
-    // 각 그룹의 주문을 날짜 오름차순 정렬 → index 0 이 "주문서", 이후 "추가주문".
-    const groups = Array.from(map.values());
-    for (const g of groups) {
-      g.orders.sort(
-        (a, b) => new Date(a.order_date).getTime() - new Date(b.order_date).getTime(),
-      );
-    }
+    // selected 가 이미 customer_id+created_at 으로 정렬되어 있어 각 그룹의 orders 는 본주문→추가주문 순.
     // 거래처도 이름순 정렬.
+    const groups = Array.from(map.values());
     groups.sort((a, b) => a.customer.name.localeCompare(b.customer.name, 'ko'));
 
     setPrintGroups(groups);
@@ -510,7 +559,10 @@ export function OrdersPage() {
             />
           </div>
 
-          <OrderDetailPane order={selectedOrder} />
+          <OrderDetailPane
+            order={selectedOrder}
+            isAdditional={selectedOrder?.isAdditional ?? false}
+          />
         </div>
       </main>
 

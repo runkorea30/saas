@@ -48,6 +48,8 @@ export interface OrderItem {
 export interface Order {
   id: string;
   order_date: string; // ISO
+  /** 주문 생성 시각. 같은 날짜+거래처 주문의 본주문/추가주문 판별에 사용. */
+  created_at: string; // ISO
   total_amount: number;
   status: OrderStatus;
   source: OrderSource;
@@ -56,6 +58,15 @@ export interface Order {
   customer: OrderCustomerRef | null;
   creator: OrderCreatorRef | null;
   items: OrderItem[];
+}
+
+/**
+ * 그룹핑된 주문 — 같은 날짜+거래처 묶음에서의 위치 정보 포함.
+ * isAdditional=true 면 같은 묶음의 본주문보다 늦게 생성된 추가주문.
+ */
+export interface OrderWithGroupInfo extends Order {
+  isAdditional: boolean;
+  groupSize: number;
 }
 
 export type PeriodKey = 'today' | 'week' | 'month' | 'lastmonth' | '90d' | 'custom';
