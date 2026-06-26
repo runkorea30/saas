@@ -17,6 +17,7 @@
  * 🟠 데스크톱 StockPage handleInlineStockSave 와 동일한 저장 패턴 사용.
  */
 import { useMemo, useRef, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useProducts, type Product } from '@/hooks/queries/useProducts';
 import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
@@ -46,11 +47,17 @@ interface EnrichedRow {
 export function InventoryPage() {
   const { companyId } = useCompany();
   const { showToast } = useToast();
-  const { data: products = [], isLoading: loadingProducts } =
-    useProducts(companyId);
-  const { data: stockSummary, isLoading: loadingStock } =
-    useInventoryStock(companyId);
+  const productsQuery = useProducts(companyId);
+  const stockQuery = useInventoryStock(companyId);
+  const { data: products = [], isLoading: loadingProducts } = productsQuery;
+  const { data: stockSummary, isLoading: loadingStock } = stockQuery;
   const adjustMut = useCreateAdjustment(companyId);
+
+  // 새로고침: 두 쿼리 모두 refetch + 진행중 여부 통합
+  const refreshing = productsQuery.isFetching || stockQuery.isFetching;
+  const handleRefresh = () => {
+    void Promise.all([productsQuery.refetch(), stockQuery.refetch()]);
+  };
 
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>(''); // '' = 전체
@@ -94,7 +101,11 @@ export function InventoryPage() {
       if (stockFilter === 'out' && r.level !== 'out') return false;
       if (stockFilter === 'low' && r.level !== 'low') return false;
       if (categoryFilter && r.product.category !== categoryFilter) return false;
-      if (q && !r.product.name.toLowerCase().includes(q)) return false;
+      if (q) {
+        const name = r.product.name.toLowerCase();
+        const code = r.product.code.toLowerCase();
+        if (!name.includes(q) && !code.includes(q)) return false;
+      }
       return true;
     });
   }, [enriched, stockFilter, categoryFilter, query]);
@@ -152,7 +163,35 @@ export function InventoryPage() {
   return (
     <div>
       <header className="m-page-header" style={{ paddingBottom: 8 }}>
-        <h1 className="m-page-title">재고현황</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <h1 className="m-page-title">재고현황</h1>
+          <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="새로고침"
+            aria-label="새로고침"
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              border: '1px solid var(--m-border-strong)',
+              background: 'var(--m-surface)',
+              color: refreshing ? 'var(--m-primary)' : 'var(--m-text-secondary)',
+              cursor: refreshing ? 'wait' : 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <RefreshCw
+              size={16}
+              strokeWidth={1.8}
+              className={refreshing ? 'animate-spin' : undefined}
+            />
+          </button>
+        </div>
         <div
           style={{
             display: 'flex',
@@ -164,7 +203,7 @@ export function InventoryPage() {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="제품명 검색…"
+            placeholder="제품명·코드 검색…"
             style={{
               flex: 1,
               minWidth: 0,
