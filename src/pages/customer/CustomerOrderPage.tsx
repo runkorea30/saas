@@ -15,6 +15,12 @@ import { useToast } from '@/components/ui/Toast';
 import { useCustomerAuth, type CustomerSession } from '@/hooks/useCustomerAuth';
 import { CustomerOrderLogin } from './CustomerOrderLogin';
 import { CustomerOrderInput } from './CustomerOrderInput';
+import {
+  DELIVERY_FEE_PRODUCT_ID,
+  DELIVERY_FEE_AMOUNT,
+  calcDeliveryFee,
+  removeDeliveryFeeFromOrder,
+} from '@/utils/deliveryFee';
 import { FileUploadSection } from '@/components/feature/customer-order/FileUploadSection';
 import { MessageSection } from '@/components/feature/customer-order/MessageSection';
 import { DirectOrderEntryCard } from '@/components/feature/customer-order/DirectOrderEntryCard';
@@ -143,18 +149,6 @@ const emptyShipping = (): ShippingRow => ({
 });
 
 const CREDIT_LABEL = '신용';
-
-// ───────────────────────────────────────────────────────────
-// 택배비 자동추가 — 합계 < 10만원 이고 직송이 아니면 택배비 행을 추가.
-// dogfooding 단계 하드코딩. 멀티테넌트 도입 시 회사별 설정으로 이동.
-// ───────────────────────────────────────────────────────────
-const DELIVERY_FEE = {
-  productId: 'cf9040dd-c363-469d-99d4-bb7eaec6264a',
-  code: '0000',
-  name: '택배비',
-  price: 4000,
-};
-const DELIVERY_FEE_THRESHOLD = 100_000;
 
 // ───────────────────────────────────────────────────────────
 // 주문 내역 데이터 모델
@@ -903,14 +897,27 @@ function LeftPanel({
           (s, it) => s + it.qty * it.unit_price_resolved,
           0,
         );
-        // 🔴 택배비 자동추가: 직송 아님 + 합계 < 10만원 + 이미 택배비 코드 미포함.
+        // 🔴 택배비 4규칙 — 직송/오늘 합산/기존 택배비 유무를 종합 판단.
+        //    매수에 이미 택배비 코드가 들어 있으면 사용자의 명시적 입력이므로 추가 판단 생략.
         const hasDeliveryAlready = matched.some(
-          (it) => it.code === DELIVERY_FEE.code,
+          (it) => it.product_id === DELIVERY_FEE_PRODUCT_ID,
         );
-        const needsDeliveryFee =
-          !isDirect && subtotal < DELIVERY_FEE_THRESHOLD && !hasDeliveryAlready;
-        const totalAmount = needsDeliveryFee
-          ? subtotal + DELIVERY_FEE.price
+        const decision = hasDeliveryAlready
+          ? { addDeliveryFee: false, removeDeliveryFeeFromOrderId: null }
+          : await calcDeliveryFee({
+              companyId: customer.companyId,
+              customerId: customer.customerId,
+              newOrderAmount: subtotal,
+              isDirectShipping: isDirect,
+            });
+        if (decision.removeDeliveryFeeFromOrderId) {
+          await removeDeliveryFeeFromOrder({
+            companyId: customer.companyId,
+            orderId: decision.removeDeliveryFeeFromOrderId,
+          });
+        }
+        const totalAmount = decision.addDeliveryFee
+          ? subtotal + DELIVERY_FEE_AMOUNT
           : subtotal;
 
         // 🟠 orders 의 shipping_info/is_direct_shipping 컬럼은 자동생성 타입에 아직 미반영
@@ -945,7 +952,7 @@ function LeftPanel({
           orderErr,
           subtotal,
           totalAmount,
-          needsDeliveryFee,
+          decision,
           isDirect,
         });
         if (orderErr || !order) throw orderErr ?? new Error('주문 생성 실패');
@@ -960,14 +967,14 @@ function LeftPanel({
           amount: it.qty * it.unit_price_resolved,
           is_return: false,
         }));
-        if (needsDeliveryFee) {
+        if (decision.addDeliveryFee) {
           orderItemsPayload.push({
             order_id: order.id,
             company_id: customer.companyId,
-            product_id: DELIVERY_FEE.productId,
+            product_id: DELIVERY_FEE_PRODUCT_ID,
             quantity: 1,
-            unit_price: DELIVERY_FEE.price,
-            amount: DELIVERY_FEE.price,
+            unit_price: DELIVERY_FEE_AMOUNT,
+            amount: DELIVERY_FEE_AMOUNT,
             is_return: false,
           });
         }

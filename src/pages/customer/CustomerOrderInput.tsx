@@ -14,6 +14,12 @@ import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 import { calcSupplyPriceByCustomerGrade } from '@/utils/calculations';
 import {
+  DELIVERY_FEE_PRODUCT_ID,
+  DELIVERY_FEE_AMOUNT,
+  calcDeliveryFee,
+  removeDeliveryFeeFromOrder,
+} from '@/utils/deliveryFee';
+import {
   getCategoryLabel,
   PRODUCT_CATEGORY_DEFAULT,
   PRODUCT_CATEGORY_ALL,
@@ -23,18 +29,6 @@ import type { CustomerSession } from '@/hooks/useCustomerAuth';
 
 /** 재고 부족 임계값 — stock < 이 값이면 '부족' 뱃지. */
 const LOW_STOCK_THRESHOLD = 10;
-
-/**
- * 택배비 자동추가 — 직접 입력 주문은 직송 UI 가 없어 항상 비-직송.
- * 합계 < 10만원 + 이미 0000 코드 미포함 일 때만 추가.
- */
-const DELIVERY_FEE = {
-  productId: 'cf9040dd-c363-469d-99d4-bb7eaec6264a',
-  code: '0000',
-  name: '택배비',
-  price: 4000,
-};
-const DELIVERY_FEE_THRESHOLD = 100_000;
 
 /**
  * 제품 행 / 컬럼 헤더 공용 flex 셀 너비.
@@ -236,14 +230,27 @@ export function CustomerOrderInput({
         (s, it) => s + it.qty * it.supply_price,
         0,
       );
-      // 🔴 택배비 자동추가: 합계 < 10만원 + 0000 미포함 (직접 입력은 항상 비-직송).
+      // 🔴 택배비 4규칙 — 직접 입력은 직송 UI 가 없어 항상 비-직송.
+      //    오늘 같은 거래처 기존 주문과 합산 + 기존 택배비 유무까지 종합 판단.
       const hasDeliveryAlready = items.some(
-        (it) => it.code === DELIVERY_FEE.code,
+        (it) => it.product_id === DELIVERY_FEE_PRODUCT_ID,
       );
-      const needsDeliveryFee =
-        subtotal < DELIVERY_FEE_THRESHOLD && !hasDeliveryAlready;
-      const totalAmount = needsDeliveryFee
-        ? subtotal + DELIVERY_FEE.price
+      const decision = hasDeliveryAlready
+        ? { addDeliveryFee: false, removeDeliveryFeeFromOrderId: null }
+        : await calcDeliveryFee({
+            companyId: customer.companyId,
+            customerId: customer.customerId,
+            newOrderAmount: subtotal,
+            isDirectShipping: false,
+          });
+      if (decision.removeDeliveryFeeFromOrderId) {
+        await removeDeliveryFeeFromOrder({
+          companyId: customer.companyId,
+          orderId: decision.removeDeliveryFeeFromOrderId,
+        });
+      }
+      const totalAmount = decision.addDeliveryFee
+        ? subtotal + DELIVERY_FEE_AMOUNT
         : subtotal;
 
       // eslint-disable-next-line no-console
@@ -296,14 +303,14 @@ export function CustomerOrderInput({
         amount: it.qty * it.supply_price,
         is_return: false,
       }));
-      if (needsDeliveryFee) {
+      if (decision.addDeliveryFee) {
         orderItemsPayload.push({
           order_id: order.id,
           company_id: customer.companyId,
-          product_id: DELIVERY_FEE.productId,
+          product_id: DELIVERY_FEE_PRODUCT_ID,
           quantity: 1,
-          unit_price: DELIVERY_FEE.price,
-          amount: DELIVERY_FEE.price,
+          unit_price: DELIVERY_FEE_AMOUNT,
+          amount: DELIVERY_FEE_AMOUNT,
           is_return: false,
         });
       }

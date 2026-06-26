@@ -584,95 +584,83 @@ export function OrderDetailPane({
           </div>
         )}
         {order.is_direct_shipping &&
-          order.shipping_info &&
-          order.shipping_info.length > 0 && (
-            <div
-              style={{
-                marginTop: 8,
-                padding: '6px 10px',
-                background: '#f0fdf4',
-                border: '1px solid #bbf7d0',
-                borderRadius: 6,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 6,
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: '#15803d',
-                  letterSpacing: '0.04em',
-                }}
-              >
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    background: '#dcfce7',
-                    color: '#15803d',
-                    padding: '1px 6px',
-                    borderRadius: 999,
-                    fontSize: 9.5,
-                  }}
-                >
-                  직송
-                </span>
-                직송 정보 ({order.shipping_info.length}건)
-              </div>
-              {order.shipping_info.map((row, i) => (
-                <div
-                  key={i}
-                  style={{
-                    background: '#fff',
-                    border: '1px solid #d1fae5',
-                    borderRadius: 5,
-                    padding: '5px 8px',
-                    fontSize: 11.5,
-                    color: 'var(--ink)',
-                    display: 'grid',
-                    gridTemplateColumns: '52px 1fr',
-                    gap: '2px 8px',
-                  }}
-                >
-                  {row.name && (
-                    <>
-                      <span style={{ color: 'var(--ink-3)' }}>받는사람</span>
-                      <span style={{ fontWeight: 500 }}>{row.name}</span>
-                    </>
-                  )}
-                  {row.phone1 && (
-                    <>
-                      <span style={{ color: 'var(--ink-3)' }}>연락처</span>
-                      <span style={{ fontFamily: 'var(--font-num)' }}>
-                        {row.phone1}
-                        {row.phone2 ? ` · ${row.phone2}` : ''}
-                      </span>
-                    </>
-                  )}
-                  {row.address && (
-                    <>
-                      <span style={{ color: 'var(--ink-3)' }}>주소</span>
-                      <span>
-                        {row.zipcode ? `(${row.zipcode}) ` : ''}
-                        {row.address}
-                      </span>
-                    </>
-                  )}
-                  {row.product && (
-                    <>
-                      <span style={{ color: 'var(--ink-3)' }}>제품</span>
-                      <span>{row.product}</span>
-                    </>
-                  )}
+          (() => {
+            // shipping_info 가 string(JSON) 또는 object 배열로 올 수 있어 양쪽 처리.
+            // 필드명도 한글/영문 혼재 대비해 ?? 체인으로 폴백.
+            const raw = order.shipping_info as unknown;
+            let rows: Array<Record<string, unknown>> = [];
+            if (typeof raw === 'string') {
+              try {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) rows = parsed;
+              } catch {
+                rows = [];
+              }
+            } else if (Array.isArray(raw)) {
+              rows = raw as Array<Record<string, unknown>>;
+            }
+            if (rows.length === 0) return null;
+            const cell = (v: unknown): string =>
+              v == null ? '' : String(v);
+            return (
+              <div className="mt-2">
+                <div className="mb-1.5 flex items-center gap-1.5">
+                  <span className="inline-flex items-center rounded-full bg-[#dcfce7] px-2 py-0.5 text-[10px] font-semibold text-[#15803d]">
+                    직송
+                  </span>
+                  <span className="text-[11.5px] font-semibold text-[#2b2521]">
+                    직송 정보 ({rows.length}건)
+                  </span>
                 </div>
-              ))}
-            </div>
-          )}
+                <div className="overflow-x-auto rounded border border-[#e2dcd5]">
+                  <table className="w-full text-[11px]">
+                    <thead>
+                      <tr className="bg-[#f5f1ec] text-[#6b6058]">
+                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">받는사람</th>
+                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">우편번호</th>
+                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">주소</th>
+                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">연락처1</th>
+                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">연락처2</th>
+                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">제품</th>
+                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">거래처</th>
+                        <th className="whitespace-nowrap px-2 py-1.5 text-left font-semibold">신용</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, i) => (
+                        <tr key={i} className="border-t border-[#e2dcd5] bg-white">
+                          <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
+                            {cell(row.name ?? (row as Record<string, unknown>)['받는사람'] ?? row.recipient)}
+                          </td>
+                          <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
+                            {cell(row.zipcode ?? (row as Record<string, unknown>)['우편번호'] ?? row.zipCode)}
+                          </td>
+                          <td className="max-w-[220px] border-r border-[#e2dcd5] px-2 py-1.5">
+                            {cell(row.address ?? (row as Record<string, unknown>)['주소'])}
+                          </td>
+                          <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
+                            {cell(row.phone1 ?? (row as Record<string, unknown>)['연락처1'])}
+                          </td>
+                          <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
+                            {cell(row.phone2 ?? (row as Record<string, unknown>)['연락처2'])}
+                          </td>
+                          <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
+                            {cell(row.product ?? (row as Record<string, unknown>)['제품'])}
+                          </td>
+                          <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
+                            {cell(row.customer ?? (row as Record<string, unknown>)['거래처'])}
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-1.5">
+                            {cell(row.credit ?? (row as Record<string, unknown>)['신용'])}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
       </div>
 
       {/* Items: 편집 가능한 6컬럼 테이블 */}
