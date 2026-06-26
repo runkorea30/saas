@@ -27,6 +27,7 @@ import {
   calcSalesQty3m,
 } from '@/utils/calculations';
 import { getCategoryLabel } from '@/constants/categories';
+import { sortByCategory } from '@/utils/sortProducts';
 
 const SAVED_QUERY_KEY = 'purchase-order-saved-categories';
 
@@ -85,11 +86,14 @@ export function PurchaseOrderPage() {
   const [busy, setBusy] = useState(false);
 
   const filteredProducts = useMemo(() => {
-    if (selectedCategory === null) return products;
-    if (selectedCategory === SAVED_ALL_FILTER) {
-      return products.filter((p) => savedCategories.has(p.category));
-    }
-    return products.filter((p) => p.category === selectedCategory);
+    const base =
+      selectedCategory === null
+        ? products
+        : selectedCategory === SAVED_ALL_FILTER
+          ? products.filter((p) => savedCategories.has(p.category))
+          : products.filter((p) => p.category === selectedCategory);
+    // 분류명 → 제품명 오름차순.
+    return sortByCategory(base);
   }, [products, selectedCategory, savedCategories]);
 
   const totalUsd = useMemo(() => {
@@ -336,9 +340,10 @@ export function PurchaseOrderPage() {
         const qty = orderQty.get(p.id) ?? 0;
         if (qty <= 0) continue;
         const price = p.unit_price_usd != null ? Number(p.unit_price_usd) : 0;
+        // 미국 공급사 발주서 — 영문명 우선, 없으면 한글명으로 폴백.
         lines.push({
           code: p.code,
-          name: p.name,
+          name: p.name_en || p.name,
           unit: p.unit,
           price: p.unit_price_usd != null ? price : '',
           qty,
