@@ -59,6 +59,8 @@ export function PurchaseOrderPage() {
     salesMap,
     stockMap,
     savedCategories,
+    savedItemCount,
+    savedTotalUsd,
     categories,
     isLoading,
     error,
@@ -414,8 +416,14 @@ export function PurchaseOrderPage() {
             marginBottom: 8,
           }}
         >
-          <KpiCard label="발주 품목" value={`${filledCount}개`} />
-          <KpiCard label="총합계" value={`$${formatUsd(totalUsd)}`} tone="brand" />
+          {/* 🔴 KPI 는 DB 저장된 purchase_orders + items 기준 (미저장 입력 제외).
+              하단 텍스트와 '저장' 버튼 disabled 는 사용자 입력 라이브(filledCount) 유지. */}
+          <KpiCard label="발주 품목" value={`${savedItemCount}개`} />
+          <KpiCard
+            label="총합계"
+            value={`$${formatUsd(savedTotalUsd)}`}
+            tone="brand"
+          />
           <KpiCard
             label="저장 분류"
             value={`${savedCategories.size}개`}
