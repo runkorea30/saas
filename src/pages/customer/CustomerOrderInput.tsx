@@ -24,6 +24,13 @@ import type { CustomerSession } from '@/hooks/useCustomerAuth';
 /** 재고 부족 임계값 — stock < 이 값이면 '부족' 뱃지. */
 const LOW_STOCK_THRESHOLD = 10;
 
+/**
+ * 제품 행 / 컬럼 헤더 공용 grid 정의.
+ * 컬럼 순서: 제품명(1fr) · 수량 · 재고 · 공급가 · 판매가.
+ * 빈 공간 최소화: 입력셀·뱃지 폭에 맞춰 컴팩트하게 잡고 제품명을 늘림.
+ */
+const ROW_COLS = 'grid-cols-[1fr_72px_60px_88px_88px]';
+
 interface ProductRow {
   id: string;
   code: string;
@@ -48,7 +55,7 @@ async function fetchActiveProducts(companyId: string): Promise<ProductRow[]> {
       .eq('company_id', companyId)
       .eq('is_active', true)
       .is('deleted_at', null)
-      .order('code', { ascending: true }),
+      .order('name', { ascending: true }),
   );
 }
 
@@ -74,7 +81,14 @@ export function CustomerOrderInput({
   const [searchQuery, setSearchQuery] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const products = productsQuery.data ?? [];
+  // 한글 콜레이션 보장 위해 클라이언트에서 제품명 오름차순으로 재정렬.
+  //   서버 정렬은 DB 콜레이션에 의존해 한글 순서가 흐트러질 수 있음.
+  const products = useMemo(() => {
+    const rows = productsQuery.data ?? [];
+    return [...rows].sort((a, b) =>
+      (a.name ?? '').localeCompare(b.name ?? '', 'ko'),
+    );
+  }, [productsQuery.data]);
 
   // 사이드바 카테고리 옵션: '전체' + 실제 카테고리(빈문자열 제외) 오름차순. 각 항목 카운트 포함.
   const categoryOptions = useMemo(() => {
@@ -389,11 +403,13 @@ export function CustomerOrderInput({
             </div>
           </div>
 
-          {/* 테이블 헤더 */}
-          <div className="grid h-9 shrink-0 grid-cols-[1fr_76px_92px_110px_110px] items-center border-b border-[#ece7e2] bg-white px-[22px] text-[11.5px] font-semibold uppercase tracking-wide text-[#a89e95]">
+          {/* 테이블 헤더 — 컬럼: 제품명 / 수량 / 재고 / 공급가 / 판매가 */}
+          <div
+            className={`grid h-9 shrink-0 ${ROW_COLS} items-center gap-3 border-b border-[#ece7e2] bg-white px-[22px] text-[11.5px] font-semibold uppercase tracking-wide text-[#a89e95]`}
+          >
             <span>제품명</span>
-            <span className="text-center">재고</span>
             <span className="text-center">수량</span>
+            <span className="text-center">재고</span>
             <span className="text-right">공급가</span>
             <span className="text-right">판매가</span>
           </div>
@@ -428,7 +444,7 @@ export function CustomerOrderInput({
               return (
                 <div
                   key={p.id}
-                  className={`grid h-11 grid-cols-[1fr_76px_92px_110px_110px] items-center border-b border-[#f3efea] px-[22px] text-[13px] transition-colors ${rowBgClass}`}
+                  className={`grid h-11 ${ROW_COLS} items-center gap-3 border-b border-[#f3efea] px-[22px] text-[13px] transition-colors ${rowBgClass}`}
                 >
                   {/* 제품명 + 코드 */}
                   <div className="flex min-w-0 flex-col gap-px">
@@ -445,23 +461,7 @@ export function CustomerOrderInput({
                     </span>
                   </div>
 
-                  {/* 재고 뱃지 */}
-                  <div className="flex justify-center">
-                    <span
-                      className={`inline-block rounded-md px-2.5 py-0.5 text-[11px] font-semibold ${
-                        isOut
-                          ? 'bg-[#fdeaea] text-[#c0392b]'
-                          : isLow
-                            ? 'bg-[#fef3e2] text-[#b45309]'
-                            : 'bg-[#e7f6ec] text-[#16803c]'
-                      }`}
-                      title={`현재 재고 ${stock}`}
-                    >
-                      {isOut ? '품절' : isLow ? '부족' : '재고'}
-                    </span>
-                  </div>
-
-                  {/* 수량 입력 */}
+                  {/* 수량 입력 — 재고 앞으로 이동 */}
                   <div className="flex justify-center">
                     <input
                       type="text"
@@ -478,6 +478,22 @@ export function CustomerOrderInput({
                             : 'border border-[#ddd5cf] bg-white focus:border-[#6B1F2A]'
                       }`}
                     />
+                  </div>
+
+                  {/* 재고 뱃지 */}
+                  <div className="flex justify-center">
+                    <span
+                      className={`inline-block rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${
+                        isOut
+                          ? 'bg-[#fdeaea] text-[#c0392b]'
+                          : isLow
+                            ? 'bg-[#fef3e2] text-[#b45309]'
+                            : 'bg-[#e7f6ec] text-[#16803c]'
+                      }`}
+                      title={`현재 재고 ${stock}`}
+                    >
+                      {isOut ? '품절' : isLow ? '부족' : '재고'}
+                    </span>
                   </div>
 
                   {/* 공급가 */}
