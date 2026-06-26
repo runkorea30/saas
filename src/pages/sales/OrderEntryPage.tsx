@@ -766,37 +766,9 @@ export function OrderEntryPage() {
           ref={tableRef}
           className="relative border border-[var(--line-default)] rounded-lg overflow-hidden"
         >
-          {/* thead — 고정 */}
-          <table className="w-full border-collapse text-sm table-fixed">
-            <colgroup>
-              <col style={{ width: '36px' }} />
-              <col style={{ width: fixedCols ? '130px' : '15%' }} />
-              <col />
-              <col style={{ width: fixedCols ? '80px' : '10%' }} />
-              <col style={{ width: fixedCols ? '90px' : '11%' }} />
-              <col style={{ width: fixedCols ? '90px' : '11%' }} />
-              <col style={{ width: fixedCols ? '100px' : '12%' }} />
-              <col style={{ width: '32px' }} />
-            </colgroup>
-            <thead>
-              <tr className="border-b-2 border-[var(--line-strong)] bg-[var(--surface-2)]">
-                {(
-                  ['#', '코드', '제품명', '수량', '판매가', '공급가', '합계', ''] as const
-                ).map((h, i) => (
-                  <th
-                    key={i}
-                    className="py-2 px-2 text-left text-xs font-medium text-[var(--ink-3)] border-r border-[var(--line-subtle)] last:border-0"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-          </table>
-
-          {/* tbody — 10행 고정 높이 스크롤 */}
+          {/* 단일 테이블 — thead sticky 로 스크롤바 너비 자동 정렬 */}
           <div
-            style={{ height: '360px' }}
+            style={{ height: '400px' }}
             className="overflow-y-auto overflow-x-hidden"
           >
             <table className="w-full border-collapse text-sm table-fixed">
@@ -810,6 +782,20 @@ export function OrderEntryPage() {
                 <col style={{ width: fixedCols ? '100px' : '12%' }} />
                 <col style={{ width: '32px' }} />
               </colgroup>
+              <thead className="sticky top-0 z-10 bg-[var(--surface-2)]">
+                <tr className="border-b-2 border-[var(--line-strong)]">
+                  {(
+                    ['#', '코드', '제품명', '수량', '판매가', '공급가', '합계', ''] as const
+                  ).map((h, i) => (
+                    <th
+                      key={i}
+                      className="py-2 px-2 text-left text-xs font-medium text-[var(--ink-3)] border-r border-[var(--line-subtle)] last:border-0"
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
               <tbody>
                 {rows.map((row, idx) => {
                   const isFocused = focusCell?.rowId === row.id;
