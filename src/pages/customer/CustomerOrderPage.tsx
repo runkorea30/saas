@@ -785,7 +785,8 @@ function LeftPanel({
           blank(yellowInputStyle),
           num(p.sell_price ?? 0, yellowInputStyle),
           num(supplyPrice, yellowInputStyle),
-          formula(`C${rowNum}*E${rowNum}`, formulaStyle),
+          // 🟠 수량 빈칸일 때 #VALUE! 방지: IF 로 빈칸 처리. SUM(F5:F9999) 는 빈 문자열 무시.
+          formula(`IF(C${rowNum}="","",C${rowNum}*E${rowNum})`, formulaStyle),
         ]);
         rowNum++;
       }
