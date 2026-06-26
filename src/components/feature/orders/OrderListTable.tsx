@@ -259,7 +259,7 @@ export function OrderListTable(props: OrderListTableProps) {
                     : isChecked
                       ? 'var(--surface-2)'
                       : isAdd
-                        ? 'var(--surface-2)'
+                        ? '#fffbeb' // amber-50 — 추가주문 행 식별용 연노랑
                         : 'transparent',
                   cursor: 'pointer',
                   alignItems: 'center',
@@ -267,13 +267,19 @@ export function OrderListTable(props: OrderListTableProps) {
                 }}
                 onMouseEnter={(e) => {
                   setHoveredId(o.id);
-                  if (!sel) e.currentTarget.style.background = 'var(--surface-2)';
+                  if (!sel)
+                    e.currentTarget.style.background = isAdd
+                      ? '#fef3c7' // amber-100 — 추가주문 호버 강조
+                      : 'var(--surface-2)';
                 }}
                 onMouseLeave={(e) => {
                   setHoveredId((cur) => (cur === o.id ? null : cur));
                   if (!sel)
-                    e.currentTarget.style.background =
-                      isChecked || isAdd ? 'var(--surface-2)' : 'transparent';
+                    e.currentTarget.style.background = isChecked
+                      ? 'var(--surface-2)'
+                      : isAdd
+                        ? '#fffbeb'
+                        : 'transparent';
                 }}
               >
                 {showTrash && (
@@ -312,43 +318,63 @@ export function OrderListTable(props: OrderListTableProps) {
 
                 {/* 주문일 — 추가주문은 └ 추가 / 본주문은 날짜·시간 표시 */}
                 {isAdd ? (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      paddingLeft: 16,
-                      color: 'var(--ink-3)',
-                      fontFamily: 'var(--font-num)',
-                      fontSize: 11.5,
-                      minWidth: 0,
-                      overflow: 'hidden',
-                      whiteSpace: 'nowrap',
-                      textOverflow: 'ellipsis',
-                    }}
-                    title={`추가주문 · ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} · ${o.id.slice(0, 6)}`}
-                  >
-                    <span style={{ fontSize: 13, color: 'var(--ink-4)' }}>└</span>
-                    <span
-                      style={{
-                        fontSize: 10.5,
-                        color: 'var(--ink-3)',
-                        letterSpacing: '0.04em',
-                      }}
-                    >
-                      추가
-                    </span>
-                    <span
-                      style={{
-                        marginLeft: 6,
-                        fontSize: 10.5,
-                        color: 'var(--ink-4)',
-                      }}
-                    >
-                      {String(d.getHours()).padStart(2, '0')}:
-                      {String(d.getMinutes()).padStart(2, '0')}
-                    </span>
-                  </div>
+                  (() => {
+                    // 시간 표시는 created_at 기준 — order_date 가 날짜 고정값일 가능성 대비.
+                    const ca = new Date(o.created_at);
+                    const hh = String(ca.getHours()).padStart(2, '0');
+                    const mm = String(ca.getMinutes()).padStart(2, '0');
+                    return (
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          paddingLeft: 4,
+                          minWidth: 0,
+                          overflow: 'hidden',
+                          whiteSpace: 'nowrap',
+                        }}
+                        title={`추가주문 · ${hh}:${mm} · ${o.id.slice(0, 6)}`}
+                      >
+                        <span
+                          style={{
+                            fontSize: 18,
+                            fontWeight: 700,
+                            color: '#6B1F2A',
+                            lineHeight: 1,
+                            marginRight: 2,
+                          }}
+                        >
+                          └
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: '#92400e',
+                            backgroundColor: '#fef3c7',
+                            border: '1px solid #f59e0b',
+                            borderRadius: 4,
+                            padding: '1px 6px',
+                            letterSpacing: '0.02em',
+                            flexShrink: 0,
+                          }}
+                        >
+                          추가
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            color: '#6b7280',
+                            fontFamily: 'var(--font-num)',
+                            fontVariantNumeric: 'tabular-nums',
+                          }}
+                        >
+                          {hh}:{mm}
+                        </span>
+                      </div>
+                    );
+                  })()
                 ) : (
                   <div
                     style={{
