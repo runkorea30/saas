@@ -55,6 +55,13 @@ function formatDateStr(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+/** 'YYYY-MM-DD' (로컬 자정 = KST 자정) → ISO UTC. useCreateImportWithLots 와 동일 규칙. */
+function localMidnightToIso(localDate: string): string {
+  const [y, m, d] = localDate.split('-').map((s) => parseInt(s, 10));
+  const local = new Date(y, (m ?? 1) - 1, d ?? 1, 0, 0, 0, 0);
+  return local.toISOString();
+}
+
 export function PurchaseOrderPage() {
   const { companyId } = useCompany();
   const { showToast } = useToast();
@@ -313,10 +320,16 @@ export function PurchaseOrderPage() {
   };
 
   /**
-   * 발주완료 — 이번 달 draft 발주서를 모두 'confirmed' 로 전환 + ORDER SHEET xlsx 다운로드.
+   * 발주완료 — 이번 달 draft 발주서를 'confirmed' 로 전환 + import_invoices + inventory_lots 자동 입고.
    *
-   * 🟠 수입/매입 페이지의 `parseOrderSheet` 가 읽는 ORDER SHEET 포맷(CODE/DESCRIPTION/UNIT/PRICE/QTY/AMOUNT)
-   *    을 그대로 재사용하므로 별도 인보이스 생성 함수 없이 `handleDownloadExcel` 위임.
+   * 🟠 useCreateImportWithLots 와 동일한 단위/타입 규칙:
+   *    - quantity / remaining_quantity : EA 단위 (DZ × 12)
+   *    - cost_usd / cost_krw           : EA 당 가격
+   *    - lot_type                      : 'import' (수입/매입 페이지와 동일)
+   *    - shipping_allocated_usd        : 0 (실제 운송비는 추후 인보이스 도착 시 수정)
+   *    - exchange_rate                 : 1380 하드코딩 (추후 입력 모달로 대체 예정)
+   * 🟠 멀티 PO 모델: 카테고리별로 PO 가 분리 저장되므로 이번 달 draft 를 모두 묶어 ONE invoice 로 합산.
+   * 🟠 보상 처리: lots INSERT 실패 시 invoice HARD DELETE (트랜잭션 없음).
    */
   const handleConfirmPO = async () => {
     if (!companyId) return;
@@ -325,16 +338,22 @@ export function PurchaseOrderPage() {
       return;
     }
     const ok = window.confirm(
-      '발주완료 처리하면 수입/매입 페이지에 업로드할 인보이스 양식(xlsx)이 자동 다운로드됩니다.\n계속하시겠습니까?',
+      '발주완료 처리하시겠습니까?\n수입/매입 인보이스가 자동으로 등록됩니다.',
     );
     if (!ok) return;
+
     setBusy(true);
     try {
       const monthStartIso = new Date(Date.UTC(year, month - 1, 1)).toISOString();
       const nextMonthIso = new Date(Date.UTC(year, month, 1)).toISOString();
-      const nowIso = new Date().toISOString();
+      const todayLocal = new Date();
+      const invoiceDateLocal = formatDateStr(todayLocal); // 'YYYY-MM-DD' (로컬)
+      const lotDateIso = localMidnightToIso(invoiceDateLocal);
+      const nowIso = todayLocal.toISOString();
+      const EXCHANGE_RATE = 1380;
 
-      const { data: rows, error: selErr } = await supabase
+      // 1) 이번 달 draft PO 모두 조회
+      const { data: poRows, error: poSelErr } = await supabase
         .from('purchase_orders')
         .select('id')
         .eq('company_id', companyId)
@@ -342,25 +361,104 @@ export function PurchaseOrderPage() {
         .gte('po_date', monthStartIso)
         .lt('po_date', nextMonthIso)
         .is('deleted_at', null);
-      if (selErr) throw selErr;
-      if (!rows || rows.length === 0) {
+      if (poSelErr) throw poSelErr;
+      if (!poRows || poRows.length === 0) {
         showToast({ kind: 'error', text: '확정할 draft 발주서가 없습니다.' });
         return;
       }
+      const poIds = poRows.map((r) => r.id);
 
-      const ids = rows.map((r) => r.id);
+      // 2) PO 아이템 일괄 조회 (수량 > 0)
+      const { data: items, error: itemsErr } = await supabase
+        .from('purchase_order_items')
+        .select('product_id, quantity, unit_price_usd')
+        .in('purchase_order_id', poIds)
+        .eq('company_id', companyId)
+        .gt('quantity', 0);
+      if (itemsErr) throw itemsErr;
+      if (!items || items.length === 0) {
+        throw new Error('발주 수량이 있는 품목이 없습니다.');
+      }
+
+      // 3) import_invoices INSERT
+      const invoiceNumber = `PO-AUTO-${todayLocal.getFullYear()}${pad2(todayLocal.getMonth() + 1)}${pad2(todayLocal.getDate())}-${pad2(todayLocal.getHours())}${pad2(todayLocal.getMinutes())}`;
+      const totalUsd = items.reduce(
+        (sum, it) => sum + Number(it.quantity) * Number(it.unit_price_usd ?? 0),
+        0,
+      );
+
+      const { data: invoice, error: invErr } = await supabase
+        .from('import_invoices')
+        .insert({
+          company_id: companyId,
+          invoice_number: invoiceNumber,
+          supplier_name: 'Angelus Shoe Polish Co.',
+          invoice_date: invoiceDateLocal,
+          exchange_rate: EXCHANGE_RATE,
+          shipping_cost_usd: 0,
+          total_usd: Number(totalUsd.toFixed(2)),
+          notes: `발주서 자동입고 (PO ${poIds.length}건)`,
+        })
+        .select('id')
+        .single();
+      if (invErr) {
+        if (invErr.code === '23505') {
+          throw new Error(`이미 등록된 Invoice # 입니다: ${invoiceNumber}`);
+        }
+        throw new Error(invErr.message || '인보이스 생성 실패');
+      }
+      if (!invoice) throw new Error('인보이스 생성 응답이 비어 있습니다.');
+      const invoiceId = invoice.id;
+
+      // 4) inventory_lots bulk INSERT (DZ → EA × 12, 단가는 EA 당으로 환산)
+      const lotPayload = items.map((it) => {
+        const qtyEa = Number(it.quantity) * 12;
+        const priceUsdPerDz = Number(it.unit_price_usd ?? 0);
+        const priceUsdPerEa = priceUsdPerDz / 12;
+        return {
+          company_id: companyId,
+          product_id: it.product_id,
+          lot_type: 'import',
+          quantity: qtyEa,
+          remaining_quantity: qtyEa,
+          cost_usd: priceUsdPerEa,
+          cost_krw: Math.round(priceUsdPerEa * EXCHANGE_RATE),
+          lot_date: lotDateIso,
+          invoice_id: invoiceId,
+          source_code: 'PO-AUTO',
+          shipping_allocated_usd: 0,
+        };
+      });
+
+      const { error: lotErr } = await supabase
+        .from('inventory_lots')
+        .insert(lotPayload);
+      if (lotErr) {
+        // 보상: 고아 invoice 제거
+        await supabase.from('import_invoices').delete().eq('id', invoiceId);
+        throw new Error(`입고 레코드 저장 실패: ${lotErr.message}`);
+      }
+
+      // 5) purchase_orders status → confirmed
       const { error: updErr } = await supabase
         .from('purchase_orders')
         .update({ status: 'confirmed', updated_at: nowIso })
-        .in('id', ids)
+        .in('id', poIds)
         .eq('company_id', companyId);
       if (updErr) throw updErr;
 
-      handleDownloadExcel();
+      // 6) 캐시 무효화 + 폼 리셋
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['inventory-stock', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory-detail', companyId] }),
+        queryClient.invalidateQueries({ queryKey: ['import-invoices', companyId] }),
+        queryClient.invalidateQueries({ queryKey: [SAVED_QUERY_KEY, companyId] }),
+      ]);
+      setOrderQty(new Map());
 
       showToast({
         kind: 'success',
-        text: `${ids.length}건 발주완료 · 인보이스 양식 다운로드됨`,
+        text: `발주완료 · 인보이스 ${invoiceNumber} (${items.length}품목) 수입/매입 등록됨`,
       });
     } catch (e) {
       showToast({
@@ -576,7 +674,7 @@ export function PurchaseOrderPage() {
                   borderColor: '#15803D',
                   color: '#ffffff',
                 }}
-                title="저장된 발주서를 'confirmed' 상태로 전환 + 인보이스 양식(xlsx) 다운로드"
+                title="저장된 발주서를 'confirmed' 로 전환 + 수입/매입 인보이스 자동 등록 (DZ→EA ×12, 환율 1380 고정)"
               >
                 <CheckCircle size={13} />
                 <StepBadge tone="onPrimary">4단계</StepBadge>
