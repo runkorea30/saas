@@ -12,6 +12,10 @@ import { Plus, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
+import type { Database } from '@/types/database';
+
+type InspectionUpdate =
+  Database['mochicraft_demo']['Tables']['inspection_certificates']['Update'];
 
 const INSPECTION_SELECT =
   'id, product_name, hs_no, inspection_no, inspection_valid_until, import_req_no, import_valid_until, created_at';
@@ -153,10 +157,12 @@ export function InspectionCertTab({ companyId }: Props) {
       return;
     }
     try {
-      const payload: Record<string, string | null> = {
+      // 🟠 Supabase 자동생성 Update 타입 사용 — 컴퓨티드 키([field])는 string 으로 widening 되므로
+      //    명시적 캐스팅 필요. product_name 의 공백 체크는 line 150 에서 처리됨.
+      const payload = {
         [field]: trimmed || null,
         updated_at: new Date().toISOString(),
-      };
+      } as InspectionUpdate;
       const { error } = await supabase
         .from('inspection_certificates')
         .update(payload)
