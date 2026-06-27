@@ -772,7 +772,7 @@ export type Database = {
           id: string
           company_id: string
           name: string
-          status: string
+          status: 'draft' | 'confirmed'
           started_at: string | null
           confirmed_at: string | null
           confirmed_by: string | null
@@ -784,7 +784,7 @@ export type Database = {
           id?: string
           company_id: string
           name: string
-          status?: string
+          status?: 'draft' | 'confirmed'
           started_at?: string | null
           confirmed_at?: string | null
           confirmed_by?: string | null
@@ -795,7 +795,7 @@ export type Database = {
         Update: {
           id?: string
           name?: string
-          status?: string
+          status?: 'draft' | 'confirmed'
           confirmed_at?: string | null
           confirmed_by?: string | null
           notes?: string | null
