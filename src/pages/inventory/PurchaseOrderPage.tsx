@@ -88,9 +88,6 @@ export function PurchaseOrderPage() {
   const [busy, setBusy] = useState(false);
   /** 발주 기준: '1m' = 1개월 판매량, '3m' = 3개월 판매량 (기본값 '3m') */
   const [salesBasis, setSalesBasis] = useState<'1m' | '3m'>('3m');
-  /** 목표 주문금액 임계값 (USD) — 기본 $4,000 */
-  const [threshold, setThreshold] = useState<number>(4000);
-  const [thresholdInput, setThresholdInput] = useState<string>('4000');
 
   const filteredProducts = useMemo(() => {
     const base =
@@ -117,15 +114,6 @@ export function PurchaseOrderPage() {
     for (const v of orderQty.values()) if (v > 0) n++;
     return n;
   }, [orderQty]);
-
-  /** totalUsd 기준 목표 달성 여부 + 부족금액 + 달성률(%) */
-  const thresholdStatus = useMemo(() => {
-    return {
-      reached: totalUsd >= threshold,
-      diff: Math.abs(totalUsd - threshold),
-      percent: threshold > 0 ? Math.min((totalUsd / threshold) * 100, 100) : 0,
-    };
-  }, [totalUsd, threshold]);
 
   // ───── 액션 ─────
 
@@ -585,95 +573,6 @@ export function PurchaseOrderPage() {
               >
                 <RefreshCw size={13} /> 초기화
               </button>
-            </div>
-            {/* 목표금액 실시간 알림 */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '6px 12px',
-                borderRadius: 8,
-                border: `1px solid ${thresholdStatus.reached ? 'var(--success)' : 'var(--line)'}`,
-                background: thresholdStatus.reached
-                  ? 'var(--success-wash)'
-                  : 'var(--surface)',
-                minWidth: 220,
-                marginLeft: 'auto',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ fontSize: 11, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>
-                  목표
-                </span>
-                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>$</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={100}
-                  value={thresholdInput}
-                  onChange={(e) => {
-                    setThresholdInput(e.target.value);
-                    const n = Number(e.target.value);
-                    if (Number.isFinite(n) && n >= 0) setThreshold(n);
-                  }}
-                  style={{
-                    width: 68,
-                    height: 22,
-                    padding: '0 4px',
-                    border: '1px solid var(--line)',
-                    borderRadius: 4,
-                    fontSize: 12,
-                    fontFamily: 'var(--font-num)',
-                    background: 'var(--surface)',
-                    color: 'var(--ink)',
-                    outline: 'none',
-                    textAlign: 'right',
-                  }}
-                />
-              </div>
-              <span style={{ width: 1, height: 14, background: 'var(--line)' }} />
-              <div style={{ flex: 1 }}>
-                {thresholdStatus.reached ? (
-                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--success)' }}>
-                    ✅ 목표 달성! ${formatUsd(totalUsd)}
-                  </div>
-                ) : (
-                  <div>
-                    <div style={{ fontSize: 11, color: 'var(--ink-3)', marginBottom: 2 }}>
-                      현재 ${formatUsd(totalUsd)}
-                      <span style={{ marginLeft: 6, color: 'var(--danger)', fontWeight: 600 }}>
-                        -${formatUsd(thresholdStatus.diff)} 부족
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        width: '100%',
-                        height: 4,
-                        background: 'var(--line)',
-                        borderRadius: 2,
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${thresholdStatus.percent}%`,
-                          height: '100%',
-                          background:
-                            thresholdStatus.percent >= 80
-                              ? 'var(--warning)'
-                              : 'var(--accent, #2563eb)',
-                          borderRadius: 2,
-                          transition: 'width 0.3s ease',
-                        }}
-                      />
-                    </div>
-                    <div style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 2 }}>
-                      {thresholdStatus.percent.toFixed(0)}% 달성
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
           </div>
         </header>
