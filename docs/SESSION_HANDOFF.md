@@ -33,9 +33,16 @@
 | Phase 3.24 | 수입 입고 예정일 4탭 카드 (페덱스/해상운송/품절/재고부족) + 제품 일괄삭제/일괄수정/노출금지 | ✅ 완료 (2026-06-25) |
 | Phase 3.25 | 청구서 페이지 (`/sales/billing`) — 거래처+연월 선택, 날짜별 그룹핑, 알파문구 거래명세서 분기, 인쇄 | ✅ 완료 (2026-06-25) |
 | Phase 3.26 | 청구서 이메일 발송 탭 — Gmail SMTP (Vercel API Route + nodemailer), billing_email 기반 거래처 체크박스, 알파문구 PDF+XLSX 첨부 | ✅ 완료 (2026-06-25, 배포 후 발송 검증 필요) |
+| Phase 3.27 | 통관서류 탭 (`/inventory/purchase` 통관서류) — PDF→Claude 파싱 + 엑셀 다운로드, 원산지증명서 업로드/다운로드, 코드매핑 관리 UI | ✅ 완료 (2026-06-27) |
+| Phase 3.28 | 인보이스 검증 대폭 개선 — 셀 포커스 시각화, sessionStorage→DB 저장(`invoice_verifications`), 단가/주문수량/주문단가 편집, 행 개별 삭제/수동 추가, order_only 행 주문코드 편집 병합 재매칭, 제품분류/제품명 정렬+불일치 최상단, 금액 합계 요약 바, products 로드 전 비교 가드+unknown 자동 재매칭 | ✅ 완료 (2026-06-27) |
+| Phase 3.29 | 발주서 페이지 — 1개월/3개월 기준 토글 (`calcSalesQty1m` 폴백) | ✅ 완료 (2026-06-27) |
+| Phase 3.30 | 홈 발주 필요 금액 위젯 (`OrderNeedWidget`) — 1m/3m 기준 + 목표금액 입력, 재고 부족분 실시간 계산. 발주서 페이지 목표금액 위젯은 제거(홈으로 통합) | ✅ 완료 (2026-06-28) |
+| Phase 3.31 | 미수금 페이지 — 이번달/다음달 입금예정 정산대기 카드 2개 추가, `due_date` 기반 `pendingByEntity` 월별 분리 | ✅ 완료 (2026-06-28) |
+| Phase 3.32 | 재고실사 페이지 (`/inventory/audit`) 신규 — 실사 목록/시작/입력/확정 4단계, `inventory_audits` + `inventory_audit_items` 테이블, GENERATED `diff` 컬럼 사용, 카테고리 정렬+필터, counted_qty=null은 일치로 간주, 확정 시 `inventory_transactions` adjustment_in/out 생성 | ✅ 완료 (2026-06-28) |
+| Phase 3.33 | 모바일 동기화 — 발주서 1m/3m 토글 + 목표금액 KPI 카드, 재고실사 페이지(`/mobile/audit`, 인라인 confirm 시트), `BottomNav` 더보기 메뉴에 재고실사 추가, ImportPage `companyId` prop + 전체삭제 버튼 + 통관서류 탭 | ✅ 완료 (2026-06-28) |
 | Phase 4 | 나머지 페이지 + Auth 도입 | 대기 |
 
-**페이지 진도: 13 / 14 구현 완료** (`/finance/pnl` 만 남음, `/sales/invoices` 는 placeholder 유지)
+**페이지 진도: 14 / 15 구현 완료** (`/finance/pnl` 만 남음, `/sales/invoices` 는 placeholder 유지)
 
 - `/` — 홈 대시보드 (KPI + Today + Chart + Timeline)
 - `/sales/orders` — 주문내역 (필터/목록/상세 split, 상세에서 수정/저장/반품추가/주문추가)
@@ -44,7 +51,8 @@
 - `/inventory/products` — 제품리스트 (CRUD + 모달 + 체크박스 + 필터 초기화)
 - `/inventory/stock` — 재고현황 (기초재고 투입 + 재고조정 + KPI)
 - `/inventory/purchase` — 수입/매입 Phase 1 + Phase 2 (수동 입력·입고확정 + PDF/XLSX 자동 파싱)
-- `/inventory/purchase-orders` — 발주서 (계산식 기반 발주량 추천 + DZ 반올림 + 카테고리 단일선택)
+- `/inventory/purchase-orders` — 발주서 (계산식 기반 발주량 추천 + DZ 반올림 + 카테고리 단일선택 + 1m/3m 토글)
+- `/inventory/audit` — 재고실사 (실사 목록/시작/입력/확정, GENERATED diff 컬럼, 카테고리 정렬·필터)
 - `/customer-order` — 거래처 주문서 포털 (로그인 + 주문서 업로드 + 직송정보 + 월별 주문내역)
 - `/finance/banking` — 은행거래 (KB엑셀 업로드, 자동매칭, 월별정산, 매핑설정)
 - `/finance/receivables` — 미수금 관리 (카드형 현황, 월별 누적미수금, 연체일수)
@@ -94,6 +102,68 @@
   - [ ] 채팅창에 노출된 앱 비밀번호 삭제 후 재발급
     - https://myaccount.google.com/apppasswords 에서 기존 EmailJS 앱 삭제
     - 새 앱 비밀번호 발급 후 Vercel 환경변수 `GMAIL_APP_PASSWORD` 업데이트
+
+---
+
+## 오늘 추가된 작업 요약 (2026-06-28, 인보이스 검증 + 재고실사 + 홈 위젯)
+
+이번 세션은 Phase 3.27 → 3.33 까지 7개 페이즈가 연달아 진행된 큰 세션. 핵심 변경:
+
+### 1. 통관서류 탭 (Phase 3.27) — `/inventory/purchase` 통관서류 탭
+- PDF 업로드 → Claude 파싱 → 통관 메타 자동 매핑 후 엑셀 다운로드
+- 원산지증명서 업로드/다운로드 섹션 (합계 패널 내부 버튼 아래에 배치)
+- 코드매핑 관리 UI (HS코드 ↔ 제품코드)
+- 데스크톱 + 모바일 양쪽 공통 컴포넌트(`CustomsDocTab`) 재사용 — 모바일은 import만
+
+### 2. 인보이스 검증 대폭 개선 (Phase 3.28) — `InvoiceUploadCard`
+
+| 항목 | 내용 |
+|---|---|
+| 셀 포커스 시각화 | 코드/수량/단가 input 포커스 시 accent 강조 + 행 배경 변경 |
+| sessionStorage → DB 저장 | `invoice_verifications` 테이블 (`UNIQUE(company_id)` upsert), 마운트 시 복원, 변경 시 자동 저장 |
+| 단가 편집 input | 인보이스 단가 + 주문수량 + 주문단가 모두 인라인 편집, 수정 시 amount/status 재계산 |
+| 행 개별 삭제 | `handleDeleteRow` + 행 우측 ✕ 버튼 |
+| 행 수동 추가 | `+ 행 추가` 버튼 → 빈 `invoice_only` 행을 최상단 삽입 |
+| order_only 코드 편집 | `orderCode` 별도 input → 매칭 행과 자동 병합 (주문 데이터 이식 후 order_only 행 삭제) |
+| 정렬 | 1차 불일치 상태 우선(qty_diff/amount_diff/order_only/…→match 맨아래), 2차 제품분류, 3차 제품명 |
+| 금액 합계 요약 바 | 인보이스/주문서/차이/검증현황 4카드 — 탭 아래 표시 |
+| products 로드 가드 | `canCompare` 에 `products.length > 0`, DB 복원 직후 unknown 행 자동 재매칭 useEffect |
+
+### 3. 발주서 1m/3m 토글 (Phase 3.29) — 데스크톱 + 모바일
+- `salesBasis` 상태 → `handleGenerate` 가 `calcSalesQty1m`/`calcSalesQty3m` 분기
+- 토스트에 기준 표기 (`X개 품목 · 1개월 기준`)
+
+### 4. 홈 발주 필요 금액 위젯 (Phase 3.30) — `OrderNeedWidget`
+- `useOrderNeedEstimate` 훅 신규 — `usePurchaseOrder` 캐시 재활용 (N+1 없음)
+- 부족분(DZ) × `unit_price_usd`(DZ당 단가) 합산 — **발주서 페이지 `totalUsd` 와 동일 공식**
+  - 초기 버전은 `unit_price_usd × 12` 잘못 곱해서 12배 과대계산 → 수정함
+- 1m/3m 토글 + 목표금액 input + 부족/달성 메시지 + 진행률 바
+- 발주서 페이지의 목표금액 위젯은 제거 (홈으로 이동)
+
+### 5. 미수금 입금예정 카드 (Phase 3.31) — `ReceivablesPage`
+- `pendingByEntity` useMemo 에서 `due_date.slice(0,7)` 기준 이번달/다음달 분리
+- 요약 카드 3개 → 5개 (이번달 입금예정 / 다음달 입금예정 추가)
+- `SummaryCard.tone` 에 `'warning'` 추가
+
+### 6. 재고실사 페이지 신규 (Phase 3.32) — `/inventory/audit` + `/mobile/audit`
+- DB: `inventory_audits` (status: draft/confirmed) + `inventory_audit_items` (UNIQUE(audit_id, product_id))
+- `diff` 컬럼은 **GENERATED ALWAYS AS** (counted_qty - snapshot_qty) — 클라이언트 write 금지
+  - 초기 v1 은 트리거인 줄 알고 클라이언트에서 diff 작성 시도 → PostgREST 거부 → 제거
+- 실사 시작 시 `calcCurrentStockByProduct` 로 전 제품 스냅샷 일괄 insert (100개씩 청크)
+- counted_qty = null → 일치로 간주 (확정 시 조정 트랜잭션 생성 안 함)
+- 확정 시 차이 항목만 `inventory_transactions` 의 adjustment_in/out 으로 insert (재고 반영)
+  - 스펙의 `reference_id` 컬럼은 실제 테이블에 없어서 제외, `memo` 에 실사명 기록
+- 정렬: category ASC → name ASC, 카테고리 select 필터
+- 모바일은 인라인 confirm 시트 (ConfirmDialog 미사용)
+
+### 7. 빌드 오류 수정
+- `inventory_audits.status` 가 `database.ts` 에서 `string` 으로 선언되어 `AuditHeader.status: 'draft' | 'confirmed'` 와 타입 불일치 → narrowing
+- 주의: `tsc --noEmit` 단독은 mobile 하위 프로젝트를 다 못 잡음. `npm run build` (`tsc -b`) 로 검증 필수
+
+### 후속 작업
+- [ ] 모바일 재고실사 — 큰 데이터셋(800+ 제품) 성능 검증
+- [ ] 인보이스 검증 DB 자동 저장의 첫 화면 깜빡임 (skipNextAutoSave 가 가끔 누락되어 즉시 재저장) 정밀 검토
+- [ ] 홈 위젯 목표금액 — localStorage 저장 여부 검토 (현재 새로고침 시 4000으로 리셋)
 
 ---
 
