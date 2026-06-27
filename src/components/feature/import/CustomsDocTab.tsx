@@ -219,6 +219,139 @@ function EditCell({
   );
 }
 
+// ── 원산지증명서 섹션 (우측 패널 내부에서 done/idle 양쪽에 동일 렌더) ──
+// 🟠 두 분기에서 호출되므로 외부 함수 컴포넌트로 분리 (JSX 중복 제거).
+
+interface CooSectionProps {
+  companyId: string | null;
+  cooFiles: CooFileRow[];
+  cooUploading: boolean;
+  handleCooUpload: (file: File) => void;
+  handleCooDownload: (row: CooFileRow) => void;
+  handleCooDelete: (id: string) => void;
+}
+
+function CooSection({
+  companyId, cooFiles, cooUploading,
+  handleCooUpload, handleCooDownload, handleCooDelete,
+}: CooSectionProps) {
+  return (
+    <div style={{
+      border: '1px solid var(--line)',
+      borderRadius: 6,
+      overflow: 'hidden',
+      fontSize: 12,
+    }}>
+      {/* 헤더 */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '6px 10px',
+        background: 'var(--surface-2, #f5f5f5)',
+        borderBottom: cooFiles.length > 0 ? '1px solid var(--line)' : 'none',
+      }}>
+        <span style={{ fontWeight: 600, fontSize: 12, flex: 'none' }}>
+          📋 원산지증명서 (C/O)
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+          {cooFiles.length > 0 ? `${cooFiles.length}개` : '없음'}
+        </span>
+        <label
+          className="btn-base"
+          style={{
+            marginLeft: 'auto',
+            cursor: cooUploading ? 'not-allowed' : 'pointer',
+            opacity: cooUploading ? 0.6 : 1,
+            height: 24,
+            fontSize: 11,
+            padding: '0 10px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            flex: 'none',
+          }}
+        >
+          {cooUploading ? (
+            <Loader2 style={{ width: 11, height: 11 }} className="animate-spin" />
+          ) : (
+            <FileUp style={{ width: 11, height: 11 }} />
+          )}
+          <span>{cooUploading ? '업로드 중…' : '업로드'}</span>
+          <input
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png"
+            disabled={cooUploading || !companyId}
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleCooUpload(file);
+              e.target.value = '';
+            }}
+          />
+        </label>
+      </div>
+
+      {/* 파일 목록 */}
+      {cooFiles.map((f, idx) => (
+        <div
+          key={f.id}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '5px 10px',
+            borderBottom: idx < cooFiles.length - 1 ? '1px solid var(--line)' : 'none',
+          }}
+        >
+          <span style={{ fontSize: 13, flex: 'none' }}>
+            {f.mime_type === 'application/pdf' ? '📄' : '🖼️'}
+          </span>
+          <span style={{
+            flex: 1, overflow: 'hidden',
+            textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            fontSize: 11.5,
+          }}>
+            {f.file_name}
+          </span>
+          {f.file_size && (
+            <span style={{ fontSize: 10.5, color: 'var(--ink-3)', flex: 'none' }}>
+              {(f.file_size / 1024).toFixed(0)}KB
+            </span>
+          )}
+          {f.uploaded_at && (
+            <span style={{ fontSize: 10.5, color: 'var(--ink-3)', flex: 'none' }}>
+              {new Date(f.uploaded_at).toLocaleDateString('ko-KR')}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => handleCooDownload(f)}
+            title="다운로드"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: '2px 3px', color: 'var(--ink-2)', flex: 'none',
+            }}
+          >
+            <Download style={{ width: 13, height: 13 }} />
+          </button>
+          <button
+            type="button"
+            onClick={() => handleCooDelete(f.id)}
+            title="삭제"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              padding: '2px 3px', color: 'var(--danger)', flex: 'none',
+            }}
+          >
+            <Trash2 style={{ width: 13, height: 13 }} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── 메인 컴포넌트 ──────────────────────────────
 
 export function CustomsDocTab() {
@@ -548,6 +681,16 @@ export function CustomsDocTab() {
                 </div>
               </div>
 
+              {/* 원산지증명서 (C/O) — 버튼 아래, 합계카드 위 */}
+              <CooSection
+                companyId={companyId}
+                cooFiles={cooFiles}
+                cooUploading={cooUploading}
+                handleCooUpload={handleCooUpload}
+                handleCooDownload={handleCooDownload}
+                handleCooDelete={handleCooDelete}
+              />
+
               {/* 분류별 합계 — 한 줄 wrap */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {sortedCats.map((cat) => {
@@ -573,12 +716,24 @@ export function CustomsDocTab() {
               </div>
             </>
           ) : (
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              height: '100%', color: 'var(--ink-3)', fontSize: 12.5,
-            }}>
-              엑셀 파일을 업로드하면 분류별 합계가 표시됩니다
-            </div>
+            <>
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: 'var(--ink-3)', fontSize: 12.5,
+                padding: '14px 0',
+              }}>
+                엑셀 파일을 업로드하면 분류별 합계가 표시됩니다
+              </div>
+              {/* 원산지증명서 — idle 상태에도 항상 표시 */}
+              <CooSection
+                companyId={companyId}
+                cooFiles={cooFiles}
+                cooUploading={cooUploading}
+                handleCooUpload={handleCooUpload}
+                handleCooDownload={handleCooDownload}
+                handleCooDelete={handleCooDelete}
+              />
+            </>
           )}
         </div>
       </div>
@@ -592,122 +747,6 @@ export function CustomsDocTab() {
           ❌ {errorMsg}
         </div>
       )}
-
-      {/* ── 원산지증명서 (C/O) 섹션 ── */}
-      <div style={{
-        border: '1px solid var(--line)',
-        borderRadius: 8,
-        background: 'var(--surface)',
-        overflow: 'hidden',
-      }}>
-        {/* 헤더 바 */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '8px 14px',
-          borderBottom: cooFiles.length > 0 ? '1px solid var(--line)' : 'none',
-          background: 'var(--surface-2, #f5f5f5)',
-        }}>
-          <span style={{ fontWeight: 600, fontSize: 12.5, flex: 'none' }}>
-            📋 원산지증명서 (C/O)
-          </span>
-          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-            {cooFiles.length > 0 ? `${cooFiles.length}개 파일` : '업로드된 파일 없음'}
-          </span>
-          <div style={{ marginLeft: 'auto' }}>
-            <label
-              className="btn-base"
-              style={{
-                cursor: cooUploading ? 'not-allowed' : 'pointer',
-                opacity: cooUploading ? 0.6 : 1,
-                height: 28,
-                fontSize: 11.5,
-                padding: '0 12px',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-              }}
-            >
-              {cooUploading ? (
-                <Loader2 style={{ width: 13, height: 13 }} className="animate-spin" />
-              ) : (
-                <FileUp style={{ width: 13, height: 13 }} />
-              )}
-              <span>{cooUploading ? '업로드 중…' : '업로드'}</span>
-              <input
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                disabled={cooUploading || !companyId}
-                style={{ display: 'none' }}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) handleCooUpload(file);
-                  e.target.value = '';
-                }}
-              />
-            </label>
-          </div>
-        </div>
-
-        {/* 파일 목록 */}
-        {cooFiles.length > 0 && (
-          <div>
-            {cooFiles.map((f, idx) => (
-              <div
-                key={f.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '7px 14px',
-                  borderBottom: idx < cooFiles.length - 1 ? '1px solid var(--line)' : 'none',
-                  fontSize: 12,
-                }}
-              >
-                <span style={{ fontSize: 14 }}>
-                  {f.mime_type === 'application/pdf' ? '📄' : '🖼️'}
-                </span>
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {f.file_name}
-                </span>
-                {f.file_size && (
-                  <span style={{ fontSize: 11, color: 'var(--ink-3)', flex: 'none' }}>
-                    {(f.file_size / 1024).toFixed(0)}KB
-                  </span>
-                )}
-                {f.uploaded_at && (
-                  <span style={{ fontSize: 11, color: 'var(--ink-3)', flex: 'none' }}>
-                    {new Date(f.uploaded_at).toLocaleDateString('ko-KR')}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => handleCooDownload(f)}
-                  title="다운로드"
-                  style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    padding: '2px 4px', color: 'var(--ink-2)', flex: 'none',
-                  }}
-                >
-                  <Download style={{ width: 14, height: 14 }} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleCooDelete(f.id)}
-                  title="삭제"
-                  style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    padding: '2px 4px', color: 'var(--danger)', flex: 'none',
-                  }}
-                >
-                  <Trash2 style={{ width: 14, height: 14 }} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
 
       {/* ── 품목 테이블 ── */}
       {status === 'done' && rows.length > 0 && (
