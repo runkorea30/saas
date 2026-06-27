@@ -28,11 +28,12 @@ const PRIMARY_TABS: TabDef[] = [
   { path: '/mobile/inventory', icon: <IconBox />, label: '재고현황' },
 ];
 
-const MORE_PATHS = ['/mobile/import', '/mobile/purchase', '/mobile/products'];
+const MORE_PATHS = ['/mobile/import', '/mobile/purchase', '/mobile/products', '/mobile/audit'];
 
 const MORE_ITEMS: TabDef[] = [
   { path: '/mobile/import', icon: <IconTruck />, label: '수입/매입' },
   { path: '/mobile/purchase', icon: <IconDoc />, label: '발주서' },
+  { path: '/mobile/audit', icon: <IconBox />, label: '재고실사' },
   { path: '/mobile/products', icon: <IconTag />, label: '제품리스트' },
 ];
 

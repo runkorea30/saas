@@ -233,20 +233,12 @@ export function InventoryAuditPage() {
   // ── 실사 수량 저장 (counted_qty + diff 동시 갱신) ─────
 
   const handleCountedQtyChange = async (itemId: string, raw: string) => {
-    const item = mergedItems.find((i) => i.id === itemId);
-    if (!item) return;
-    let val: number | null;
-    if (raw.trim() === '') {
-      val = null;
-    } else {
-      const n = Math.max(0, Math.floor(Number(raw)));
-      if (!Number.isFinite(n)) return;
-      val = n;
-    }
-    const diff = val === null ? null : val - item.snapshot_qty;
+    const val =
+      raw.trim() === '' ? null : Math.max(0, Math.floor(Number(raw)));
+    if (raw.trim() !== '' && !Number.isFinite(val)) return;
     const { error } = await supabase
       .from('inventory_audit_items')
-      .update({ counted_qty: val, diff, updated_at: new Date().toISOString() })
+      .update({ counted_qty: val, updated_at: new Date().toISOString() })
       .eq('id', itemId);
     if (error) {
       showToast({ kind: 'error', text: '저장 실패: ' + error.message });

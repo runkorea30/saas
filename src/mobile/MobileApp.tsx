@@ -12,6 +12,7 @@ import { InventoryPage } from './pages/InventoryPage';
 import { ImportPage } from './pages/ImportPage';
 import { PurchaseOrderPage } from './pages/PurchaseOrderPage';
 import { ProductListPage } from './pages/ProductListPage';
+import { AuditPage } from './pages/AuditPage';
 
 export function MobileApp() {
   return (
@@ -25,6 +26,7 @@ export function MobileApp() {
         <Route path="import" element={<ImportPage />} />
         <Route path="purchase" element={<PurchaseOrderPage />} />
         <Route path="products" element={<ProductListPage />} />
+        <Route path="audit" element={<AuditPage />} />
         <Route path="*" element={<Navigate to="orders" replace />} />
       </Route>
     </Routes>

@@ -73,6 +73,9 @@ export function PurchaseOrderPage() {
   const [orderQty, setOrderQty] = useState<Map<string, number>>(new Map());
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [salesBasis, setSalesBasis] = useState<'1m' | '3m'>('3m');
+  const [threshold, setThreshold] = useState<number>(4000);
+  const [thresholdInput, setThresholdInput] = useState<string>('4000');
 
   // 새로고침 — usePurchaseOrder 가 노출하지 않는 내부 4개 쿼리를 invalidate.
   // invalidateQueries 는 자동으로 활성 쿼리를 refetch.
@@ -115,6 +118,14 @@ export function PurchaseOrderPage() {
     return sum;
   }, [products, orderQty]);
 
+  const thresholdStatus = useMemo(() => {
+    return {
+      reached: totalUsd >= threshold,
+      diff: Math.abs(totalUsd - threshold),
+      percent: threshold > 0 ? Math.min((totalUsd / threshold) * 100, 100) : 0,
+    };
+  }, [totalUsd, threshold]);
+
   const filledCount = useMemo(() => {
     let n = 0;
     for (const v of orderQty.values()) if (v > 0) n++;
@@ -135,13 +146,15 @@ export function PurchaseOrderPage() {
     for (const p of products) {
       const qty6mExcl = salesMap.get(p.id) ?? 0;
       const qty3m = calcSalesQty3m(qty6mExcl);
-      const orderQ = calcOrderQty(qty3m, p.unit_order || p.unit);
+      const baseQty = salesBasis === '1m' ? calcSalesQty1m(qty3m) : qty3m;
+      const orderQ = calcOrderQty(baseQty, p.unit_order || p.unit);
       if (orderQ > 0) next.set(p.id, orderQ);
     }
     setOrderQty(next);
+    const basisLabel = salesBasis === '1m' ? '1개월' : '3개월';
     showToast({
       kind: 'success',
-      text: `발주서 생성 완료 (${next.size}품목)`,
+      text: `발주서 생성 완료 (${next.size}품목 · ${basisLabel} 기준)`,
     });
   };
 
@@ -429,6 +442,121 @@ export function PurchaseOrderPage() {
             value={`${savedCategories.size}개`}
             tone={savedCategories.size > 0 ? 'success' : undefined}
           />
+          {/* 목표금액 달성률 카드 */}
+          <div
+            style={{
+              flexShrink: 0,
+              minWidth: 160,
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: `1px solid ${
+                thresholdStatus.reached
+                  ? 'var(--m-success, #22c55e)'
+                  : 'var(--m-border)'
+              }`,
+              background: thresholdStatus.reached
+                ? 'var(--m-success-wash, #f0fdf4)'
+                : 'var(--m-surface)',
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10,
+                color: 'var(--m-text-secondary)',
+                marginBottom: 4,
+              }}
+            >
+              목표
+              <input
+                type="number"
+                min={0}
+                step={100}
+                value={thresholdInput}
+                onChange={(e) => {
+                  setThresholdInput(e.target.value);
+                  const n = Number(e.target.value);
+                  if (Number.isFinite(n) && n >= 0) setThreshold(n);
+                }}
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  width: 60,
+                  height: 18,
+                  padding: '0 3px',
+                  marginLeft: 4,
+                  border: '1px solid var(--m-border)',
+                  borderRadius: 3,
+                  fontSize: 11,
+                  background: 'var(--m-surface)',
+                  color: 'var(--m-text)',
+                  outline: 'none',
+                  textAlign: 'right',
+                }}
+              />
+              <span style={{ marginLeft: 2 }}>USD</span>
+            </div>
+            {thresholdStatus.reached ? (
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: 'var(--m-success, #22c55e)',
+                }}
+              >
+                ✅ 목표 달성!
+              </div>
+            ) : (
+              <>
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: 'var(--m-text)',
+                  }}
+                >
+                  ${formatUsd(totalUsd)}
+                </div>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    color: 'var(--m-danger, #ef4444)',
+                  }}
+                >
+                  -${formatUsd(thresholdStatus.diff)} 부족
+                </div>
+                <div
+                  style={{
+                    marginTop: 4,
+                    height: 3,
+                    background: 'var(--m-border)',
+                    borderRadius: 2,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${thresholdStatus.percent}%`,
+                      height: '100%',
+                      background:
+                        thresholdStatus.percent >= 80
+                          ? 'var(--m-warning, #f59e0b)'
+                          : 'var(--m-primary)',
+                      borderRadius: 2,
+                      transition: 'width 0.3s ease',
+                    }}
+                  />
+                </div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: 'var(--m-text-secondary)',
+                    marginTop: 2,
+                  }}
+                >
+                  {thresholdStatus.percent.toFixed(0)}%
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* 액션 버튼 — 4개 가로 스크롤 */}
@@ -440,6 +568,41 @@ export function PurchaseOrderPage() {
             WebkitOverflowScrolling: 'touch',
           }}
         >
+          {/* 1m/3m 기준 토글 */}
+          <div
+            style={{
+              display: 'flex',
+              flexShrink: 0,
+              gap: 0,
+              border: '1px solid var(--m-border)',
+              borderRadius: 6,
+              overflow: 'hidden',
+            }}
+          >
+            {(['1m', '3m'] as const).map((basis) => (
+              <button
+                key={basis}
+                type="button"
+                onClick={() => setSalesBasis(basis)}
+                style={{
+                  height: 30,
+                  padding: '0 10px',
+                  fontSize: 11.5,
+                  fontWeight: salesBasis === basis ? 700 : 400,
+                  border: 'none',
+                  background:
+                    salesBasis === basis
+                      ? 'var(--m-primary)'
+                      : 'var(--m-surface)',
+                  color:
+                    salesBasis === basis ? '#fff' : 'var(--m-text-secondary)',
+                  cursor: 'pointer',
+                }}
+              >
+                {basis === '1m' ? '1개월' : '3개월'}
+              </button>
+            ))}
+          </div>
           <ActionBtn
             label={`1. 생성`}
             onClick={handleGenerate}

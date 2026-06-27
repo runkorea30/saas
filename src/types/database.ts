@@ -823,14 +823,12 @@ export type Database = {
           product_id: string
           snapshot_qty: number
           counted_qty?: number | null
-          diff?: number | null
           notes?: string | null
           created_at?: string | null
           updated_at?: string | null
         }
         Update: {
           counted_qty?: number | null
-          diff?: number | null
           notes?: string | null
           updated_at?: string | null
         }
