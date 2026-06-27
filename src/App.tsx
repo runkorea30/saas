@@ -22,6 +22,7 @@ import { ProductsPage } from '@/pages/inventory/ProductsPage';
 import { StockPage } from '@/pages/inventory/StockPage';
 import { ImportReceivingPage } from '@/pages/inventory/ImportReceivingPage';
 import { PurchaseOrderPage } from '@/pages/inventory/PurchaseOrderPage';
+import { InventoryAuditPage } from '@/pages/inventory/InventoryAuditPage';
 import { CustomerOrderPage } from '@/pages/customer/CustomerOrderPage';
 import { BankingPage } from '@/pages/finance/BankingPage';
 import { ReceivablesPage } from '@/pages/finance/ReceivablesPage';
@@ -56,6 +57,7 @@ function App() {
           <Route path="stock" element={<StockPage />} />
           <Route path="purchase" element={<ImportReceivingPage />} />
           <Route path="purchase-orders" element={<PurchaseOrderPage />} />
+          <Route path="audit" element={<InventoryAuditPage />} />
           <Route path="products" element={<ProductsPage />} />
         </Route>
 

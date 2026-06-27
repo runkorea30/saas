@@ -222,16 +222,28 @@ export function ReceivablesPage() {
   // 미수금/정산대기는 calcMonthlyReconciliation 의 status 분기 사용:
   //   '연체'   = balance > tolerance AND due_date < today   → 미수금
   //   '정산대기' = balance > tolerance AND due_date >= today  → 정산대기
-  const { pendingByEntity, overdueByEntity } = useMemo(() => {
+  const {
+    pendingByEntity,
+    overdueByEntity,
+    thisMonthPendingByEntity,
+    nextMonthPendingByEntity,
+  } = useMemo(() => {
     const pending = new Map<string, number>();
     const overdue = new Map<string, number>();
+    const thisMonthPending = new Map<string, number>();
+    const nextMonthPending = new Map<string, number>();
     const customers = customerGroupMapQuery.data ?? [];
     const orders = ordersForReconQuery.data ?? [];
     const transactions = txForReconQuery.data ?? [];
     const splits = splitsForReconQuery.data ?? [];
 
     if (customers.length === 0 || orders.length === 0) {
-      return { pendingByEntity: pending, overdueByEntity: overdue };
+      return {
+        pendingByEntity: pending,
+        overdueByEntity: overdue,
+        thisMonthPendingByEntity: thisMonthPending,
+        nextMonthPendingByEntity: nextMonthPending,
+      };
     }
 
     // customer_id → entity_key (group_id 있으면 'group:...', 없으면 'customer:...')
@@ -262,17 +274,33 @@ export function ReceivablesPage() {
       PAYMENT_TOLERANCE_AMOUNT,
     );
 
+    // 이번달/다음달 'YYYY-MM' (useMemo 단위로 1회만 계산)
+    const thisYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const nextDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const nextYM = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}`;
+
     for (const r of recon) {
       const key = entityKeyByCustomer.get(r.customer_id);
       if (!key) continue;
       if (r.status === '정산대기') {
         pending.set(key, (pending.get(key) ?? 0) + r.difference);
+        const dueYM = r.due_date.slice(0, 7);
+        if (dueYM === thisYM) {
+          thisMonthPending.set(key, (thisMonthPending.get(key) ?? 0) + r.difference);
+        } else if (dueYM === nextYM) {
+          nextMonthPending.set(key, (nextMonthPending.get(key) ?? 0) + r.difference);
+        }
       } else if (r.status === '연체') {
         overdue.set(key, (overdue.get(key) ?? 0) + r.difference);
       }
     }
 
-    return { pendingByEntity: pending, overdueByEntity: overdue };
+    return {
+      pendingByEntity: pending,
+      overdueByEntity: overdue,
+      thisMonthPendingByEntity: thisMonthPending,
+      nextMonthPendingByEntity: nextMonthPending,
+    };
   }, [
     customerGroupMapQuery.data,
     ordersForReconQuery.data,
@@ -307,10 +335,20 @@ export function ReceivablesPage() {
     }
     let overdue = 0;
     let pending = 0;
+    let thisMonthPending = 0;
+    let nextMonthPending = 0;
     for (const v of overdueByEntity.values()) overdue += v;
     for (const v of pendingByEntity.values()) pending += v;
-    return { billed, paid, overdue, pending };
-  }, [summaries, overdueByEntity, pendingByEntity]);
+    for (const v of thisMonthPendingByEntity.values()) thisMonthPending += v;
+    for (const v of nextMonthPendingByEntity.values()) nextMonthPending += v;
+    return { billed, paid, overdue, pending, thisMonthPending, nextMonthPending };
+  }, [
+    summaries,
+    overdueByEntity,
+    pendingByEntity,
+    thisMonthPendingByEntity,
+    nextMonthPendingByEntity,
+  ]);
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -391,11 +429,11 @@ export function ReceivablesPage() {
           </div>
         </header>
 
-        {/* 요약 카드 3개 */}
+        {/* 요약 카드 5개 */}
         <section
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
             gap: 12,
             marginBottom: 18,
           }}
@@ -412,6 +450,20 @@ export function ReceivablesPage() {
                 ? `정산대기 ₩${fmtWon(totals.pending)}`
                 : undefined
             }
+          />
+          <SummaryCard
+            label="이번달 입금예정"
+            value={totals.thisMonthPending}
+            tone="warning"
+            sub={`${now.getFullYear()}년 ${now.getMonth() + 1}월말 마감`}
+          />
+          <SummaryCard
+            label="다음달 입금예정"
+            value={totals.nextMonthPending}
+            sub={(() => {
+              const nd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+              return `${nd.getFullYear()}년 ${nd.getMonth() + 1}월말 마감`;
+            })()}
           />
         </section>
 
@@ -498,7 +550,7 @@ function SummaryCard({
 }: {
   label: string;
   value: number;
-  tone?: 'info' | 'danger';
+  tone?: 'info' | 'danger' | 'warning';
   emphasis?: boolean;
   sub?: string;
 }) {
@@ -507,7 +559,9 @@ function SummaryCard({
       ? 'var(--danger)'
       : tone === 'info'
         ? 'var(--info, #2563eb)'
-        : 'var(--ink)';
+        : tone === 'warning'
+          ? 'var(--warning)'
+          : 'var(--ink)';
   return (
     <div
       style={{

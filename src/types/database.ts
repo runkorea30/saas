@@ -767,6 +767,75 @@ export type Database = {
           },
         ]
       }
+      inventory_audits: {
+        Row: {
+          id: string
+          company_id: string
+          name: string
+          status: string
+          started_at: string | null
+          confirmed_at: string | null
+          confirmed_by: string | null
+          notes: string | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          name: string
+          status?: string
+          started_at?: string | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          notes?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          name?: string
+          status?: string
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          notes?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      inventory_audit_items: {
+        Row: {
+          id: string
+          audit_id: string
+          company_id: string
+          product_id: string
+          snapshot_qty: number
+          counted_qty: number | null
+          diff: number | null
+          notes: string | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          audit_id: string
+          company_id: string
+          product_id: string
+          snapshot_qty: number
+          counted_qty?: number | null
+          diff?: number | null
+          notes?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          counted_qty?: number | null
+          diff?: number | null
+          notes?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       inventory_lots: {
         Row: {
           company_id: string
