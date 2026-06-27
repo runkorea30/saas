@@ -874,7 +874,7 @@ export function ImportReceivingPage() {
             >
               표시할 제품 (코드 입력)
             </label>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
               <input
                 type="text"
                 value={noticeProductInput}
@@ -941,6 +941,24 @@ export function ImportReceivingPage() {
                   disabled={noticeParsingPdf}
                 />
               </label>
+              {activeProducts.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setActiveProducts([])}
+                  style={{
+                    marginLeft: 'auto',
+                    padding: '6px 12px',
+                    fontSize: 12,
+                    borderRadius: 6,
+                    border: '1px solid var(--danger, #ef4444)',
+                    background: 'var(--surface)',
+                    color: 'var(--danger, #ef4444)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  전체 삭제
+                </button>
+              )}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {activeProducts.map((p) => (

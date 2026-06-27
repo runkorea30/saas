@@ -11,7 +11,7 @@
  * 🟡 BO(백오더): 인보이스에 qty_shipped=0 으로 나오거나, 주문서에만 있는 항목.
  *    "기존 입력 폼에 채우기" 시 BO 행은 제외 — 실입고 0 인 행을 만들지 않음.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FileSpreadsheet, FileText, X } from 'lucide-react';
 import {
   parseOrderSheet,
@@ -23,6 +23,9 @@ import {
   type InvoiceParsedRow,
 } from '@/utils/invoiceParser';
 import type { ImportRowInput, ImportInvoiceHeader } from '@/types/import';
+
+const SESSION_KEY = 'invoice_verification_comparison';
+const SESSION_TAB_KEY = 'invoice_verification_tab';
 
 // 주문서/인보이스/OPS 제품 코드 간 매칭용 정규화.
 // 공백·하이픈 제거 + 소문자 통일. (leading-zero 는 제거하지 않음 — 다른 SKU 가 충돌할 수 있음.)
@@ -52,8 +55,10 @@ interface ComparisonRow {
   originalInvoiceQty: number; // 현재 매칭 기준 원본 수량 (재매칭 시 리셋)
   orderPrice?: number;   // 주문서 단가 (없으면 undefined → 금액 비교 스킵)
   invoicePrice: number;  // 인보이스 단가
+  originalInvoicePrice: number; // 편집 감지 + 재검증 기준
   amount: number;        // 인보이스 금액 (totalUsd 채움 용도)
   isInOps: boolean;      // OPS products 에 코드가 존재하는지
+  category: string;      // 정렬용 OPS 카테고리
   status: CompareStatus;
 }
 
@@ -81,7 +86,7 @@ interface Props {
   onFill: (rows: ImportRowInput[], headerPatch: Partial<ImportInvoiceHeader>) => void;
   disabled?: boolean;
   /** OPS products 목록. 매칭된 코드의 한글 제품명을 표시하는 데 사용. */
-  products?: ReadonlyArray<{ code: string; name: string }>;
+  products?: ReadonlyArray<{ code: string; name: string; category: string }>;
 }
 
 type Tab = 'all' | CompareStatus;
@@ -116,6 +121,8 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
     invoiceDate: string;
   } | null>(null);
   const [tab, setTab] = useState<Tab>('all');
+  // 현재 포커스된 input 의 rowId — 코드/수량 셀 포커스 하이라이트용
+  const [focusedId, setFocusedId] = useState<string | null>(null);
 
   // 정규화된 OPS 제품코드 → 한글명 맵. (인보이스/주문서의 영문명을 한글로 치환)
   const productNameByCode = useMemo(() => {
@@ -127,7 +134,48 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
     return map;
   }, [products]);
 
+  // 정규화된 OPS 코드 → category 맵
+  const productCategoryByCode = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of products ?? []) {
+      const key = normalizeCode(p.code);
+      if (key) map.set(key, p.category ?? '');
+    }
+    return map;
+  }, [products]);
+
   const canCompare = Boolean(orderFile && invoiceFile) && !parsing && !disabled;
+
+  // ── sessionStorage 복원 (마운트 시 1회) ──
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem(SESSION_KEY);
+      const savedTab = sessionStorage.getItem(SESSION_TAB_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // File 객체는 직렬화 불가 — orderFile/invoiceFile 은 복원 불가 (파일명만 표시)
+        setComparison(parsed);
+      }
+      if (savedTab) setTab(savedTab as Tab);
+    } catch { /* ignore */ }
+  }, []);
+
+  // ── sessionStorage 동기화 (comparison/tab 변경 시) ──
+  useEffect(() => {
+    try {
+      if (comparison) {
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(comparison));
+      } else {
+        sessionStorage.removeItem(SESSION_KEY);
+      }
+    } catch { /* ignore */ }
+  }, [comparison]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(SESSION_TAB_KEY, tab);
+    } catch { /* ignore */ }
+  }, [tab]);
 
   const handleCompare = async () => {
     if (!orderFile || !invoiceFile) return;
@@ -139,7 +187,7 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
         parseOrderSheet(orderFile),
         parseInvoicePDF(invoiceFile),
       ]);
-      const rows = compareOrderInvoice(orderRows, invoice, productNameByCode);
+      const rows = compareOrderInvoice(orderRows, invoice, productNameByCode, productCategoryByCode);
       setComparison({
         rows,
         orderRows,
@@ -169,7 +217,8 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
     };
     for (const r of rows) {
       c[r.status]++;
-      if (r.invoiceQty !== r.originalInvoiceQty || r.code !== r.originalCode) {
+      const priceEdited = Math.abs(r.invoicePrice - r.originalInvoicePrice) > 0.001;
+      if (r.invoiceQty !== r.originalInvoiceQty || r.code !== r.originalCode || priceEdited) {
         c.edited++;
       }
     }
@@ -189,6 +238,30 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
             row.orderQty,
             safeQty,
             row.invoicePrice,
+            row.orderPrice,
+            row.isInOps,
+          ),
+        };
+      });
+      return { ...prev, rows: nextRows };
+    });
+  };
+
+  const handlePriceChange = (rowId: string, newPrice: number) => {
+    setComparison((prev) => {
+      if (!prev) return prev;
+      const safePrice = Number.isFinite(newPrice) && newPrice >= 0 ? newPrice : 0;
+      const nextRows = prev.rows.map((row) => {
+        if (row.id !== rowId) return row;
+        const newAmount = parseFloat((safePrice * row.invoiceQty).toFixed(2));
+        return {
+          ...row,
+          invoicePrice: safePrice,
+          amount: newAmount,
+          status: calcStatus(
+            row.orderQty,
+            row.invoiceQty,
+            safePrice,
             row.orderPrice,
             row.isInOps,
           ),
@@ -257,8 +330,10 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
           originalInvoiceQty: newInvoiceQty, // 새 매칭 기준 baseline 으로 리셋
           orderPrice: newOrderPrice,
           invoicePrice: newInvoicePrice,
+          originalInvoicePrice: newInvoicePrice,
           amount: newAmount,
           isInOps,
+          category: productCategoryByCode.get(normNew) ?? '',
           status: calcStatus(
             newOrderQty,
             newInvoiceQty,
@@ -290,7 +365,7 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
       quantity: r.invoiceQty,
       unit: r.unit,
       adjustedQuantity: r.unit === 'DZ' ? r.invoiceQty * 12 : r.invoiceQty,
-      totalUsd: r.amount,
+      totalUsd: parseFloat((r.invoicePrice * r.invoiceQty).toFixed(2)),
     }));
     onFill(rows, {
       invoiceNumber: comparison.invoiceNo,
@@ -304,6 +379,10 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
     setComparison(null);
     setError(null);
     setTab('all');
+    try {
+      sessionStorage.removeItem(SESSION_KEY);
+      sessionStorage.removeItem(SESSION_TAB_KEY);
+    } catch { /* ignore */ }
   };
 
   return (
@@ -485,7 +564,7 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                 style={{
                   display: 'grid',
                   gridTemplateColumns:
-                    '120px minmax(220px, 1fr) 60px 80px 100px 70px 100px',
+                    '120px minmax(200px, 1fr) 60px 80px 100px 90px 70px 100px',
                   gap: 10,
                   padding: '8px 12px',
                   background: 'var(--surface-2)',
@@ -503,6 +582,7 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                 <span style={{ textAlign: 'center' }}>단위</span>
                 <span style={{ textAlign: 'right' }}>주문</span>
                 <span style={{ textAlign: 'right' }}>인보이스</span>
+                <span style={{ textAlign: 'right' }}>단가(USD)</span>
                 <span style={{ textAlign: 'right' }}>차이</span>
                 <span style={{ textAlign: 'center' }}>상태</span>
               </div>
@@ -531,21 +611,28 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                     const qtyEdited = r.invoiceQty !== r.originalInvoiceQty;
                     const codeEdited =
                       normalizeCode(r.code) !== normalizeCode(r.originalCode);
-                    const rowEdited = qtyEdited || codeEdited;
+                    const priceEdited =
+                      Math.abs(r.invoicePrice - r.originalInvoicePrice) > 0.001;
+                    const rowEdited = qtyEdited || codeEdited || priceEdited;
                     return (
                       <div
                         key={r.id}
                         style={{
                           display: 'grid',
                           gridTemplateColumns:
-                            '120px minmax(220px, 1fr) 60px 80px 100px 70px 100px',
+                            '120px minmax(200px, 1fr) 60px 80px 100px 90px 70px 100px',
                           gap: 10,
                           padding: '8px 12px',
                           borderBottom: '1px solid var(--line)',
                           fontSize: 12.5,
                           alignItems: 'center',
                           minWidth: 760,
-                          background: rowEdited ? 'var(--warning-wash)' : undefined,
+                          background:
+                            focusedId === r.id || focusedId === r.id + '_qty' || focusedId === r.id + '_price'
+                              ? 'var(--accent-wash, #EFF6FF)'
+                              : rowEdited
+                                ? 'var(--warning-wash)'
+                                : undefined,
                         }}
                       >
                         <input
@@ -554,8 +641,14 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                           onChange={(e) =>
                             handleCodeChange(r.id, e.target.value)
                           }
-                          onBlur={(e) => handleCodeBlur(r.id, e.target.value)}
-                          onFocus={(e) => e.currentTarget.select()}
+                          onBlur={(e) => {
+                            handleCodeBlur(r.id, e.target.value);
+                            setFocusedId(null);
+                          }}
+                          onFocus={(e) => {
+                            e.currentTarget.select();
+                            setFocusedId(r.id);
+                          }}
                           title={
                             codeEdited
                               ? `원본 코드: ${r.originalCode}`
@@ -567,11 +660,15 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                             height: 24,
                             padding: '0 4px',
                             border: 'none',
-                            borderBottom: `1px ${codeEdited ? 'solid' : 'dashed'} ${codeEdited ? 'var(--warning)' : 'var(--line)'}`,
-                            background: 'transparent',
-                            color: 'var(--ink-2)',
+                            borderBottom: `1px ${codeEdited ? 'solid' : 'dashed'} ${
+                              codeEdited ? 'var(--warning)' : 'var(--line)'
+                            }`,
+                            borderRadius: 3,
+                            background: focusedId === r.id ? 'var(--accent-wash, #EFF6FF)' : 'transparent',
+                            color: focusedId === r.id ? 'var(--ink)' : 'var(--ink-2)',
                             fontSize: 12.5,
-                            outline: 'none',
+                            outline: focusedId === r.id ? '2px solid var(--accent, #2563eb)' : 'none',
+                            outlineOffset: 1,
                           }}
                         />
                         <span
@@ -609,7 +706,11 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                             onChange={(e) =>
                               handleQtyChange(r.id, Number(e.target.value))
                             }
-                            onFocus={(e) => e.currentTarget.select()}
+                            onFocus={(e) => {
+                              e.currentTarget.select();
+                              setFocusedId(r.id + '_qty');
+                            }}
+                            onBlur={() => setFocusedId(null)}
                             title={
                               qtyEdited
                                 ? `원본: ${r.originalInvoiceQty.toLocaleString('ko-KR')}`
@@ -621,12 +722,57 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                               height: 26,
                               padding: '0 6px',
                               textAlign: 'right',
-                              border: `1px solid ${qtyEdited ? 'var(--warning)' : 'var(--line)'}`,
+                              border: `1px solid ${
+                                focusedId === r.id + '_qty'
+                                  ? 'var(--accent, #2563eb)'
+                                  : qtyEdited
+                                    ? 'var(--warning)'
+                                    : 'var(--line)'
+                              }`,
                               borderRadius: 4,
-                              background: 'var(--surface)',
+                              background: focusedId === r.id + '_qty' ? 'var(--accent-wash, #EFF6FF)' : 'var(--surface)',
                               color: 'var(--ink)',
                               fontWeight: 500,
                               fontSize: 12.5,
+                              outline: 'none',
+                              boxShadow: focusedId === r.id + '_qty' ? '0 0 0 2px var(--accent-wash, #DBEAFE)' : 'none',
+                            }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                          <input
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            value={r.invoicePrice}
+                            onChange={(e) => handlePriceChange(r.id, Number(e.target.value))}
+                            onFocus={(e) => {
+                              e.currentTarget.select();
+                              setFocusedId(r.id + '_price');
+                            }}
+                            onBlur={() => setFocusedId(null)}
+                            title={priceEdited ? `원본: $${r.originalInvoicePrice.toFixed(2)}` : undefined}
+                            className="num"
+                            style={{
+                              width: 80,
+                              height: 26,
+                              padding: '0 6px',
+                              textAlign: 'right',
+                              border: `1px solid ${
+                                focusedId === r.id + '_price'
+                                  ? 'var(--accent, #2563eb)'
+                                  : priceEdited
+                                    ? 'var(--warning)'
+                                    : 'var(--line)'
+                              }`,
+                              borderRadius: 4,
+                              background:
+                                focusedId === r.id + '_price'
+                                  ? 'var(--accent-wash, #EFF6FF)'
+                                  : 'var(--surface)',
+                              color: 'var(--ink)',
+                              fontWeight: 500,
+                              fontSize: 12,
                               outline: 'none',
                             }}
                           />
@@ -860,6 +1006,7 @@ function compareOrderInvoice(
   orders: OrderSheetRow[],
   invoice: InvoiceParsed,
   productNameByCode: ReadonlyMap<string, string> = new Map(),
+  productCategoryByCode: ReadonlyMap<string, string> = new Map(),
 ): ComparisonRow[] {
   // 정규화된 코드 → 주문 행. (대소문자/공백/하이픈 차이로 매칭 누락되던 문제 해결)
   const orderByCode = new Map<string, OrderSheetRow>();
@@ -895,8 +1042,10 @@ function compareOrderInvoice(
       originalInvoiceQty: invoiceQty,
       orderPrice,
       invoicePrice,
+      originalInvoicePrice: invoicePrice,
       amount: inv.amount,
       isInOps,
+      category: productCategoryByCode.get(normInv) ?? '',
       status: calcStatus(orderQty, invoiceQty, invoicePrice, orderPrice, isInOps),
     });
   }
@@ -918,26 +1067,21 @@ function compareOrderInvoice(
       originalInvoiceQty: 0,
       orderPrice: ord.price,
       invoicePrice: 0,
+      originalInvoicePrice: 0,
       amount: 0,
       isInOps,
+      category: productCategoryByCode.get(normOrd) ?? '',
       status: calcStatus(ord.qty, 0, 0, ord.price, isInOps),
     });
   }
 
-  // 정렬: 상태 중요도 → 코드 오름차순
-  // (수량불일치 → 금액불일치 → 주문서만 → 인보이스만 → 미확인 → 일치)
-  const STATUS_ORDER: Record<CompareStatus, number> = {
-    qty_diff: 0,
-    amount_diff: 1,
-    order_only: 2,
-    invoice_only: 3,
-    unknown: 4,
-    match: 5,
-  };
+  // 정렬: 제품분류 → 제품명 → 코드 (안정)
   out.sort((a, b) => {
-    const so = STATUS_ORDER[a.status] - STATUS_ORDER[b.status];
-    if (so !== 0) return so;
-    return a.code.localeCompare(b.code, 'ko');
+    const catCmp = a.category.localeCompare(b.category, 'ko');
+    if (catCmp !== 0) return catCmp;
+    const descCmp = a.description.localeCompare(b.description, 'ko');
+    if (descCmp !== 0) return descCmp;
+    return a.code.localeCompare(b.code);
   });
   return out;
 }
