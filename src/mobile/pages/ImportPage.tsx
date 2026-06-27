@@ -500,6 +500,7 @@ export function ImportPage() {
         <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
           {activeTab === 'verification' && (
             <InvoiceUploadCard
+              companyId={companyId}
               disabled={busy}
               products={productsQuery.data}
               onFill={(rows, headerPatch) => {
@@ -593,6 +594,7 @@ export function ImportPage() {
               setNoticeProductInput={setNoticeProductInput}
               noticeParsingPdf={noticeParsingPdf}
               onAddProduct={handleAddNoticeProduct}
+              onClearProducts={() => setActiveProducts([])}
               onUploadPdf={handleNoticePdfUpload}
               onSave={handleNoticeSave}
               saving={noticeSaving}
@@ -684,6 +686,7 @@ interface PortalSectionProps {
   setNoticeProductInput: (v: string) => void;
   noticeParsingPdf: boolean;
   onAddProduct: () => void;
+  onClearProducts: () => void;
   onUploadPdf: (file: File) => void;
   onSave: () => void;
   saving: boolean;
@@ -847,7 +850,7 @@ function PortalSection(p: PortalSectionProps) {
         >
           표시할 제품 (코드 입력 후 Enter)
         </label>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
           <input
             type="text"
             value={p.noticeProductInput}
@@ -885,6 +888,21 @@ function PortalSection(p: PortalSectionProps) {
               disabled={p.noticeParsingPdf}
             />
           </label>
+          {p.activeProducts.length > 0 && (
+            <button
+              type="button"
+              onClick={p.onClearProducts}
+              style={{
+                ...mobileBtnStyle(false, false),
+                border: '1px solid var(--m-danger, #ef4444)',
+                color: 'var(--m-danger, #ef4444)',
+                marginLeft: 'auto',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              전체 삭제
+            </button>
+          )}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {p.activeProducts.map((it) => (

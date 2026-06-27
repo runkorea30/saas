@@ -433,6 +433,34 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     });
   };
 
+  const handleAddRow = () => {
+    const newRow: ComparisonRow = {
+      id: makeId(),
+      code: '',
+      originalCode: '',
+      orderCode: '',
+      description: '',
+      unit: 'DZ',
+      orderQty: 0,
+      originalOrderQty: 0,
+      orderPrice: undefined,
+      originalOrderPrice: undefined,
+      invoiceQty: 0,
+      originalInvoiceQty: 0,
+      invoicePrice: 0,
+      originalInvoicePrice: 0,
+      amount: 0,
+      isInOps: false,
+      category: '',
+      status: 'invoice_only',
+    };
+    setComparison((prev) => {
+      if (!prev) return prev;
+      return { ...prev, rows: [newRow, ...prev.rows] };
+    });
+    setTab('all');
+  };
+
   // 코드 셀 입력 변경 — 화면 표시만 즉시 반영 (재매칭은 blur 에서).
   const handleCodeChange = (rowId: string, rawCode: string) => {
     setComparison((prev) => {
@@ -1320,7 +1348,16 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
           </div>
 
           {/* 액션 */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn-base"
+              onClick={handleAddRow}
+              style={{ height: 32, fontSize: 12.5 }}
+            >
+              + 행 추가
+            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
             <button
               type="button"
               className="btn-base"
@@ -1348,6 +1385,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
               }
               건)
             </button>
+            </div>
           </div>
         </>
       )}
