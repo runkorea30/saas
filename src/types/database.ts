@@ -1697,6 +1697,55 @@ export type Database = {
           },
         ]
       }
+      customs_code_mappings: {
+        Row: {
+          id: string
+          company_id: string
+          code_prefix: string
+          code_examples: string | null
+          product_category: string
+          hs_code: string
+          import_req_no: string
+          origin_serial: string
+          sort_order: number
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          code_prefix: string
+          code_examples?: string | null
+          product_category?: string
+          hs_code?: string
+          import_req_no?: string
+          origin_serial?: string
+          sort_order?: number
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          code_prefix?: string
+          code_examples?: string | null
+          product_category?: string
+          hs_code?: string
+          import_req_no?: string
+          origin_serial?: string
+          sort_order?: number
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customs_code_mappings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_profiles: {
         Row: {
           created_at: string

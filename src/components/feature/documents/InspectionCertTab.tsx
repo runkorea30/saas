@@ -433,6 +433,9 @@ export function InspectionCertTab({ companyId }: Props) {
           </div>
         )}
       </div>
+
+      {/* 통관 코드 매핑 */}
+      <CustomsMappingSection companyId={companyId} />
     </div>
   );
 }
@@ -616,4 +619,270 @@ function cellTdStyle(
     color: 'var(--ink)',
     verticalAlign: 'middle',
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 코드 매핑 관리 섹션 (InspectionCertTab 하단에 렌더링)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface MappingRow {
+  id: string;
+  code_prefix: string;
+  code_examples: string | null;
+  product_category: string;
+  hs_code: string;
+  import_req_no: string;
+  origin_serial: string;
+  sort_order: number;
+}
+
+type MappingField = 'code_prefix' | 'code_examples' | 'product_category' | 'hs_code' | 'import_req_no' | 'origin_serial';
+
+type CustomsMappingUpdate =
+  Database['mochicraft_demo']['Tables']['customs_code_mappings']['Update'];
+
+const MAPPING_SELECT = 'id, code_prefix, code_examples, product_category, hs_code, import_req_no, origin_serial, sort_order';
+
+interface MappingSectionProps {
+  companyId: string | null;
+}
+
+function CustomsMappingSection({ companyId }: MappingSectionProps) {
+  const { showToast } = useToast();
+  const queryClient = useQueryClient();
+  const qKey = ['customs-mappings', companyId];
+
+  const { data: mRows = [], isLoading } = useQuery<MappingRow[]>({
+    queryKey: qKey,
+    enabled: Boolean(companyId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('customs_code_mappings')
+        .select(MAPPING_SELECT)
+        .eq('company_id', companyId!)
+        .order('sort_order', { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as MappingRow[];
+    },
+    staleTime: 30_000,
+  });
+
+  const [editingCell, setEditingCell] = useState<{ id: string; field: MappingField } | null>(null);
+  const [editingValue, setEditingValue] = useState('');
+
+  function startEdit(id: string, field: MappingField, value: string) {
+    setEditingCell({ id, field });
+    setEditingValue(value);
+  }
+
+  async function saveEdit() {
+    if (!editingCell) return;
+    const { id, field } = editingCell;
+    const trimmed = editingValue.trim();
+    if (field === 'code_prefix' && !trimmed) {
+      showToast({ kind: 'error', text: '코드 prefix는 필수입니다.' });
+      return;
+    }
+    // 🟠 컴퓨티드 키([field])는 string 으로 widening 되므로 명시적 캐스팅 필요
+    //    (InspectionCert saveEdit 와 동일 패턴).
+    const payload = {
+      [field]: trimmed,
+      updated_at: new Date().toISOString(),
+    } as CustomsMappingUpdate;
+    const { error } = await supabase
+      .from('customs_code_mappings')
+      .update(payload)
+      .eq('id', id);
+    if (error) {
+      showToast({ kind: 'error', text: `저장 실패: ${error.message}` });
+    } else {
+      queryClient.invalidateQueries({ queryKey: qKey });
+    }
+    setEditingCell(null);
+  }
+
+  function cancelEdit() {
+    setEditingCell(null);
+  }
+
+  async function addRow() {
+    if (!companyId) return;
+    const maxOrder = mRows.length > 0 ? Math.max(...mRows.map((r) => r.sort_order)) : 0;
+    const { data, error } = await supabase
+      .from('customs_code_mappings')
+      .insert({ company_id: companyId, code_prefix: '???', sort_order: maxOrder + 10 })
+      .select(MAPPING_SELECT)
+      .single();
+    if (error) {
+      showToast({ kind: 'error', text: `추가 실패: ${error.message}` });
+      return;
+    }
+    await queryClient.invalidateQueries({ queryKey: qKey });
+    if (data) {
+      setEditingCell({ id: (data as MappingRow).id, field: 'code_prefix' });
+      setEditingValue((data as MappingRow).code_prefix);
+    }
+  }
+
+  async function deleteRows(ids: string[]) {
+    const { error } = await supabase
+      .from('customs_code_mappings')
+      .delete()
+      .in('id', ids);
+    if (error) {
+      showToast({ kind: 'error', text: `삭제 실패: ${error.message}` });
+    } else {
+      queryClient.invalidateQueries({ queryKey: qKey });
+    }
+  }
+
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const allChecked = mRows.length > 0 && mRows.every((r) => checkedIds.has(r.id));
+
+  const COLS: { field: MappingField; label: string; width?: number; align?: 'center' | 'left' }[] = [
+    { field: 'code_prefix',      label: 'Prefix\n(앞 3자리)', width: 80,  align: 'center' },
+    { field: 'code_examples',    label: '해당 코드 예시',      width: 180              },
+    { field: 'product_category', label: '제품분류',            width: 160              },
+    { field: 'hs_code',          label: 'HS Code',             width: 130, align: 'center' },
+    { field: 'import_req_no',    label: '수입요건번호',         width: 170              },
+    { field: 'origin_serial',    label: 'C/O Serial No',      width: 110, align: 'center' },
+  ];
+
+  const thS = (align: 'left' | 'center' = 'left', w?: number): React.CSSProperties => ({
+    padding: '7px 10px', textAlign: align, fontWeight: 600, fontSize: 12,
+    borderBottom: '1px solid var(--line)', whiteSpace: 'pre-line',
+    width: w ? `${w}px` : undefined, background: 'var(--surface-2, var(--surface))',
+  });
+
+  const tdS = (align: 'left' | 'center' = 'left'): React.CSSProperties => ({
+    padding: '5px 8px', textAlign: align, fontSize: 12,
+  });
+
+  return (
+    <div style={{ marginTop: 32, borderTop: '2px solid var(--line)', paddingTop: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div>
+          <span style={{ fontWeight: 700, fontSize: 13.5 }}>통관 코드 매핑 관리</span>
+          <span style={{ fontSize: 12, color: 'var(--ink-2)', marginLeft: 10 }}>
+            아이템 코드 앞 3자리 기준으로 통관 정보를 자동 매핑합니다
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {checkedIds.size > 0 && (
+            <button
+              type="button"
+              className="btn-base"
+              onClick={async () => {
+                await deleteRows([...checkedIds]);
+                setCheckedIds(new Set());
+              }}
+              style={{ height: 30, fontSize: 12, padding: '0 12px', color: 'var(--danger)' }}
+            >
+              삭제 ({checkedIds.size})
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn-base primary"
+            onClick={addRow}
+            style={{ height: 30, fontSize: 12, padding: '0 14px' }}
+          >
+            + 추가
+          </button>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div style={{ fontSize: 12.5, color: 'var(--ink-2)', padding: 12 }}>로딩 중…</div>
+      ) : (
+        <div style={{ overflowX: 'auto', border: '1px solid var(--line)', borderRadius: 8 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th style={thS('center', 36)}>
+                  <input
+                    type="checkbox"
+                    checked={allChecked}
+                    onChange={() => {
+                      if (allChecked) setCheckedIds(new Set());
+                      else setCheckedIds(new Set(mRows.map((r) => r.id)));
+                    }}
+                  />
+                </th>
+                {COLS.map((c) => (
+                  <th key={c.field} style={thS(c.align ?? 'left', c.width)}>{c.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {mRows.map((row, idx) => (
+                <tr key={row.id} style={{
+                  background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2, var(--surface))',
+                  borderBottom: '1px solid var(--line)',
+                }}>
+                  <td style={tdS('center')}>
+                    <input
+                      type="checkbox"
+                      checked={checkedIds.has(row.id)}
+                      onChange={() => {
+                        const next = new Set(checkedIds);
+                        if (next.has(row.id)) next.delete(row.id); else next.add(row.id);
+                        setCheckedIds(next);
+                      }}
+                    />
+                  </td>
+                  {COLS.map((c) => {
+                    const isEditing = editingCell?.id === row.id && editingCell?.field === c.field;
+                    const val = String(row[c.field] ?? '');
+                    return (
+                      <td
+                        key={c.field}
+                        style={{ ...tdS(c.align ?? 'left'), cursor: 'text' }}
+                        onClick={() => !isEditing && startEdit(row.id, c.field, val)}
+                      >
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            value={editingValue}
+                            onChange={(e) => setEditingValue(e.target.value)}
+                            onBlur={saveEdit}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') saveEdit();
+                              if (e.key === 'Escape') cancelEdit();
+                            }}
+                            style={{
+                              width: '100%', border: '1px solid var(--accent, #2563eb)',
+                              borderRadius: 4, padding: '2px 6px', fontSize: 12,
+                              fontFamily: c.field === 'code_prefix' || c.field === 'hs_code' || c.field === 'import_req_no'
+                                ? 'monospace' : undefined,
+                            }}
+                          />
+                        ) : (
+                          <span style={{
+                            display: 'block', minHeight: 20,
+                            fontFamily: c.field === 'code_prefix' || c.field === 'hs_code' || c.field === 'import_req_no'
+                              ? 'monospace' : undefined,
+                            color: val ? 'var(--ink)' : 'var(--ink-3)',
+                          }}>
+                            {val || '—'}
+                          </span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              {mRows.length === 0 && (
+                <tr>
+                  <td colSpan={COLS.length + 1} style={{ padding: 20, textAlign: 'center', color: 'var(--ink-3)', fontSize: 12 }}>
+                    매핑 데이터가 없습니다. [+ 추가] 버튼으로 등록하세요.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 }
