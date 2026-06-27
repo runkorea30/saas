@@ -45,10 +45,11 @@ import { ImportSummaryBar } from '@/components/feature/import/ImportSummaryBar';
 import { ImportRowsTable } from '@/components/feature/import/ImportRowsTable';
 import { InvoiceUploadCard } from '@/components/feature/import/InvoiceUploadCard';
 import { RecentInvoicesSection } from '@/components/feature/import/RecentInvoicesSection';
+import { CustomsDocTab } from '@/components/feature/import/CustomsDocTab';
 import { parseInvoicePDF } from '@/utils/invoiceParser';
 import { RefreshButton } from '../components/RefreshButton';
 
-type TabKey = 'verification' | 'receiving' | 'portal';
+type TabKey = 'verification' | 'customs' | 'receiving' | 'portal';
 
 function todayLocalDateStr(): string {
   const d = new Date();
@@ -464,6 +465,14 @@ export function ImportPage() {
           <button
             type="button"
             className="m-tab"
+            aria-pressed={activeTab === 'customs'}
+            onClick={() => setActiveTab('customs')}
+          >
+            통관서류
+          </button>
+          <button
+            type="button"
+            className="m-tab"
             aria-pressed={activeTab === 'receiving'}
             onClick={() => setActiveTab('receiving')}
           >
@@ -514,6 +523,8 @@ export function ImportPage() {
               }}
             />
           )}
+
+          {activeTab === 'customs' && <CustomsDocTab />}
 
           {activeTab === 'receiving' && (
             <>
