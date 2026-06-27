@@ -1435,8 +1435,18 @@ function compareOrderInvoice(
     });
   }
 
-  // 정렬: 제품분류 → 제품명 → 코드 (안정)
+  // 정렬: 불일치 상태 우선 → 제품분류 → 제품명 → 코드 (안정)
+  const STATUS_PRIORITY: Record<CompareStatus, number> = {
+    qty_diff:     0,  // 수량불일치
+    amount_diff:  1,  // 금액불일치
+    order_only:   2,  // 주문서만
+    invoice_only: 3,  // 인보이스만
+    unknown:      4,  // 미확인
+    match:        5,  // 일치 — 맨 아래
+  };
   out.sort((a, b) => {
+    const statusCmp = STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status];
+    if (statusCmp !== 0) return statusCmp;
     const catCmp = a.category.localeCompare(b.category, 'ko');
     if (catCmp !== 0) return catCmp;
     const descCmp = a.description.localeCompare(b.description, 'ko');
