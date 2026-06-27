@@ -42,6 +42,7 @@ import { ImportSummaryBar } from '@/components/feature/import/ImportSummaryBar';
 import { ImportRowsTable } from '@/components/feature/import/ImportRowsTable';
 import { InvoiceUploadCard } from '@/components/feature/import/InvoiceUploadCard';
 import { RecentInvoicesSection } from '@/components/feature/import/RecentInvoicesSection';
+import { CustomsDocTab } from '@/components/feature/import/CustomsDocTab';
 import { parseInvoicePDF } from '@/utils/invoiceParser';
 
 // ───────────────────────────────────────────────────────────
@@ -68,7 +69,7 @@ function createEmptyRow(): ImportRowInput {
   };
 }
 
-type TabKey = 'verification' | 'receiving' | 'portal';
+type TabKey = 'verification' | 'customs' | 'receiving' | 'portal';
 
 const DEFAULT_HEADER: ImportInvoiceHeader = {
   invoiceNumber: '',
@@ -520,6 +521,11 @@ export function ImportReceivingPage() {
             label="인보이스 검증"
           />
           <TabButton
+            active={activeTab === 'customs'}
+            onClick={() => setActiveTab('customs')}
+            label="통관서류"
+          />
+          <TabButton
             active={activeTab === 'receiving'}
             onClick={() => setActiveTab('receiving')}
             label="입고 처리"
@@ -561,6 +567,8 @@ export function ImportReceivingPage() {
             }}
           />
         )}
+
+        {activeTab === 'customs' && <CustomsDocTab />}
 
         {activeTab === 'receiving' && (
           <>
