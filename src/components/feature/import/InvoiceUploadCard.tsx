@@ -152,7 +152,11 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     return map;
   }, [products]);
 
-  const canCompare = Boolean(orderFile && invoiceFile) && !parsing && !disabled;
+  const canCompare =
+    Boolean(orderFile && invoiceFile) &&
+    !parsing &&
+    !disabled &&
+    Boolean(products && products.length > 0);
 
   // ── DB 저장 ──
   const saveToDb = async (
@@ -220,6 +224,36 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       });
   }, [companyId, dbLoaded]);
 
+  // ── products 로드 완료 시 unknown 행 자동 재매칭 ──
+  // DB 복원 직후엔 products 가 비어있어 모두 unknown 으로 들어올 수 있음.
+  // products 가 채워지는 순간 1회 스캔해 매칭 가능한 행은 정상 상태로 전환.
+  useEffect(() => {
+    if (!products || products.length === 0) return;
+    if (!comparison) return;
+    const hasUnknown = comparison.rows.some((r) => r.status === 'unknown');
+    if (!hasUnknown) return;
+
+    const reMatched = comparison.rows.map((r) => {
+      if (r.status !== 'unknown') return r;
+      const normCode = normalizeCode(r.code);
+      const opsName = productNameByCode.get(normCode);
+      if (opsName === undefined) return r;
+      return {
+        ...r,
+        description: opsName || r.description,
+        isInOps: true,
+        category: productCategoryByCode.get(normCode) ?? r.category,
+        status: calcStatus(r.orderQty, r.invoiceQty, r.invoicePrice, r.orderPrice, true),
+      };
+    });
+
+    const changed = reMatched.some((r, i) => r.status !== comparison.rows[i].status);
+    if (!changed) return;
+
+    setComparison((prev) => (prev ? { ...prev, rows: reMatched } : prev));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products]);
+
   // ── comparison/tab 변경 시 DB 자동 저장 ──
   useEffect(() => {
     if (skipNextAutoSave.current) {
@@ -259,9 +293,18 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
 
   const counts = useMemo(() => {
     const rows = comparison?.rows ?? [];
-    const c: Record<CompareStatus, number> & { all: number; edited: number } = {
+    const c: Record<CompareStatus, number> & {
+      all: number;
+      edited: number;
+      invoiceTotal: number;
+      orderTotal: number;
+      diffTotal: number;
+    } = {
       all: rows.length,
       edited: 0,
+      invoiceTotal: 0,
+      orderTotal: 0,
+      diffTotal: 0,
       match: 0,
       qty_diff: 0,
       amount_diff: 0,
@@ -283,7 +326,12 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       ) {
         c.edited++;
       }
+      c.invoiceTotal += r.invoicePrice * r.invoiceQty;
+      c.orderTotal += (r.orderPrice ?? r.invoicePrice) * r.orderQty;
     }
+    c.invoiceTotal = parseFloat(c.invoiceTotal.toFixed(2));
+    c.orderTotal = parseFloat(c.orderTotal.toFixed(2));
+    c.diffTotal = parseFloat((c.invoiceTotal - c.orderTotal).toFixed(2));
     return c;
   }, [comparison]);
 
@@ -635,6 +683,11 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
           >
             {parsing ? '분석 중…' : '비교 시작'}
           </button>
+          {(!products || products.length === 0) && (
+            <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+              제품 목록 로딩 중…
+            </span>
+          )}
           {(orderFile || invoiceFile || comparison) && (
             <button
               type="button"
@@ -750,6 +803,107 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
                 저장 중…
               </span>
             )}
+          </div>
+
+          {/* 금액 합계 요약 바 */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <div
+              style={{
+                flex: '1 1 140px',
+                border: '1px solid var(--line)',
+                borderRadius: 8,
+                padding: '8px 14px',
+                background: 'var(--surface)',
+              }}
+            >
+              <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginBottom: 3 }}>
+                인보이스 합계
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 14, fontFamily: 'var(--font-num)' }}>
+                ${counts.invoiceTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              </div>
+            </div>
+
+            <div
+              style={{
+                flex: '1 1 140px',
+                border: '1px solid var(--line)',
+                borderRadius: 8,
+                padding: '8px 14px',
+                background: 'var(--surface)',
+              }}
+            >
+              <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginBottom: 3 }}>
+                주문서 합계
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 14, fontFamily: 'var(--font-num)' }}>
+                ${counts.orderTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              </div>
+            </div>
+
+            <div
+              style={{
+                flex: '1 1 140px',
+                border: `1px solid ${counts.diffTotal === 0 ? 'var(--line)' : 'var(--warning)'}`,
+                borderRadius: 8,
+                padding: '8px 14px',
+                background: counts.diffTotal === 0 ? 'var(--surface)' : 'var(--warning-wash)',
+              }}
+            >
+              <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginBottom: 3 }}>
+                차이 (인보이스 − 주문서)
+              </div>
+              <div
+                style={{
+                  fontWeight: 700,
+                  fontSize: 14,
+                  fontFamily: 'var(--font-num)',
+                  color:
+                    counts.diffTotal === 0
+                      ? 'var(--ink)'
+                      : counts.diffTotal > 0
+                        ? 'var(--danger)'
+                        : 'var(--success)',
+                }}
+              >
+                {counts.diffTotal === 0
+                  ? '—'
+                  : `${counts.diffTotal > 0 ? '+' : ''}$${Math.abs(counts.diffTotal).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+              </div>
+            </div>
+
+            <div
+              style={{
+                flex: '1 1 140px',
+                border: `1px solid ${counts.match === counts.all ? 'var(--success)' : 'var(--line)'}`,
+                borderRadius: 8,
+                padding: '8px 14px',
+                background: counts.match === counts.all ? 'var(--success-wash)' : 'var(--surface)',
+              }}
+            >
+              <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginBottom: 3 }}>
+                검증 현황
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>
+                {counts.match === counts.all ? (
+                  <span style={{ color: 'var(--success)' }}>✅ 전체 일치</span>
+                ) : (
+                  <span style={{ color: 'var(--danger)' }}>
+                    불일치 {counts.all - counts.match}건
+                    <span
+                      style={{
+                        fontWeight: 400,
+                        fontSize: 11,
+                        color: 'var(--ink-3)',
+                        marginLeft: 6,
+                      }}
+                    >
+                      / 전체 {counts.all}건
+                    </span>
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* 결과 테이블 */}
