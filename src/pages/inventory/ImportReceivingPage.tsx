@@ -554,6 +554,7 @@ export function ImportReceivingPage() {
 
         {activeTab === 'verification' && (
           <InvoiceUploadCard
+            companyId={companyId}
             disabled={busy}
             products={productsQuery.data}
             onFill={(rows, headerPatch) => {

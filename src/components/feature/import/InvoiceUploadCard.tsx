@@ -11,7 +11,7 @@
  * 🟡 BO(백오더): 인보이스에 qty_shipped=0 으로 나오거나, 주문서에만 있는 항목.
  *    "기존 입력 폼에 채우기" 시 BO 행은 제외 — 실입고 0 인 행을 만들지 않음.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileSpreadsheet, FileText, X } from 'lucide-react';
 import {
   parseOrderSheet,
@@ -23,9 +23,8 @@ import {
   type InvoiceParsedRow,
 } from '@/utils/invoiceParser';
 import type { ImportRowInput, ImportInvoiceHeader } from '@/types/import';
-
-const SESSION_KEY = 'invoice_verification_comparison';
-const SESSION_TAB_KEY = 'invoice_verification_tab';
+import { supabase } from '@/lib/supabase';
+import type { Json } from '@/types/database';
 
 // 주문서/인보이스/OPS 제품 코드 간 매칭용 정규화.
 // 공백·하이픈 제거 + 소문자 통일. (leading-zero 는 제거하지 않음 — 다른 SKU 가 충돌할 수 있음.)
@@ -48,12 +47,15 @@ interface ComparisonRow {
   id: string; // 안정적 React key + 편집 핸들러 식별자 (코드 변경되어도 유지)
   code: string;
   originalCode: string; // 파싱 직후 원본 코드 (편집 감지용)
+  orderCode: string; // 주문서 원본 코드 — order_only 행에서 인보이스 코드로 병합 재매칭용
   description: string;
   unit: 'DZ' | 'EA';
   orderQty: number;
+  originalOrderQty: number; // 편집 감지용 (재매칭 시 리셋)
   invoiceQty: number;
   originalInvoiceQty: number; // 현재 매칭 기준 원본 수량 (재매칭 시 리셋)
   orderPrice?: number;   // 주문서 단가 (없으면 undefined → 금액 비교 스킵)
+  originalOrderPrice?: number; // 편집 감지용
   invoicePrice: number;  // 인보이스 단가
   originalInvoicePrice: number; // 편집 감지 + 재검증 기준
   amount: number;        // 인보이스 금액 (totalUsd 채움 용도)
@@ -82,6 +84,8 @@ function calcStatus(
 // ───── Props ─────
 
 interface Props {
+  /** 현재 회사 ID — DB 저장/로드 키. null/undefined 시 DB 동작 스킵. */
+  companyId: string | null | undefined;
   /** 비교 결과를 기존 행 입력 폼으로 옮길 때 호출. */
   onFill: (rows: ImportRowInput[], headerPatch: Partial<ImportInvoiceHeader>) => void;
   disabled?: boolean;
@@ -106,7 +110,7 @@ const STATUS_META: Record<
 
 // ───────────────────────────────────────────────────────────
 
-export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
+export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Props) {
   const [orderFile, setOrderFile] = useState<File | null>(null);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [parsing, setParsing] = useState(false);
@@ -123,6 +127,10 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
   const [tab, setTab] = useState<Tab>('all');
   // 현재 포커스된 input 의 rowId — 코드/수량 셀 포커스 하이라이트용
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [dbSaving, setDbSaving] = useState(false);
+  const [dbLoaded, setDbLoaded] = useState(false);
+  // DB 자동 저장 useEffect 가 마운트 직후/DB 복원 직후에 한 번 트리거되는 것을 막기 위함.
+  const skipNextAutoSave = useRef(true);
 
   // 정규화된 OPS 제품코드 → 한글명 맵. (인보이스/주문서의 영문명을 한글로 치환)
   const productNameByCode = useMemo(() => {
@@ -146,36 +154,82 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
 
   const canCompare = Boolean(orderFile && invoiceFile) && !parsing && !disabled;
 
-  // ── sessionStorage 복원 (마운트 시 1회) ──
-  useEffect(() => {
+  // ── DB 저장 ──
+  const saveToDb = async (
+    data: {
+      rows: ComparisonRow[];
+      orderRows: OrderSheetRow[];
+      invoiceRows: InvoiceParsedRow[];
+      invoiceNo: string;
+      invoiceDate: string;
+    },
+    currentTab: string,
+    orderFileName?: string,
+    invoiceFileName?: string,
+  ) => {
+    if (!companyId) return;
+    setDbSaving(true);
     try {
-      const saved = sessionStorage.getItem(SESSION_KEY);
-      const savedTab = sessionStorage.getItem(SESSION_TAB_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // File 객체는 직렬화 불가 — orderFile/invoiceFile 은 복원 불가 (파일명만 표시)
-        setComparison(parsed);
-      }
-      if (savedTab) setTab(savedTab as Tab);
-    } catch { /* ignore */ }
-  }, []);
+      await supabase
+        .from('invoice_verifications')
+        .upsert(
+          {
+            company_id: companyId,
+            invoice_no: data.invoiceNo,
+            invoice_date: data.invoiceDate,
+            comparison_rows: data.rows as unknown as Json,
+            order_rows: data.orderRows as unknown as Json,
+            invoice_rows: data.invoiceRows as unknown as Json,
+            order_file_name: orderFileName ?? null,
+            invoice_file_name: invoiceFileName ?? null,
+            last_tab: currentTab,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'company_id' },
+        );
+    } catch { /* ignore — 저장 실패해도 UI 방해 안 함 */ }
+    finally { setDbSaving(false); }
+  };
 
-  // ── sessionStorage 동기화 (comparison/tab 변경 시) ──
+  // ── DB 복원 (companyId 로드 시 1회) ──
   useEffect(() => {
-    try {
-      if (comparison) {
-        sessionStorage.setItem(SESSION_KEY, JSON.stringify(comparison));
-      } else {
-        sessionStorage.removeItem(SESSION_KEY);
-      }
-    } catch { /* ignore */ }
-  }, [comparison]);
+    if (!companyId || dbLoaded) return;
+    setDbLoaded(true);
 
+    void supabase
+      .from('invoice_verifications')
+      .select('*')
+      .eq('company_id', companyId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!data) return;
+        // 복원으로 인한 setComparison/setTab 으로 자동저장 useEffect 가 다시 트리거되어
+        // 방금 로드한 데이터를 그대로 재저장하는 것을 막음.
+        skipNextAutoSave.current = true;
+        setComparison({
+          rows: (data.comparison_rows as unknown as ComparisonRow[]) ?? [],
+          orderRows: (data.order_rows as unknown as OrderSheetRow[]) ?? [],
+          invoiceRows: (data.invoice_rows as unknown as InvoiceParsedRow[]) ?? [],
+          invoiceNo: data.invoice_no ?? '',
+          invoiceDate: data.invoice_date ?? '',
+        });
+        setTab((data.last_tab as Tab) ?? 'all');
+        // 파일명 복원 (File 객체 자체는 복원 불가 — 표시 목적)
+        if (data.order_file_name) setOrderFile({ name: data.order_file_name } as File);
+        if (data.invoice_file_name) setInvoiceFile({ name: data.invoice_file_name } as File);
+      });
+  }, [companyId, dbLoaded]);
+
+  // ── comparison/tab 변경 시 DB 자동 저장 ──
   useEffect(() => {
-    try {
-      sessionStorage.setItem(SESSION_TAB_KEY, tab);
-    } catch { /* ignore */ }
-  }, [tab]);
+    if (skipNextAutoSave.current) {
+      skipNextAutoSave.current = false;
+      return;
+    }
+    if (!comparison || !companyId) return;
+    void saveToDb(comparison, tab, orderFile?.name, invoiceFile?.name);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comparison, tab]);
 
   const handleCompare = async () => {
     if (!orderFile || !invoiceFile) return;
@@ -217,8 +271,16 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
     };
     for (const r of rows) {
       c[r.status]++;
-      const priceEdited = Math.abs(r.invoicePrice - r.originalInvoicePrice) > 0.001;
-      if (r.invoiceQty !== r.originalInvoiceQty || r.code !== r.originalCode || priceEdited) {
+      const iPriceEdited = Math.abs(r.invoicePrice - r.originalInvoicePrice) > 0.001;
+      const oQtyEdited = r.orderQty !== r.originalOrderQty;
+      const oPriceEdited =
+        r.originalOrderPrice !== undefined &&
+        Math.abs((r.orderPrice ?? 0) - (r.originalOrderPrice ?? 0)) > 0.001;
+      if (
+        r.invoiceQty !== r.originalInvoiceQty ||
+        r.code !== r.originalCode ||
+        iPriceEdited || oQtyEdited || oPriceEdited
+      ) {
         c.edited++;
       }
     }
@@ -247,6 +309,50 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
     });
   };
 
+  const handleOrderQtyChange = (rowId: string, newQty: number) => {
+    setComparison((prev) => {
+      if (!prev) return prev;
+      const safeQty = Number.isFinite(newQty) ? Math.max(0, Math.floor(newQty)) : 0;
+      const nextRows = prev.rows.map((row) => {
+        if (row.id !== rowId) return row;
+        return {
+          ...row,
+          orderQty: safeQty,
+          status: calcStatus(
+            safeQty,
+            row.invoiceQty,
+            row.invoicePrice,
+            row.orderPrice,
+            row.isInOps,
+          ),
+        };
+      });
+      return { ...prev, rows: nextRows };
+    });
+  };
+
+  const handleOrderPriceChange = (rowId: string, newPrice: number) => {
+    setComparison((prev) => {
+      if (!prev) return prev;
+      const safePrice = Number.isFinite(newPrice) && newPrice >= 0 ? newPrice : 0;
+      const nextRows = prev.rows.map((row) => {
+        if (row.id !== rowId) return row;
+        return {
+          ...row,
+          orderPrice: safePrice,
+          status: calcStatus(
+            row.orderQty,
+            row.invoiceQty,
+            row.invoicePrice,
+            safePrice,
+            row.isInOps,
+          ),
+        };
+      });
+      return { ...prev, rows: nextRows };
+    });
+  };
+
   const handlePriceChange = (rowId: string, newPrice: number) => {
     setComparison((prev) => {
       if (!prev) return prev;
@@ -267,6 +373,14 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
           ),
         };
       });
+      return { ...prev, rows: nextRows };
+    });
+  };
+
+  const handleDeleteRow = (rowId: string) => {
+    setComparison((prev) => {
+      if (!prev) return prev;
+      const nextRows = prev.rows.filter((row) => row.id !== rowId);
       return { ...prev, rows: nextRows };
     });
   };
@@ -323,12 +437,15 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
         return {
           ...row,
           code: newCode,
+          orderCode: matchedOrder?.code ?? '',
           description: newDesc,
           unit: newUnit,
           orderQty: newOrderQty,
+          originalOrderQty: newOrderQty,
           invoiceQty: newInvoiceQty,
           originalInvoiceQty: newInvoiceQty, // 새 매칭 기준 baseline 으로 리셋
           orderPrice: newOrderPrice,
+          originalOrderPrice: newOrderPrice,
           invoicePrice: newInvoicePrice,
           originalInvoicePrice: newInvoicePrice,
           amount: newAmount,
@@ -343,6 +460,75 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
           ),
         };
       });
+      return { ...prev, rows: nextRows };
+    });
+  };
+
+  // 주문서 코드 셀 입력 변경 (order_only 행 전용) — 화면 즉시 반영
+  const handleOrderCodeChange = (rowId: string, rawCode: string) => {
+    setComparison((prev) => {
+      if (!prev) return prev;
+      const nextRows = prev.rows.map((row) =>
+        row.id === rowId ? { ...row, orderCode: rawCode } : row,
+      );
+      return { ...prev, rows: nextRows };
+    });
+  };
+
+  // 주문서 코드 셀 blur — 인보이스 행과 병합 시도
+  const handleOrderCodeBlur = (rowId: string, rawNewCode: string) => {
+    setComparison((prev) => {
+      if (!prev) return prev;
+
+      const newCode = rawNewCode.trim();
+      const normNew = normalizeCode(newCode);
+
+      const editedRow = prev.rows.find((r) => r.id === rowId);
+      if (!editedRow) return prev;
+
+      // 정규화 변화 없으면 스킵
+      if (normNew === normalizeCode(editedRow.orderCode)) {
+        return editedRow.orderCode !== newCode
+          ? { ...prev, rows: prev.rows.map((r) => r.id === rowId ? { ...r, orderCode: newCode } : r) }
+          : prev;
+      }
+
+      // 입력 코드와 일치하는 기존 행 탐색 (자기 자신 제외)
+      const targetRow = prev.rows.find(
+        (r) => r.id !== rowId && normalizeCode(r.code) === normNew,
+      );
+
+      if (targetRow) {
+        // 병합: targetRow 에 editedRow 의 주문 데이터 이식하고 editedRow 삭제
+        const mergedOrderQty = editedRow.orderQty;
+        const mergedOrderPrice = editedRow.orderPrice;
+        const mergedRows = prev.rows
+          .filter((r) => r.id !== rowId)
+          .map((r) => {
+            if (r.id !== targetRow.id) return r;
+            return {
+              ...r,
+              orderQty: mergedOrderQty,
+              originalOrderQty: mergedOrderQty,
+              orderPrice: mergedOrderPrice,
+              originalOrderPrice: mergedOrderPrice,
+              orderCode: newCode,
+              status: calcStatus(
+                mergedOrderQty,
+                r.invoiceQty,
+                r.invoicePrice,
+                mergedOrderPrice,
+                r.isInOps,
+              ),
+            };
+          });
+        return { ...prev, rows: mergedRows };
+      }
+
+      // 매칭 행 없음 — orderCode 만 업데이트
+      const nextRows = prev.rows.map((r) =>
+        r.id === rowId ? { ...r, orderCode: newCode } : r,
+      );
       return { ...prev, rows: nextRows };
     });
   };
@@ -374,15 +560,19 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
   };
 
   const handleReset = () => {
+    // 자동 저장 useEffect 가 comparison=null 로 빈 행을 저장하는 것을 막고, DB 행을 삭제.
+    skipNextAutoSave.current = true;
     setOrderFile(null);
     setInvoiceFile(null);
     setComparison(null);
     setError(null);
     setTab('all');
-    try {
-      sessionStorage.removeItem(SESSION_KEY);
-      sessionStorage.removeItem(SESSION_TAB_KEY);
-    } catch { /* ignore */ }
+    if (companyId) {
+      void supabase
+        .from('invoice_verifications')
+        .delete()
+        .eq('company_id', companyId);
+    }
   };
 
   return (
@@ -549,6 +739,17 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                 {counts.edited}건 수정됨
               </span>
             )}
+            {dbSaving && (
+              <span
+                style={{
+                  marginLeft: counts.edited > 0 ? 8 : 'auto',
+                  fontSize: 11,
+                  color: 'var(--ink-3)',
+                }}
+              >
+                저장 중…
+              </span>
+            )}
           </div>
 
           {/* 결과 테이블 */}
@@ -564,7 +765,7 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                 style={{
                   display: 'grid',
                   gridTemplateColumns:
-                    '120px minmax(200px, 1fr) 60px 80px 100px 90px 70px 100px',
+                    '120px minmax(200px, 1fr) 60px 80px 80px 100px 90px 70px 100px 28px',
                   gap: 10,
                   padding: '8px 12px',
                   background: 'var(--surface-2)',
@@ -580,11 +781,13 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                 <span>제품코드</span>
                 <span>제품명</span>
                 <span style={{ textAlign: 'center' }}>단위</span>
-                <span style={{ textAlign: 'right' }}>주문</span>
+                <span style={{ textAlign: 'right' }}>주문수량</span>
+                <span style={{ textAlign: 'right' }}>주문단가</span>
                 <span style={{ textAlign: 'right' }}>인보이스</span>
                 <span style={{ textAlign: 'right' }}>단가(USD)</span>
                 <span style={{ textAlign: 'right' }}>차이</span>
                 <span style={{ textAlign: 'center' }}>상태</span>
+                <span />
               </div>
               <div style={{ maxHeight: 320, overflowY: 'auto' }}>
                 {visibleRows.length === 0 ? (
@@ -613,14 +816,20 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                       normalizeCode(r.code) !== normalizeCode(r.originalCode);
                     const priceEdited =
                       Math.abs(r.invoicePrice - r.originalInvoicePrice) > 0.001;
-                    const rowEdited = qtyEdited || codeEdited || priceEdited;
+                    const orderQtyEdited = r.orderQty !== r.originalOrderQty;
+                    const orderPriceEdited =
+                      r.originalOrderPrice !== undefined &&
+                      r.orderPrice !== undefined &&
+                      Math.abs((r.orderPrice ?? 0) - (r.originalOrderPrice ?? 0)) > 0.001;
+                    const rowEdited =
+                      qtyEdited || codeEdited || priceEdited || orderQtyEdited || orderPriceEdited;
                     return (
                       <div
                         key={r.id}
                         style={{
                           display: 'grid',
                           gridTemplateColumns:
-                            '120px minmax(200px, 1fr) 60px 80px 100px 90px 70px 100px',
+                            '120px minmax(200px, 1fr) 60px 80px 80px 100px 90px 70px 100px 28px',
                           gap: 10,
                           padding: '8px 12px',
                           borderBottom: '1px solid var(--line)',
@@ -628,49 +837,90 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                           alignItems: 'center',
                           minWidth: 760,
                           background:
-                            focusedId === r.id || focusedId === r.id + '_qty' || focusedId === r.id + '_price'
+                            focusedId === r.id ||
+                            focusedId === r.id + '_qty' ||
+                            focusedId === r.id + '_price' ||
+                            focusedId === r.id + '_oqty' ||
+                            focusedId === r.id + '_oprice'
                               ? 'var(--accent-wash, #EFF6FF)'
                               : rowEdited
                                 ? 'var(--warning-wash)'
                                 : undefined,
                         }}
                       >
-                        <input
-                          type="text"
-                          value={r.code}
-                          onChange={(e) =>
-                            handleCodeChange(r.id, e.target.value)
-                          }
-                          onBlur={(e) => {
-                            handleCodeBlur(r.id, e.target.value);
-                            setFocusedId(null);
-                          }}
-                          onFocus={(e) => {
-                            e.currentTarget.select();
-                            setFocusedId(r.id);
-                          }}
-                          title={
-                            codeEdited
-                              ? `원본 코드: ${r.originalCode}`
-                              : undefined
-                          }
-                          className="num"
-                          style={{
-                            width: '100%',
-                            height: 24,
-                            padding: '0 4px',
-                            border: 'none',
-                            borderBottom: `1px ${codeEdited ? 'solid' : 'dashed'} ${
-                              codeEdited ? 'var(--warning)' : 'var(--line)'
-                            }`,
-                            borderRadius: 3,
-                            background: focusedId === r.id ? 'var(--accent-wash, #EFF6FF)' : 'transparent',
-                            color: focusedId === r.id ? 'var(--ink)' : 'var(--ink-2)',
-                            fontSize: 12.5,
-                            outline: focusedId === r.id ? '2px solid var(--accent, #2563eb)' : 'none',
-                            outlineOffset: 1,
-                          }}
-                        />
+                        {r.status === 'order_only' ? (
+                          <div>
+                            <input
+                              type="text"
+                              value={r.orderCode}
+                              onChange={(e) => handleOrderCodeChange(r.id, e.target.value)}
+                              onBlur={(e) => {
+                                handleOrderCodeBlur(r.id, e.target.value);
+                                setFocusedId(null);
+                              }}
+                              onFocus={(e) => {
+                                e.currentTarget.select();
+                                setFocusedId(r.id);
+                              }}
+                              placeholder="인보이스 코드 입력 후 Enter"
+                              title="인보이스의 제품코드를 입력하면 해당 행과 자동 병합됩니다"
+                              className="num"
+                              style={{
+                                width: '100%',
+                                height: 24,
+                                padding: '0 4px',
+                                border: 'none',
+                                borderBottom: `1px solid var(--warning)`,
+                                borderRadius: 3,
+                                background: focusedId === r.id ? 'var(--accent-wash, #EFF6FF)' : 'var(--warning-wash)',
+                                color: 'var(--ink)',
+                                fontSize: 12.5,
+                                outline: focusedId === r.id ? '2px solid var(--accent, #2563eb)' : 'none',
+                                outlineOffset: 1,
+                              }}
+                            />
+                            <div style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 2, lineHeight: 1.3 }}>
+                              ↑ 인보이스 코드로 수정
+                            </div>
+                          </div>
+                        ) : (
+                          <input
+                            type="text"
+                            value={r.code}
+                            onChange={(e) =>
+                              handleCodeChange(r.id, e.target.value)
+                            }
+                            onBlur={(e) => {
+                              handleCodeBlur(r.id, e.target.value);
+                              setFocusedId(null);
+                            }}
+                            onFocus={(e) => {
+                              e.currentTarget.select();
+                              setFocusedId(r.id);
+                            }}
+                            title={
+                              codeEdited
+                                ? `원본 코드: ${r.originalCode}`
+                                : undefined
+                            }
+                            className="num"
+                            style={{
+                              width: '100%',
+                              height: 24,
+                              padding: '0 4px',
+                              border: 'none',
+                              borderBottom: `1px ${codeEdited ? 'solid' : 'dashed'} ${
+                                codeEdited ? 'var(--warning)' : 'var(--line)'
+                              }`,
+                              borderRadius: 3,
+                              background: focusedId === r.id ? 'var(--accent-wash, #EFF6FF)' : 'transparent',
+                              color: focusedId === r.id ? 'var(--ink)' : 'var(--ink-2)',
+                              fontSize: 12.5,
+                              outline: focusedId === r.id ? '2px solid var(--accent, #2563eb)' : 'none',
+                              outlineOffset: 1,
+                            }}
+                          />
+                        )}
                         <span
                           style={{
                             color: 'var(--ink)',
@@ -691,12 +941,87 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                         >
                           {r.unit}
                         </span>
-                        <span
-                          className="num"
-                          style={{ textAlign: 'right', color: 'var(--ink-3)' }}
-                        >
-                          {r.orderQty === 0 ? '—' : r.orderQty.toLocaleString('ko-KR')}
-                        </span>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                          {(() => {
+                            const orderQtyEdited = r.orderQty !== r.originalOrderQty;
+                            return (
+                              <input
+                                type="number"
+                                min={0}
+                                step={1}
+                                value={r.orderQty}
+                                onChange={(e) => handleOrderQtyChange(r.id, Number(e.target.value))}
+                                onFocus={(e) => {
+                                  e.currentTarget.select();
+                                  setFocusedId(r.id + '_oqty');
+                                }}
+                                onBlur={() => setFocusedId(null)}
+                                title={orderQtyEdited ? `원본: ${r.originalOrderQty.toLocaleString('ko-KR')}` : undefined}
+                                className="num"
+                                style={{
+                                  width: 68,
+                                  height: 26,
+                                  padding: '0 6px',
+                                  textAlign: 'right',
+                                  border: `1px solid ${
+                                    focusedId === r.id + '_oqty'
+                                      ? 'var(--accent, #2563eb)'
+                                      : orderQtyEdited
+                                        ? 'var(--warning)'
+                                        : 'var(--line)'
+                                  }`,
+                                  borderRadius: 4,
+                                  background: focusedId === r.id + '_oqty' ? 'var(--accent-wash, #EFF6FF)' : 'var(--surface)',
+                                  color: 'var(--ink)',
+                                  fontSize: 12.5,
+                                  outline: 'none',
+                                }}
+                              />
+                            );
+                          })()}
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                          {(() => {
+                            const orderPriceEdited =
+                              r.originalOrderPrice !== undefined &&
+                              r.orderPrice !== undefined &&
+                              Math.abs((r.orderPrice ?? 0) - (r.originalOrderPrice ?? 0)) > 0.001;
+                            return (
+                              <input
+                                type="number"
+                                min={0}
+                                step={0.01}
+                                value={r.orderPrice ?? 0}
+                                onChange={(e) => handleOrderPriceChange(r.id, Number(e.target.value))}
+                                onFocus={(e) => {
+                                  e.currentTarget.select();
+                                  setFocusedId(r.id + '_oprice');
+                                }}
+                                onBlur={() => setFocusedId(null)}
+                                title={orderPriceEdited ? `원본: $${(r.originalOrderPrice ?? 0).toFixed(2)}` : undefined}
+                                className="num"
+                                style={{
+                                  width: 68,
+                                  height: 26,
+                                  padding: '0 6px',
+                                  textAlign: 'right',
+                                  border: `1px solid ${
+                                    focusedId === r.id + '_oprice'
+                                      ? 'var(--accent, #2563eb)'
+                                      : orderPriceEdited
+                                        ? 'var(--warning)'
+                                        : 'var(--line)'
+                                  }`,
+                                  borderRadius: 4,
+                                  background: focusedId === r.id + '_oprice' ? 'var(--accent-wash, #EFF6FF)' : 'var(--surface)',
+                                  color: 'var(--ink)',
+                                  fontSize: 12.5,
+                                  outline: 'none',
+                                }}
+                              />
+                            );
+                          })()}
+                        </div>
                         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                           <input
                             type="number"
@@ -803,6 +1128,35 @@ export function InvoiceUploadCard({ onFill, disabled, products }: Props) {
                             {meta.label}
                           </span>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteRow(r.id)}
+                          title="이 행 삭제"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: 24,
+                            height: 24,
+                            border: 'none',
+                            borderRadius: 4,
+                            background: 'transparent',
+                            color: 'var(--ink-3)',
+                            cursor: 'pointer',
+                            padding: 0,
+                            flexShrink: 0,
+                          }}
+                          onMouseEnter={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.background = 'var(--danger-wash)';
+                            (e.currentTarget as HTMLButtonElement).style.color = 'var(--danger)';
+                          }}
+                          onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                            (e.currentTarget as HTMLButtonElement).style.color = 'var(--ink-3)';
+                          }}
+                        >
+                          <X style={{ width: 13, height: 13 }} />
+                        </button>
                       </div>
                     );
                   })
@@ -1035,12 +1389,15 @@ function compareOrderInvoice(
       id: makeId(),
       code: inv.item_code,
       originalCode: inv.item_code,
+      orderCode: ord?.code ?? '',
       description: desc,
       unit: (ord?.unit ?? inv.unit) as 'DZ' | 'EA',
       orderQty,
+      originalOrderQty: orderQty,
       invoiceQty,
       originalInvoiceQty: invoiceQty,
       orderPrice,
+      originalOrderPrice: orderPrice,
       invoicePrice,
       originalInvoicePrice: invoicePrice,
       amount: inv.amount,
@@ -1060,12 +1417,15 @@ function compareOrderInvoice(
       id: makeId(),
       code: ord.code,
       originalCode: ord.code,
+      orderCode: ord.code,
       description: opsName || ord.description,
       unit: ord.unit,
       orderQty: ord.qty,
+      originalOrderQty: ord.qty,
       invoiceQty: 0,
       originalInvoiceQty: 0,
       orderPrice: ord.price,
+      originalOrderPrice: ord.price,
       invoicePrice: 0,
       originalInvoicePrice: 0,
       amount: 0,

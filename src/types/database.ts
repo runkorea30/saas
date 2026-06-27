@@ -998,6 +998,50 @@ export type Database = {
           },
         ]
       }
+      invoice_verifications: {
+        Row: {
+          id: string
+          company_id: string
+          invoice_no: string
+          invoice_date: string
+          comparison_rows: Json
+          order_rows: Json
+          invoice_rows: Json
+          order_file_name: string | null
+          invoice_file_name: string | null
+          last_tab: string
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          invoice_no?: string
+          invoice_date?: string
+          comparison_rows?: Json
+          order_rows?: Json
+          invoice_rows?: Json
+          order_file_name?: string | null
+          invoice_file_name?: string | null
+          last_tab?: string
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          invoice_no?: string
+          invoice_date?: string
+          comparison_rows?: Json
+          order_rows?: Json
+          invoice_rows?: Json
+          order_file_name?: string | null
+          invoice_file_name?: string | null
+          last_tab?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       memberships: {
         Row: {
           company_id: string
