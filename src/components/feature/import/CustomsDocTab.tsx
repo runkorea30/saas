@@ -7,9 +7,12 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Download, FileUp, Loader2, Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
+import { useToast } from '@/components/ui/Toast';
 
 // ── 타입 ──────────────────────────────────────
 
@@ -37,10 +40,22 @@ interface CodeMapping {
 
 type EditableField = 'category' | 'hsCode' | 'importReqNo' | 'originSerial';
 
+interface CooFileRow {
+  id: string;
+  file_name: string;
+  file_size: number | null;
+  mime_type: string | null;
+  uploaded_at: string | null;
+}
+
 // ── 상수 ──────────────────────────────────────
 
 const SESSION_KEY = 'customs_doc_rows';
 const SESSION_INV_KEY = 'customs_doc_invoice_no';
+
+const COO_CATEGORY = 'certificate_of_origin';
+const COO_MAX_SIZE = 20 * 1024 * 1024; // 20MB
+const COO_SELECT_LIST = 'id, file_name, file_size, mime_type, uploaded_at';
 
 const CAT_ORDER = [
   '물체염색제(가죽페인트)',
@@ -208,7 +223,100 @@ function EditCell({
 
 export function CustomsDocTab() {
   const { companyId } = useCompany();
+  const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── 원산지증명서 (C/O) ──
+  const cooQueryKey = ['doc-files-coo', companyId];
+  const [cooUploading, setCooUploading] = useState(false);
+
+  const { data: cooFiles = [] } = useQuery<CooFileRow[]>({
+    queryKey: cooQueryKey,
+    enabled: Boolean(companyId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('document_files')
+        .select(COO_SELECT_LIST)
+        .eq('company_id', companyId!)
+        .eq('category', COO_CATEGORY)
+        .order('uploaded_at', { ascending: false, nullsFirst: false });
+      if (error) throw error;
+      return (data ?? []) as CooFileRow[];
+    },
+    staleTime: 30_000,
+  });
+
+  async function handleCooUpload(file: File) {
+    if (!companyId) return;
+    if (file.size > COO_MAX_SIZE) {
+      showToast({ kind: 'error', text: '20MB 이하 파일만 업로드 가능합니다.' });
+      return;
+    }
+    setCooUploading(true);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('파일 읽기 실패'));
+        reader.readAsDataURL(file);
+      });
+      const { error } = await supabase.from('document_files').insert({
+        company_id: companyId,
+        category: COO_CATEGORY,
+        file_name: file.name,
+        file_path: base64,
+        file_size: file.size,
+        mime_type: file.type || null,
+        uploaded_at: new Date().toISOString(),
+      });
+      if (error) throw error;
+      showToast({ kind: 'success', text: '원산지증명서 업로드 완료' });
+      queryClient.invalidateQueries({ queryKey: cooQueryKey });
+    } catch (err) {
+      showToast({ kind: 'error', text: err instanceof Error ? err.message : '업로드 실패' });
+    } finally {
+      setCooUploading(false);
+    }
+  }
+
+  async function handleCooDownload(row: CooFileRow) {
+    if (!companyId) return;
+    try {
+      const { data, error } = await supabase
+        .from('document_files')
+        .select('file_path, file_name')
+        .eq('id', row.id)
+        .eq('company_id', companyId)
+        .single();
+      if (error) throw error;
+      if (!data?.file_path) throw new Error('파일 데이터 없음');
+      const a = document.createElement('a');
+      a.href = data.file_path;
+      a.download = data.file_name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      showToast({ kind: 'error', text: err instanceof Error ? err.message : '다운로드 실패' });
+    }
+  }
+
+  async function handleCooDelete(id: string) {
+    if (!companyId) return;
+    try {
+      const { error } = await supabase
+        .from('document_files')
+        .delete()
+        .eq('id', id)
+        .eq('company_id', companyId);
+      if (error) throw error;
+      showToast({ kind: 'success', text: '삭제 완료' });
+      queryClient.invalidateQueries({ queryKey: cooQueryKey });
+    } catch (err) {
+      showToast({ kind: 'error', text: err instanceof Error ? err.message : '삭제 실패' });
+    }
+  }
 
   const [status, setStatus] = useState<'idle' | 'parsing' | 'done' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
@@ -484,6 +592,122 @@ export function CustomsDocTab() {
           ❌ {errorMsg}
         </div>
       )}
+
+      {/* ── 원산지증명서 (C/O) 섹션 ── */}
+      <div style={{
+        border: '1px solid var(--line)',
+        borderRadius: 8,
+        background: 'var(--surface)',
+        overflow: 'hidden',
+      }}>
+        {/* 헤더 바 */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '8px 14px',
+          borderBottom: cooFiles.length > 0 ? '1px solid var(--line)' : 'none',
+          background: 'var(--surface-2, #f5f5f5)',
+        }}>
+          <span style={{ fontWeight: 600, fontSize: 12.5, flex: 'none' }}>
+            📋 원산지증명서 (C/O)
+          </span>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
+            {cooFiles.length > 0 ? `${cooFiles.length}개 파일` : '업로드된 파일 없음'}
+          </span>
+          <div style={{ marginLeft: 'auto' }}>
+            <label
+              className="btn-base"
+              style={{
+                cursor: cooUploading ? 'not-allowed' : 'pointer',
+                opacity: cooUploading ? 0.6 : 1,
+                height: 28,
+                fontSize: 11.5,
+                padding: '0 12px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+              }}
+            >
+              {cooUploading ? (
+                <Loader2 style={{ width: 13, height: 13 }} className="animate-spin" />
+              ) : (
+                <FileUp style={{ width: 13, height: 13 }} />
+              )}
+              <span>{cooUploading ? '업로드 중…' : '업로드'}</span>
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                disabled={cooUploading || !companyId}
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleCooUpload(file);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          </div>
+        </div>
+
+        {/* 파일 목록 */}
+        {cooFiles.length > 0 && (
+          <div>
+            {cooFiles.map((f, idx) => (
+              <div
+                key={f.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '7px 14px',
+                  borderBottom: idx < cooFiles.length - 1 ? '1px solid var(--line)' : 'none',
+                  fontSize: 12,
+                }}
+              >
+                <span style={{ fontSize: 14 }}>
+                  {f.mime_type === 'application/pdf' ? '📄' : '🖼️'}
+                </span>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {f.file_name}
+                </span>
+                {f.file_size && (
+                  <span style={{ fontSize: 11, color: 'var(--ink-3)', flex: 'none' }}>
+                    {(f.file_size / 1024).toFixed(0)}KB
+                  </span>
+                )}
+                {f.uploaded_at && (
+                  <span style={{ fontSize: 11, color: 'var(--ink-3)', flex: 'none' }}>
+                    {new Date(f.uploaded_at).toLocaleDateString('ko-KR')}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleCooDownload(f)}
+                  title="다운로드"
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    padding: '2px 4px', color: 'var(--ink-2)', flex: 'none',
+                  }}
+                >
+                  <Download style={{ width: 14, height: 14 }} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCooDelete(f.id)}
+                  title="삭제"
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    padding: '2px 4px', color: 'var(--danger)', flex: 'none',
+                  }}
+                >
+                  <Trash2 style={{ width: 14, height: 14 }} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* ── 품목 테이블 ── */}
       {status === 'done' && rows.length > 0 && (
