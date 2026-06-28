@@ -191,6 +191,14 @@ export function IncomeStatementPage() {
     return map;
   }, [pl.sellingExpenses]);
 
+  // monthly 모드 — 카테고리별 거래내역 자동분류 금액(fromBank) 맵.
+  // 입력 필드 옆 "+ 거래내역 X원" 표시에 사용.
+  const fromBankByCategory = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const e of pl.sellingExpenses) map.set(e.categoryId, e.fromBank);
+    return map;
+  }, [pl.sellingExpenses]);
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <main
@@ -524,6 +532,8 @@ export function IncomeStatementPage() {
                   mode === 'monthly'
                     ? draftValue(cat.id)
                     : String(aggregateExpenseByCategory.get(cat.id) ?? 0);
+                const fromBank = fromBankByCategory.get(cat.id) ?? 0;
+                const showFromBank = mode === 'monthly' && fromBank > 0;
                 return (
                   <div key={cat.id} className="flex items-center gap-2">
                     <span
@@ -574,6 +584,21 @@ export function IncomeStatementPage() {
                       </span>
                     )}
                     <span className="text-[11px] text-ink-3 w-3">원</span>
+                    {showFromBank && (
+                      <span
+                        className="num"
+                        title="은행 거래내역 자동분류 금액 (이 카테고리)"
+                        style={{
+                          fontSize: 11,
+                          color: 'var(--ink-3)',
+                          fontVariantNumeric: 'tabular-nums',
+                          whiteSpace: 'nowrap',
+                          marginLeft: 4,
+                        }}
+                      >
+                        + 거래내역 {fmtWon(fromBank)}원
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleDeleteCategory(cat.id, cat.name)}
@@ -589,6 +614,7 @@ export function IncomeStatementPage() {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
+                        marginLeft: 'auto',
                       }}
                     >
                       <Trash2 size={11} strokeWidth={1.8} />
@@ -600,21 +626,37 @@ export function IncomeStatementPage() {
 
             {categories.length > 0 && (
               <div
-                className="flex justify-between items-center mt-3 pt-3"
+                className="flex justify-between items-start mt-3 pt-3"
                 style={{ borderTop: '1px solid var(--line)' }}
               >
                 <span className="text-sm font-medium text-ink-2">합계</span>
-                <span
-                  className="num"
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 700,
-                    color: BRAND,
-                    fontVariantNumeric: 'tabular-nums',
-                  }}
-                >
-                  {fmtWon(pl.totalSellingExpenses)}원
-                </span>
+                <div className="flex flex-col items-end" style={{ gap: 2 }}>
+                  <span
+                    className="num"
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: BRAND,
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {fmtWon(pl.totalSellingExpenses)}원
+                  </span>
+                  {pl.totalSellingExpensesManual > 0 &&
+                    pl.totalSellingExpensesFromBank > 0 && (
+                      <span
+                        className="num"
+                        style={{
+                          fontSize: 10.5,
+                          color: 'var(--ink-3)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        수동 {fmtWon(pl.totalSellingExpensesManual)} + 거래내역{' '}
+                        {fmtWon(pl.totalSellingExpensesFromBank)}
+                      </span>
+                    )}
+                </div>
               </div>
             )}
 
