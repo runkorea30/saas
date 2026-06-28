@@ -27,6 +27,7 @@ import {
   type BankExpenseRow,
 } from '@/hooks/queries/useBankExpenses';
 import { usePlExpenseCategories } from '@/hooks/queries/usePlExpenseCategories';
+import type { PlMode } from '@/hooks/queries/useProfitLoss';
 
 const BRAND = '#6B1F2A';
 
@@ -38,6 +39,7 @@ interface PendingFile {
 interface Props {
   year: number;
   month: number;
+  mode: PlMode;
 }
 
 function fmtWon(n: number): string {
@@ -62,7 +64,7 @@ const EXCLUDE_REASONS = [
   { value: 'other', label: '기타제외' },
 ];
 
-export function BankExpenseSection({ year, month }: Props) {
+export function BankExpenseSection({ year, month, mode }: Props) {
   const { companyId } = useCompany();
   const { showToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -456,12 +458,28 @@ export function BankExpenseSection({ year, month }: Props) {
         </div>
       )}
 
-      {/* 리뷰 테이블 */}
-      {rowsQ.isLoading && (
+      {/* 리뷰 테이블 — monthly 모드에서만. 연간/기간선택은 안내 카드. */}
+      {mode !== 'monthly' && (
+        <div
+          style={{
+            padding: 12,
+            fontSize: 12,
+            color: 'var(--ink-3)',
+            background: 'var(--surface-2)',
+            borderRadius: 8,
+            marginTop: 4,
+          }}
+        >
+          거래내역 확인 및 분류는 <strong>월별 모드</strong>에서 가능합니다.
+          분류된 항목은 연간/기간선택 모드에서도 자동으로 합산됩니다.
+        </div>
+      )}
+
+      {mode === 'monthly' && rowsQ.isLoading && (
         <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>로딩 중…</div>
       )}
 
-      {!rowsQ.isLoading && rows.length === 0 && (
+      {mode === 'monthly' && !rowsQ.isLoading && rows.length === 0 && (
         <div
           style={{
             padding: 20,
@@ -476,7 +494,7 @@ export function BankExpenseSection({ year, month }: Props) {
         </div>
       )}
 
-      {rows.length > 0 && (
+      {mode === 'monthly' && rows.length > 0 && (
         <>
           <div
             style={{
