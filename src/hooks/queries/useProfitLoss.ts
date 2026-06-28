@@ -52,11 +52,24 @@ export interface PlExpenseLine {
   fromBank: number;
 }
 
+/** 매출원가 세부 — 항등식: beginningInventory + importPurchase - endingInventory ≈ total. */
+export interface CogsDetail {
+  /** 기초재고: opening lot + 이전 수입입고 누계 - 이전 COGS 누계. */
+  beginningInventory: number;
+  /** 수입입고: 선택 기간 내 import lot 의 quantity × cost_krw 합. */
+  importPurchase: number;
+  /** 기말재고: beginningInventory + importPurchase - total. */
+  endingInventory: number;
+  /** 매출원가 합계 (= ProfitLossData.cogs). */
+  total: number;
+}
+
 export interface ProfitLossData {
   revenue: number;
   revenueExVat: number;
   displayRevenue: number;
   cogs: number;
+  cogsDetail: CogsDetail;
   grossProfit: number;
   grossMargin: number;
   importCosts: number;
@@ -91,6 +104,8 @@ interface LotRow {
   product_id: string;
   quantity: number;
   cost_krw: number | null;
+  lot_type: string;
+  lot_date: string;
 }
 interface ImportInvoiceRow {
   invoice_date: string;
@@ -194,8 +209,32 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
       ),
   });
 
-  // 매출원가 산정용 lot 가중평균 — 회사 전체 lot 단위. 연/월에 무관하게 캐시.
-  // cost_krw >= 100,000 인 lot 은 택배비 등 비정상 opening 항목이라 제외.
+  // 기초재고 역산용 — 대상 연도 이전의 모든 판매 order_items.
+  // 가중평균 단가 × 판매EA 누계로 prior-year COGS 를 계산해 기초재고에서 차감.
+  // (현재 데이터셋은 2026 시작 → 0건 반환되어 비용 무시 가능)
+  const priorItemsQ = useQuery({
+    queryKey: ['pl-prior-items-cogs', companyId, year],
+    enabled,
+    staleTime: 1000 * 60 * 5,
+    queryFn: () =>
+      fetchAllRows<OrderItemRow>(() =>
+        supabase
+          .from('order_items')
+          .select(
+            'product_id, quantity, is_return, order:orders!inner(order_date, status, deleted_at)',
+          )
+          .eq('company_id', companyId!)
+          .is('deleted_at', null)
+          .is('order.deleted_at', null)
+          .neq('order.status', 'canceled')
+          .lt('order.order_date', yearStart),
+      ),
+  });
+
+  // 매출원가 산정용 lot — 회사 전체 lot 단위. 연/월에 무관하게 캐시.
+  //   - cost_krw 가중평균 단가 산출
+  //   - lot_type/lot_date 로 기초재고·수입입고 분해
+  //   - cost_krw >= 100,000 인 lot 은 택배비 등 비정상 opening 항목이라 제외
   const lotsQ = useQuery({
     queryKey: ['pl-lots-cogs', companyId],
     enabled,
@@ -204,7 +243,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
       fetchAllRows<LotRow>(() =>
         supabase
           .from('inventory_lots')
-          .select('product_id, quantity, cost_krw')
+          .select('product_id, quantity, cost_krw, lot_type, lot_date')
           .eq('company_id', companyId!)
           .in('lot_type', ['import', 'opening'])
           .is('deleted_at', null)
@@ -283,6 +322,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
   const isLoading =
     ordersQ.isLoading ||
     itemsQ.isLoading ||
+    priorItemsQ.isLoading ||
     lotsQ.isLoading ||
     importsQ.isLoading ||
     taxQ.isLoading ||
@@ -298,6 +338,12 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
       revenueExVat: 0,
       displayRevenue: 0,
       cogs: 0,
+      cogsDetail: {
+        beginningInventory: 0,
+        importPurchase: 0,
+        endingInventory: 0,
+        total: 0,
+      },
       grossProfit: 0,
       grossMargin: 0,
       importCosts: 0,
@@ -323,6 +369,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
 
     const orders = ordersQ.data ?? [];
     const items = itemsQ.data ?? [];
+    const priorItems = priorItemsQ.data ?? [];
     const lots = lotsQ.data ?? [];
     const imports = importsQ.data ?? [];
     const tax = taxQ.data ?? [];
@@ -361,17 +408,104 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
       if (qty > 0) avgCostMap.set(pid, totalCost / qty);
     }
 
-    // ── 매출원가 (VAT 포함 raw) — 가중평균 EA당 원가 × 판매EA, 반품 차감 ─
-    let cogsRaw = 0;
+    // ── 매출원가 분해 — 기초재고 / 수입입고 / 기말재고 / 합계 (VAT 포함 raw) ─
+    //
+    // 항등식:
+    //   기말재고 = 기초재고 + 수입입고 - 매출원가
+    //   기초재고 = openingValue + (이전 수입 누계) - (이전 COGS 누계)
+    //
+    // 가중평균 단가는 회사 전체 lot 기준 고정값(avgCostMap)이므로
+    // 월별 COGS 합 = 항상 일관되게 누적.
+
+    // (a) opening lot 총가치 — lot_type='opening' 의 quantity × cost_krw 합.
+    let openingValueRaw = 0;
+    for (const lot of lots) {
+      if (lot.lot_type !== 'opening') continue;
+      if (lot.cost_krw == null || lot.cost_krw >= 100000) continue;
+      openingValueRaw +=
+        (Number(lot.quantity) || 0) * (Number(lot.cost_krw) || 0);
+    }
+
+    // (b) 월별 수입입고 합 (대상 연도) + 이전 연도 수입 누계.
+    const monthlyImportRaw: number[] = new Array(13).fill(0); // index 1..12
+    let priorYearImportRaw = 0;
+    for (const lot of lots) {
+      if (lot.lot_type !== 'import') continue;
+      if (lot.cost_krw == null || lot.cost_krw >= 100000) continue;
+      const value =
+        (Number(lot.quantity) || 0) * (Number(lot.cost_krw) || 0);
+      const d = new Date(lot.lot_date);
+      const lotYear = d.getUTCFullYear();
+      const lotMonth = d.getUTCMonth() + 1;
+      if (lotYear < year) {
+        priorYearImportRaw += value;
+      } else if (lotYear === year && lotMonth >= 1 && lotMonth <= 12) {
+        monthlyImportRaw[lotMonth] += value;
+      }
+      // lotYear > year 는 미래 데이터 — 무시.
+    }
+
+    // (c) 월별 COGS 합 (대상 연도) + 이전 연도 COGS 누계.
+    //     가중평균 EA당 원가 × 판매EA, 반품 차감. lot 없는 product 는 0 처리.
+    const monthlyCogsRaw: number[] = new Array(13).fill(0);
     for (const it of items) {
       if (!it.order) continue;
-      if (!isMonthSelected(dateToMonth(it.order.order_date), mode, month, months))
-        continue;
+      const m = dateToMonth(it.order.order_date);
       const avgCost = avgCostMap.get(it.product_id) ?? 0;
       if (avgCost <= 0) continue;
       const sign = it.is_return ? -1 : 1;
-      cogsRaw += sign * (Number(it.quantity) || 0) * avgCost;
+      monthlyCogsRaw[m] +=
+        sign * (Number(it.quantity) || 0) * avgCost;
     }
+    let priorYearCogsRaw = 0;
+    for (const it of priorItems) {
+      if (!it.order) continue;
+      const avgCost = avgCostMap.get(it.product_id) ?? 0;
+      if (avgCost <= 0) continue;
+      const sign = it.is_return ? -1 : 1;
+      priorYearCogsRaw +=
+        sign * (Number(it.quantity) || 0) * avgCost;
+    }
+
+    // (d) 선택된 월 집합 결정.
+    const selectedMonthsList: number[] =
+      mode === 'monthly'
+        ? month != null
+          ? [month]
+          : []
+        : mode === 'yearly'
+          ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+          : [...(months ?? [])];
+
+    // (e) 첫 선택 월 이전 누계 (대상 연도 내).
+    const firstSelected =
+      selectedMonthsList.length > 0
+        ? Math.min(...selectedMonthsList)
+        : 1;
+    let importBeforeRaw = 0;
+    let cogsBeforeRaw = 0;
+    for (let m = 1; m < firstSelected; m++) {
+      importBeforeRaw += monthlyImportRaw[m];
+      cogsBeforeRaw += monthlyCogsRaw[m];
+    }
+
+    // (f) 선택 기간 합산.
+    let importPurchaseRaw = 0;
+    let cogsRaw = 0;
+    for (const m of selectedMonthsList) {
+      importPurchaseRaw += monthlyImportRaw[m] ?? 0;
+      cogsRaw += monthlyCogsRaw[m] ?? 0;
+    }
+
+    // (g) 기초재고 / 기말재고.
+    const beginningInventoryRaw =
+      openingValueRaw +
+      priorYearImportRaw -
+      priorYearCogsRaw +
+      importBeforeRaw -
+      cogsBeforeRaw;
+    const endingInventoryRaw =
+      beginningInventoryRaw + importPurchaseRaw - cogsRaw;
 
     // ── 수입비용 (운임, VAT 포함 raw) ──────────────────────
     let importCostsRaw = 0;
@@ -458,6 +592,12 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
     const displayRevenue = revenueRaw / vatDivisor;
     const cogs = cogsRaw / vatDivisor;
     const importCosts = importCostsRaw / vatDivisor;
+    const cogsDetail: CogsDetail = {
+      beginningInventory: beginningInventoryRaw / vatDivisor,
+      importPurchase: importPurchaseRaw / vatDivisor,
+      endingInventory: endingInventoryRaw / vatDivisor,
+      total: cogs,
+    };
 
     const grossProfit = displayRevenue - cogs;
     const grossMargin =
@@ -477,6 +617,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
       revenueExVat,
       displayRevenue,
       cogs,
+      cogsDetail,
       grossProfit,
       grossMargin,
       importCosts,
@@ -496,6 +637,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
   }, [
     ordersQ.data,
     itemsQ.data,
+    priorItemsQ.data,
     lotsQ.data,
     importsQ.data,
     taxQ.data,

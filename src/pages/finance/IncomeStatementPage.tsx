@@ -12,7 +12,11 @@ import { useMemo, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useToast } from '@/components/ui/Toast';
-import { useProfitLoss, type PlMode } from '@/hooks/queries/useProfitLoss';
+import {
+  useProfitLoss,
+  type CogsDetail,
+  type PlMode,
+} from '@/hooks/queries/useProfitLoss';
 import {
   usePlExpenseCategories,
   useAddPlExpenseCategory,
@@ -345,11 +349,9 @@ export function IncomeStatementPage() {
                   value={pl.displayRevenue}
                   bold
                 />
-                <PLRow
-                  label="매출원가"
-                  subLabel="(수입원가 기준)"
-                  value={-pl.cogs}
-                  sub
+                <CogsBreakdown
+                  detail={pl.cogsDetail}
+                  includeVat={includeVat}
                 />
                 <PLDivider />
                 <PLRow
@@ -717,5 +719,113 @@ function PLDivider() {
         margin: '4px 10px',
       }}
     />
+  );
+}
+
+// ───────────────────────────────────────────────────────────
+// 매출원가 — 기초재고 / 수입입고 / 기말재고 / 합계 분해 표시.
+
+function CogsBreakdown({
+  detail,
+  includeVat,
+}: {
+  detail: CogsDetail;
+  includeVat: boolean;
+}) {
+  return (
+    <div style={{ padding: '4px 10px 6px 26px' }}>
+      <div
+        className="flex items-center"
+        style={{
+          fontSize: 12.5,
+          color: 'var(--ink-2)',
+          marginBottom: 4,
+        }}
+      >
+        <span style={{ marginRight: 4, color: 'var(--ink-4)' }}>└</span>
+        매출원가
+        {includeVat && (
+          <span
+            style={{
+              marginLeft: 8,
+              fontSize: 10.5,
+              color: 'var(--ink-3)',
+              fontWeight: 400,
+            }}
+          >
+            ※ 부가세(10%) 포함 금액
+          </span>
+        )}
+      </div>
+      <div
+        style={{
+          marginLeft: 14,
+          paddingLeft: 10,
+          borderLeft: '2px solid var(--line)',
+        }}
+      >
+        <CogsLine label="기초재고" value={detail.beginningInventory} />
+        <CogsLine label="수입입고" value={detail.importPurchase} />
+        <CogsLine
+          label="기말재고"
+          value={-detail.endingInventory}
+          negative
+        />
+        <div
+          style={{
+            borderTop: '1px solid var(--line)',
+            marginTop: 3,
+            paddingTop: 3,
+          }}
+        >
+          <CogsLine
+            label="매출원가 합계"
+            value={-detail.total}
+            negative
+            bold
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CogsLine({
+  label,
+  value,
+  negative,
+  bold,
+}: {
+  label: string;
+  value: number;
+  negative?: boolean;
+  bold?: boolean;
+}) {
+  return (
+    <div
+      className="flex items-center justify-between"
+      style={{ padding: '2px 4px' }}
+    >
+      <span
+        style={{
+          fontSize: 12,
+          color: bold ? 'var(--ink-2)' : 'var(--ink-3)',
+          fontWeight: bold ? 600 : 400,
+        }}
+      >
+        {label}
+      </span>
+      <span
+        className="num"
+        style={{
+          fontSize: 12.5,
+          color: negative ? 'var(--danger)' : 'var(--ink)',
+          fontWeight: bold ? 700 : 400,
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {fmtWon(value)}원
+      </span>
+    </div>
   );
 }
