@@ -605,8 +605,8 @@ export function IncomeStatementPage() {
           </section>
         </div>
 
-        {/* 하단 — 거래내역 업로드 섹션 (현재 선택된 year/month 기준) */}
-        <BankExpenseSection year={year} month={month} mode={mode} />
+        {/* 하단 — 거래내역 업로드 섹션 (year 만 받고 month 는 자체 셀렉터) */}
+        <BankExpenseSection year={year} />
       </main>
     </div>
   );

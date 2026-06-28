@@ -6,11 +6,11 @@
  *   2. 각 파일에 계좌 별칭 입력
  *   3. [자동분류 실행] — DB unique 제약으로 중복 자동 스킵
  *   4. 토스트: "N건 추가, M건 중복 스킵"
- *   5. 리뷰 테이블 (현재 선택된 월) — 미분류 행 상단 정렬 + 빨간 점
- *   6. 미분류 0 건이면 [전체 확인 완료] 활성화 → is_confirmed=true 일괄 저장
+ *   5. 자체 월 선택기(전체 / 데이터 있는 월) — 상단 손익 month 와 독립
+ *   6. 리뷰 테이블 (선택된 월 또는 연도 전체) — 미분류 행 상단 정렬 + 빨간 점
+ *   7. 미분류 0 건이면 [전체 확인 완료] 활성화 (단일 월 선택 시에만)
  *
- * 🟠 표시 행은 현재 (year, month) 만, 업로드 자체는 모든 월 행 저장.
- * 🟠 업로드 batch year/month 는 첫 거래월 기준.
+ * 🟠 selectedMonth 는 컴포넌트 내부 state — 페이지 mode/month 와 별개.
  */
 import { useRef, useState } from 'react';
 import { Trash2, Upload, X } from 'lucide-react';
@@ -18,6 +18,7 @@ import { useCompany } from '@/hooks/useCompany';
 import { useToast } from '@/components/ui/Toast';
 import {
   useBankClassifyRules,
+  useBankExpenseMonths,
   useBankExpenseRows,
   useBankExpenseUploads,
   useConfirmAllBankExpenseRows,
@@ -27,7 +28,6 @@ import {
   type BankExpenseRow,
 } from '@/hooks/queries/useBankExpenses';
 import { usePlExpenseCategories } from '@/hooks/queries/usePlExpenseCategories';
-import type { PlMode } from '@/hooks/queries/useProfitLoss';
 
 const BRAND = '#6B1F2A';
 
@@ -37,10 +37,11 @@ interface PendingFile {
 }
 
 interface Props {
+  /** 페이지에서 선택된 연도. 거래내역은 이 연도 범위 내에서 조회. */
   year: number;
-  month: number;
-  mode: PlMode;
 }
+
+type SelectedMonth = number | 'all';
 
 function fmtWon(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -64,16 +65,22 @@ const EXCLUDE_REASONS = [
   { value: 'other', label: '기타제외' },
 ];
 
-export function BankExpenseSection({ year, month, mode }: Props) {
+export function BankExpenseSection({ year }: Props) {
   const { companyId } = useCompany();
   const { showToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState<SelectedMonth>('all');
 
   const rulesQ = useBankClassifyRules(companyId);
-  const rowsQ = useBankExpenseRows(companyId, year, month);
+  const rowsQ = useBankExpenseRows(
+    companyId,
+    year,
+    selectedMonth === 'all' ? undefined : selectedMonth,
+  );
+  const monthsQ = useBankExpenseMonths(companyId, year);
   const uploadsQ = useBankExpenseUploads(companyId, year);
   const categoriesQ = usePlExpenseCategories(companyId);
 
@@ -84,6 +91,7 @@ export function BankExpenseSection({ year, month, mode }: Props) {
 
   const rules = rulesQ.data ?? [];
   const rows = rowsQ.data ?? [];
+  const availableMonths = monthsQ.data ?? [];
   const uploads = uploadsQ.data ?? [];
   const categories = categoriesQ.data ?? [];
 
@@ -221,8 +229,9 @@ export function BankExpenseSection({ year, month, mode }: Props) {
 
   const handleConfirmAll = () => {
     if (!companyId || hasUnclassified) return;
+    if (selectedMonth === 'all') return; // 전체 모드에서는 비활성.
     confirmAllMut.mutate(
-      { companyId, year, month },
+      { companyId, year, month: selectedMonth },
       {
         onSuccess: () =>
           showToast({ kind: 'success', text: '확인 완료' }),
@@ -458,28 +467,58 @@ export function BankExpenseSection({ year, month, mode }: Props) {
         </div>
       )}
 
-      {/* 리뷰 테이블 — monthly 모드에서만. 연간/기간선택은 안내 카드. */}
-      {mode !== 'monthly' && (
-        <div
+      {/* 자체 월 선택기 — 상단 손익 month 와 독립 */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <span
           style={{
-            padding: 12,
-            fontSize: 12,
+            fontSize: 11.5,
             color: 'var(--ink-3)',
-            background: 'var(--surface-2)',
-            borderRadius: 8,
-            marginTop: 4,
+            flexShrink: 0,
           }}
         >
-          거래내역 확인 및 분류는 <strong>월별 모드</strong>에서 가능합니다.
-          분류된 항목은 연간/기간선택 모드에서도 자동으로 합산됩니다.
+          거래내역 조회:
+        </span>
+        <div className="flex flex-wrap gap-1">
+          {(['all', ...availableMonths] as SelectedMonth[]).map((m) => {
+            const active = selectedMonth === m;
+            return (
+              <button
+                key={String(m)}
+                type="button"
+                onClick={() => setSelectedMonth(m)}
+                className="transition-colors"
+                style={{
+                  padding: '3px 10px',
+                  fontSize: 11.5,
+                  borderRadius: 4,
+                  border: `1px solid ${active ? BRAND : 'var(--line)'}`,
+                  background: active ? BRAND : 'transparent',
+                  color: active ? '#fff' : 'var(--ink-3)',
+                  cursor: 'pointer',
+                }}
+              >
+                {m === 'all' ? '전체' : `${m}월`}
+              </button>
+            );
+          })}
         </div>
-      )}
+        <span
+          style={{
+            marginLeft: 'auto',
+            fontSize: 11,
+            color: 'var(--ink-3)',
+          }}
+        >
+          {rows.length}건
+        </span>
+      </div>
 
-      {mode === 'monthly' && rowsQ.isLoading && (
+      {/* 리뷰 테이블 */}
+      {rowsQ.isLoading && (
         <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>로딩 중…</div>
       )}
 
-      {mode === 'monthly' && !rowsQ.isLoading && rows.length === 0 && (
+      {!rowsQ.isLoading && rows.length === 0 && (
         <div
           style={{
             padding: 20,
@@ -490,11 +529,13 @@ export function BankExpenseSection({ year, month, mode }: Props) {
             borderRadius: 8,
           }}
         >
-          이번 달 거래내역이 없습니다. 상단 [+ XLS 업로드] 로 시작하세요.
+          {selectedMonth === 'all'
+            ? `${year}년 거래내역이 없습니다. 상단 [+ XLS 업로드] 로 시작하세요.`
+            : `${selectedMonth}월 거래내역이 없습니다.`}
         </div>
       )}
 
-      {mode === 'monthly' && rows.length > 0 && (
+      {rows.length > 0 && (
         <>
           <div
             style={{
@@ -695,19 +736,37 @@ export function BankExpenseSection({ year, month, mode }: Props) {
             <button
               type="button"
               onClick={handleConfirmAll}
-              disabled={hasUnclassified || confirmAllMut.isPending}
+              disabled={
+                hasUnclassified ||
+                confirmAllMut.isPending ||
+                selectedMonth === 'all'
+              }
               title={
-                hasUnclassified ? '미분류 항목을 먼저 처리해주세요' : ''
+                selectedMonth === 'all'
+                  ? '월을 선택하면 일괄 확인이 가능합니다'
+                  : hasUnclassified
+                    ? '미분류 항목을 먼저 처리해주세요'
+                    : ''
               }
               style={{
                 padding: '6px 14px',
-                background: hasUnclassified ? 'var(--surface-2)' : BRAND,
-                color: hasUnclassified ? 'var(--ink-3)' : '#fff',
+                background:
+                  hasUnclassified || selectedMonth === 'all'
+                    ? 'var(--surface-2)'
+                    : BRAND,
+                color:
+                  hasUnclassified || selectedMonth === 'all'
+                    ? 'var(--ink-3)'
+                    : '#fff',
                 fontSize: 12.5,
                 borderRadius: 6,
                 border: 'none',
-                cursor: hasUnclassified ? 'not-allowed' : 'pointer',
-                opacity: hasUnclassified ? 0.6 : 1,
+                cursor:
+                  hasUnclassified || selectedMonth === 'all'
+                    ? 'not-allowed'
+                    : 'pointer',
+                opacity:
+                  hasUnclassified || selectedMonth === 'all' ? 0.6 : 1,
               }}
             >
               전체 확인 완료

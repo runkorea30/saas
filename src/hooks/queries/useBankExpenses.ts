@@ -62,27 +62,56 @@ export function useBankClassifyRules(companyId: string | null) {
   });
 }
 
+/**
+ * 단일 월 또는 전체 연도 행 조회.
+ * - month: number → 해당 월만
+ * - month: undefined → 연도 전체 (월 무관)
+ */
 export function useBankExpenseRows(
   companyId: string | null,
   year: number,
-  month: number,
+  month: number | undefined,
 ) {
   return useQuery({
-    queryKey: ['bank-expense-rows', companyId, year, month],
+    queryKey: ['bank-expense-rows', companyId, year, month ?? 'all'],
     enabled: Boolean(companyId),
     staleTime: 1000 * 60 * 2,
     queryFn: () =>
-      fetchAllRows<BankExpenseRow>(() =>
-        supabase
+      fetchAllRows<BankExpenseRow>(() => {
+        let q = supabase
           .from('bank_expense_rows')
           .select(
             'id, upload_id, transaction_date, counterpart, memo, description, withdrawal, deposit, pl_category_id, exclude_reason, is_excluded, is_confirmed, year, month',
           )
           .eq('company_id', companyId!)
-          .eq('year', year)
-          .eq('month', month)
-          .order('transaction_date', { ascending: false }),
-      ),
+          .eq('year', year);
+        if (month !== undefined) q = q.eq('month', month);
+        return q.order('transaction_date', { ascending: false });
+      }),
+  });
+}
+
+/** 해당 연도에 데이터가 존재하는 distinct month 목록 (오름차순). */
+export function useBankExpenseMonths(
+  companyId: string | null,
+  year: number,
+) {
+  return useQuery({
+    queryKey: ['bank-expense-months', companyId, year],
+    enabled: Boolean(companyId),
+    staleTime: 1000 * 60 * 2,
+    queryFn: async () => {
+      const rows = await fetchAllRows<{ month: number }>(() =>
+        supabase
+          .from('bank_expense_rows')
+          .select('month')
+          .eq('company_id', companyId!)
+          .eq('year', year),
+      );
+      const set = new Set<number>();
+      for (const r of rows) set.add(r.month);
+      return Array.from(set).sort((a, b) => a - b);
+    },
   });
 }
 
@@ -231,6 +260,7 @@ export function useUploadBankExpenses() {
       qc.invalidateQueries({ queryKey: ['bank-expense-rows'] });
       qc.invalidateQueries({ queryKey: ['bank-expense-uploads'] });
       qc.invalidateQueries({ queryKey: ['bank-expense-rows-pl'] });
+      qc.invalidateQueries({ queryKey: ['bank-expense-months'] });
     },
   });
 }
@@ -305,6 +335,7 @@ export function useDeleteBankExpenseUpload() {
       qc.invalidateQueries({ queryKey: ['bank-expense-rows'] });
       qc.invalidateQueries({ queryKey: ['bank-expense-uploads'] });
       qc.invalidateQueries({ queryKey: ['bank-expense-rows-pl'] });
+      qc.invalidateQueries({ queryKey: ['bank-expense-months'] });
     },
   });
 }
