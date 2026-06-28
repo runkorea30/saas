@@ -19,6 +19,7 @@ import { Download, FileSpreadsheet, RefreshCw, Save } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useCompany } from '@/hooks/useCompany';
 import { usePurchaseOrder } from '@/hooks/queries/usePurchaseOrder';
+import { usePurchaseOrderExcluded } from '@/hooks/usePurchaseOrderExcluded';
 import { useToast } from '@/components/ui/Toast';
 import { supabase } from '@/lib/supabase';
 import {
@@ -71,6 +72,9 @@ export function PurchaseOrderPage() {
     isLoading,
     error,
   } = usePurchaseOrder(companyId);
+  // 발주 예상 제외 카테고리 — TopNav 헤더 위젯과 동일 localStorage 공유.
+  const { excluded: excludedCategories, toggle: toggleExcluded } =
+    usePurchaseOrderExcluded();
 
   const now = new Date();
   const year = now.getFullYear();
@@ -103,11 +107,13 @@ export function PurchaseOrderPage() {
   const totalUsd = useMemo(() => {
     let sum = 0;
     for (const p of products) {
+      // 제외 카테고리는 발주 예상 합계에서 빼고 — TopNav 헤더 위젯과 일치.
+      if (excludedCategories.has(p.category)) continue;
       const qty = orderQty.get(p.id) ?? 0;
       if (qty > 0 && p.unit_price_usd) sum += qty * Number(p.unit_price_usd);
     }
     return sum;
-  }, [products, orderQty]);
+  }, [products, orderQty, excludedCategories]);
 
   const filledCount = useMemo(() => {
     let n = 0;
@@ -125,10 +131,12 @@ export function PurchaseOrderPage() {
     setOrderQty(next);
   };
 
-  /** 발주서 생성 — 모든 제품의 추천 발주수량을 자동 입력. */
+  /** 발주서 생성 — 모든 제품의 추천 발주수량을 자동 입력 (제외 카테고리 스킵). */
   const handleGenerate = () => {
     const next = new Map<string, number>();
     for (const p of products) {
+      // 제외 카테고리는 추천 발주수량 생성에서 스킵 — 테이블 값과 푸터 합계 일치.
+      if (excludedCategories.has(p.category)) continue;
       const qty6mExcl = salesMap.get(p.id) ?? 0;
       const qty3m = calcSalesQty3m(qty6mExcl);
       // salesBasis 에 따라 기준 수량 결정 (1m = 3m / 3)
@@ -603,7 +611,9 @@ export function PurchaseOrderPage() {
               label={getCategoryLabel(cat)}
               isSelected={selectedCategory === cat}
               isSaved={savedCategories.has(cat)}
+              isExcluded={excludedCategories.has(cat)}
               onClick={() => handleCategoryClick(cat)}
+              onToggleExclude={() => toggleExcluded(cat)}
             />
           ))}
           <div style={{ flex: 1 }} />
@@ -789,6 +799,11 @@ export function PurchaseOrderPage() {
         >
           총 {filteredProducts.length}품목 표시 · 발주 {filledCount}품목 ·
           총합계 ${formatUsd(totalUsd)}
+          {excludedCategories.size > 0 && (
+            <div style={{ marginTop: 4, fontSize: 11, color: 'var(--ink-3)' }}>
+              제외: {Array.from(excludedCategories).join(', ')}
+            </div>
+          )}
         </div>
       </main>
     </div>
@@ -824,12 +839,17 @@ function CategoryButton({
   label,
   isSelected,
   isSaved,
+  isExcluded,
   onClick,
+  onToggleExclude,
 }: {
   label: string;
   isSelected: boolean;
   isSaved: boolean;
+  isExcluded?: boolean;
   onClick: () => void;
+  /** 정의되면 좌상단 체크박스 노출 — "전체" 버튼처럼 토글 불필요 시 omit. */
+  onToggleExclude?: () => void;
 }) {
   // 우선순위: selected > saved > 기본
   let background = 'transparent';
@@ -844,21 +864,59 @@ function CategoryButton({
     color = '#166534'; // green-800
     borderColor = '#22C55E'; // green-500
   }
+  // 제외 카테고리는 흐리게 + 취소선 — 발주 예상에 안 잡힘을 시각화.
+  const opacity = isExcluded ? 0.4 : 1;
+  const textDecoration = isExcluded ? 'line-through' : 'none';
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="btn-base"
+    <span
       style={{
-        height: 28,
-        fontSize: 12,
-        background,
-        color,
-        borderColor,
+        position: 'relative',
+        display: 'inline-flex',
+        alignItems: 'center',
       }}
     >
-      {label}
-    </button>
+      <button
+        type="button"
+        onClick={onClick}
+        className="btn-base"
+        style={{
+          height: 28,
+          fontSize: 12,
+          background,
+          color,
+          borderColor,
+          opacity,
+          textDecoration,
+        }}
+      >
+        {label}
+      </button>
+      {onToggleExclude && (
+        <input
+          type="checkbox"
+          checked={!isExcluded}
+          onChange={(e) => {
+            e.stopPropagation();
+            onToggleExclude();
+          }}
+          onClick={(e) => e.stopPropagation()}
+          title={
+            isExcluded
+              ? '발주 예상에서 제외됨 (클릭하여 포함)'
+              : '발주 예상에 포함됨 (클릭하여 제외)'
+          }
+          style={{
+            position: 'absolute',
+            top: -5,
+            right: -5,
+            width: 12,
+            height: 12,
+            accentColor: '#6B1F2A',
+            cursor: 'pointer',
+          }}
+        />
+      )}
+    </span>
   );
 }
 

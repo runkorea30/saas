@@ -633,21 +633,14 @@ export function ImportReceivingPage() {
           totalKrw={summary.totalKrw}
         />
 
-        <ImportRowsTable
-          rows={enrichedRows}
-          onUpdateRow={updateRow}
-          onRemoveRow={removeRow}
-          onAddRow={addRow}
-          disabled={busy}
-        />
-
-        {/* 하단 액션 바 */}
+        {/* 상단 액션 바 — 테이블 위 */}
         <div
           style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             marginTop: 14,
+            marginBottom: 10,
             gap: 10,
           }}
         >
@@ -683,6 +676,14 @@ export function ImportReceivingPage() {
               : `입고확정 (${validSubmitRows.length}건)`}
           </button>
         </div>
+
+        <ImportRowsTable
+          rows={enrichedRows}
+          onUpdateRow={updateRow}
+          onRemoveRow={removeRow}
+          onAddRow={addRow}
+          disabled={busy}
+        />
 
             <RecentInvoicesSection companyId={companyId} />
           </>

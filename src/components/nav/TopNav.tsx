@@ -5,8 +5,7 @@
  * - 설정 바로 오른쪽: 발주 예상 위젯 (1m/3m 토글 + 카테고리 필터 + USD 금액)
  *
  * 🔴 계산식은 발주서 페이지와 완전 일치 (useOrderNeedEstimate 주석 참조).
- * 🟠 excludedCategories 는 localStorage 보존 — 새로고침/재로그인 후에도 유지.
- *    기본값: 해상(선박) 수입 카테고리 3종.
+ * 🟠 excludedCategories 는 usePurchaseOrderExcluded 훅 — 발주서 페이지와 공유.
  */
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -17,36 +16,7 @@ import {
   useOrderNeedEstimate,
   type OrderBasis,
 } from '@/hooks/queries/useOrderNeedEstimate';
-
-const STORAGE_KEY = 'purchaseOrderExcludedCategories';
-
-/** 헤더 위젯의 초기 제외 카테고리 — 해상(선박) 수입. */
-const DEFAULT_EXCLUDED: readonly string[] = [
-  '2-1.레더다이',
-  '2-2.스웨이드다이',
-  '3-1.디글레이저',
-];
-
-function loadExcluded(): Set<string> {
-  if (typeof window === 'undefined') return new Set(DEFAULT_EXCLUDED);
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw == null) return new Set(DEFAULT_EXCLUDED);
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return new Set(DEFAULT_EXCLUDED);
-    return new Set(arr.filter((v): v is string => typeof v === 'string'));
-  } catch {
-    return new Set(DEFAULT_EXCLUDED);
-  }
-}
-
-function saveExcluded(set: Set<string>): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(set)));
-  } catch {
-    /* localStorage 사용 불가 환경 — 무시. */
-  }
-}
+import { usePurchaseOrderExcluded } from '@/hooks/usePurchaseOrderExcluded';
 
 function fmtUsd(v: number): string {
   return v.toLocaleString('en-US', {
@@ -60,7 +30,8 @@ export function TopNav() {
   const navigate = useNavigate();
   const { companyId } = useCompany();
   const [basis, setBasis] = useState<OrderBasis>('1m');
-  const [excluded, setExcluded] = useState<Set<string>>(loadExcluded);
+  const { excluded, toggle, includeAll, restoreDefault } =
+    usePurchaseOrderExcluded();
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
@@ -81,28 +52,6 @@ export function TopNav() {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [filterOpen]);
-
-  const toggleCategory = (cat: string) => {
-    setExcluded((prev) => {
-      const next = new Set(prev);
-      if (next.has(cat)) next.delete(cat);
-      else next.add(cat);
-      saveExcluded(next);
-      return next;
-    });
-  };
-
-  const includeAll = () => {
-    const next = new Set<string>();
-    saveExcluded(next);
-    setExcluded(next);
-  };
-
-  const restoreDefault = () => {
-    const next = new Set(DEFAULT_EXCLUDED);
-    saveExcluded(next);
-    setExcluded(next);
-  };
 
   return (
     <header
@@ -198,7 +147,7 @@ export function TopNav() {
                     <input
                       type="checkbox"
                       checked={!excluded.has(cat)}
-                      onChange={() => toggleCategory(cat)}
+                      onChange={() => toggle(cat)}
                       className="accent-brand"
                     />
                     <span>{cat}</span>
