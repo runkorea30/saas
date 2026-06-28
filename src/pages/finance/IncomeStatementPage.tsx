@@ -528,12 +528,26 @@ export function IncomeStatementPage() {
 
             <div className="space-y-1.5">
               {categories.map((cat) => {
-                const value =
-                  mode === 'monthly'
-                    ? draftValue(cat.id)
-                    : String(aggregateExpenseByCategory.get(cat.id) ?? 0);
                 const fromBank = fromBankByCategory.get(cat.id) ?? 0;
-                const showFromBank = mode === 'monthly' && fromBank > 0;
+                const manualSaved = Number(monthExpenseMap.get(cat.id) ?? 0);
+                const aggregate = aggregateExpenseByCategory.get(cat.id) ?? 0;
+
+                // 우측 값 영역의 표시 모드 결정 — monthly 일 때만 fromBank 고려.
+                //   yearly/custom: 항상 합산 숫자(aggregate) read-only
+                //   monthly:
+                //     - fromBank > 0 && manualSaved === 0 → 자동분류 숫자만
+                //     - fromBank > 0 && manualSaved > 0   → 합계 숫자 + 출처 소괄호
+                //     - fromBank === 0                    → 수동 입력 필드
+                const isMonthly = mode === 'monthly';
+                const showAutoOnly =
+                  isMonthly && fromBank > 0 && manualSaved === 0;
+                const showCombined =
+                  isMonthly && fromBank > 0 && manualSaved > 0;
+                const showInput = !isMonthly ? false : fromBank === 0;
+                const readOnlyValue = isMonthly
+                  ? manualSaved + fromBank
+                  : aggregate;
+
                 return (
                   <div key={cat.id} className="flex items-center gap-2">
                     <span
@@ -545,13 +559,13 @@ export function IncomeStatementPage() {
                     >
                       {cat.name}
                     </span>
-                    {mode === 'monthly' ? (
+                    {showInput ? (
                       <input
                         type="number"
                         inputMode="numeric"
                         min={0}
                         step={1000}
-                        value={value}
+                        value={draftValue(cat.id)}
                         onChange={(e) => onDraftChange(cat.id, e.target.value)}
                         onBlur={() => onDraftBlur(cat.id)}
                         placeholder="0"
@@ -580,23 +594,25 @@ export function IncomeStatementPage() {
                           fontVariantNumeric: 'tabular-nums',
                         }}
                       >
-                        {fmtWon(Number(value) || 0)}
+                        {showAutoOnly
+                          ? fmtWon(fromBank)
+                          : fmtWon(readOnlyValue)}
                       </span>
                     )}
                     <span className="text-[11px] text-ink-3 w-3">원</span>
-                    {showFromBank && (
+                    {showCombined && (
                       <span
                         className="num"
-                        title="은행 거래내역 자동분류 금액 (이 카테고리)"
+                        title="이 카테고리 합계 = 수동 입력 + 거래내역 자동분류"
                         style={{
-                          fontSize: 11,
+                          fontSize: 10.5,
                           color: 'var(--ink-3)',
                           fontVariantNumeric: 'tabular-nums',
                           whiteSpace: 'nowrap',
                           marginLeft: 4,
                         }}
                       >
-                        + 거래내역 {fmtWon(fromBank)}원
+                        (수동 {fmtWon(manualSaved)} + 거래내역 {fmtWon(fromBank)})
                       </span>
                     )}
                     <button
