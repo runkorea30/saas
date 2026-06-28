@@ -21,8 +21,12 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 
-/** 매출원가 환산 환율 — 추후 import_invoices 평균환율로 동적 계산 가능. */
-export const DEFAULT_EXCHANGE_RATE = 1300;
+/**
+ * 매출원가 환산 환율 fallback (₩/USD).
+ * inventory_lots 역산 결과 실제 수입환율은 ₩1,574~1,579 범위 →
+ * 기본값 1,575. 페이지에서 사용자가 직접 조정 가능.
+ */
+export const DEFAULT_EXCHANGE_RATE = 1575;
 
 export type PlMode = 'monthly' | 'yearly' | 'custom';
 
@@ -37,6 +41,8 @@ export interface UseProfitLossParams {
   includeVat: boolean;
   /** 매출원가 관세율(%). 8 = 8% 가산. 0 = 미적용. */
   tariffRate?: number;
+  /** 매출원가 환산 환율(₩/USD). 미지정 시 DEFAULT_EXCHANGE_RATE. */
+  exchangeRate?: number;
 }
 
 export interface PlExpenseLine {
@@ -143,8 +149,16 @@ function periodLabel(
 }
 
 export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
-  const { companyId, mode, year, month, months, includeVat, tariffRate = 0 } =
-    params;
+  const {
+    companyId,
+    mode,
+    year,
+    month,
+    months,
+    includeVat,
+    tariffRate = 0,
+    exchangeRate = DEFAULT_EXCHANGE_RATE,
+  } = params;
 
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year + 1}-01-01`;
@@ -320,7 +334,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
       const dzPriceUsd = Number(it.product?.unit_price_usd) || 0;
       if (dzPriceUsd <= 0) continue;
       const costPerEaKrw =
-        (dzPriceUsd / 12) * DEFAULT_EXCHANGE_RATE * tariffMultiplier;
+        (dzPriceUsd / 12) * exchangeRate * tariffMultiplier;
       const sign = it.is_return ? -1 : 1;
       cogs += sign * it.quantity * costPerEaKrw;
     }
@@ -445,6 +459,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
     months,
     includeVat,
     tariffRate,
+    exchangeRate,
     isLoading,
   ]);
 }

@@ -17,6 +17,7 @@ import {
   DEFAULT_EXCHANGE_RATE,
   type PlMode,
 } from '@/hooks/queries/useProfitLoss';
+// DEFAULT_EXCHANGE_RATE 는 환율 state 초기 fallback 으로만 사용.
 import {
   usePlExpenseCategories,
   useAddPlExpenseCategory,
@@ -31,6 +32,7 @@ import { BankExpenseSection } from '@/components/feature/finance/BankExpenseSect
 const BRAND = '#6B1F2A';
 const TARIFF_STORAGE_KEY = 'pl_tariff_rate';
 const DEFAULT_TARIFF_RATE = 8;
+const EXCHANGE_STORAGE_KEY = 'pl_exchange_rate';
 
 function loadTariffRate(): number {
   if (typeof window === 'undefined') return DEFAULT_TARIFF_RATE;
@@ -41,6 +43,18 @@ function loadTariffRate(): number {
     return Number.isFinite(n) && n >= 0 ? n : DEFAULT_TARIFF_RATE;
   } catch {
     return DEFAULT_TARIFF_RATE;
+  }
+}
+
+function loadExchangeRate(): number {
+  if (typeof window === 'undefined') return DEFAULT_EXCHANGE_RATE;
+  try {
+    const raw = window.localStorage.getItem(EXCHANGE_STORAGE_KEY);
+    if (raw == null) return DEFAULT_EXCHANGE_RATE;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : DEFAULT_EXCHANGE_RATE;
+  } catch {
+    return DEFAULT_EXCHANGE_RATE;
   }
 }
 
@@ -73,6 +87,16 @@ export function IncomeStatementPage() {
     }
   };
 
+  const [exchangeRate, setExchangeRateState] = useState<number>(loadExchangeRate);
+  const setExchangeRate = (n: number) => {
+    setExchangeRateState(n);
+    try {
+      window.localStorage.setItem(EXCHANGE_STORAGE_KEY, String(n));
+    } catch {
+      /* ignore */
+    }
+  };
+
   const yearOptions = useMemo(() => {
     const y = now.getFullYear();
     return [y - 2, y - 1, y, y + 1];
@@ -86,6 +110,7 @@ export function IncomeStatementPage() {
     months: mode === 'custom' ? selectedMonths : undefined,
     includeVat,
     tariffRate,
+    exchangeRate,
   });
 
   const categoriesQ = usePlExpenseCategories(companyId);
@@ -292,6 +317,35 @@ export function IncomeStatementPage() {
               </div>
             </div>
 
+            {/* 환율 입력 — localStorage 저장 (기본 1575) */}
+            <div className="flex items-center gap-1.5 ml-2">
+              <span className="text-xs text-ink-3">환율 ₩</span>
+              <input
+                type="number"
+                value={exchangeRate}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (Number.isFinite(n) && n > 0) setExchangeRate(n);
+                }}
+                min={1000}
+                max={2000}
+                step={1}
+                style={{
+                  width: 64,
+                  height: 28,
+                  padding: '0 6px',
+                  border: '1px solid var(--line)',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  textAlign: 'center',
+                  background: 'var(--surface)',
+                  color: 'var(--ink)',
+                  outline: 'none',
+                  fontFamily: 'var(--font-num)',
+                }}
+              />
+            </div>
+
             {/* 관세율 입력 — localStorage 저장 */}
             <div className="flex items-center gap-1.5 ml-2">
               <span className="text-xs text-ink-3">관세율</span>
@@ -386,13 +440,13 @@ export function IncomeStatementPage() {
             {!pl.isLoading && !pl.hasNoMonths && (
               <div className="space-y-1">
                 <PLRow
-                  label={includeVat ? '매출액 (부가세 포함)' : '매출액 (공급가액)'}
+                  label={includeVat ? '매출액 (부가세 포함)' : '매출액 (부가세 제외)'}
                   value={pl.displayRevenue}
                   bold
                 />
                 <PLRow
                   label="매출원가"
-                  subLabel={`(수입원가 기준, 환율 ₩${DEFAULT_EXCHANGE_RATE.toLocaleString('ko-KR')}${tariffRate > 0 ? `, 관세 ${tariffRate}%` : ''})`}
+                  subLabel={`(수입원가 기준, 환율 ₩${exchangeRate.toLocaleString('ko-KR')}${tariffRate > 0 ? `, 관세 ${tariffRate}%` : ''})`}
                   value={-pl.cogs}
                   sub
                 />
