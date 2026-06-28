@@ -2,14 +2,14 @@
  * 인보이스 자동 입고 카드 — ImportReceivingPage 상단에 마운트.
  *
  * 흐름: 주문서(엑셀) + 인보이스(PDF) 업로드 → [비교 시작] → 4상태 분류 결과 표 →
- *       [기존 입력 폼에 채우기] 로 부모의 rowInputs/header 교체.
+ *       [입고처리로 이관] 으로 부모의 rowInputs/header 교체 + DB transfer_rows 저장.
  *
  * 🔴 Claude API 키는 클라이언트 노출 (VITE_ANTHROPIC_API_KEY) — 내부 도구 한정.
  *    Phase 3 에서 Supabase Edge Function 으로 이전 권장.
  * 🟠 검수/USD단가/환율/저장은 모두 부모 페이지의 기존 14컬럼 테이블에 위임.
- *    이 카드는 "파싱 + 비교 + 초기 채우기" 만 담당.
+ *    이 카드는 "파싱 + 비교 + 이관(transfer_rows 저장)" 만 담당.
  * 🟡 BO(백오더): 인보이스에 qty_shipped=0 으로 나오거나, 주문서에만 있는 항목.
- *    "기존 입력 폼에 채우기" 시 BO 행은 제외 — 실입고 0 인 행을 만들지 않음.
+ *    "입고처리로 이관" 시 BO 행은 제외 — 실입고 0 인 행을 만들지 않음.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileSpreadsheet, FileText, X } from 'lucide-react';
@@ -633,6 +633,16 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       invoiceNumber: comparison.invoiceNo,
       invoiceDate: comparison.invoiceDate,
     });
+    // 이관된 행을 DB 에 보존 — 새로고침 후에도 입고처리 폼이 복원됨.
+    if (companyId) {
+      void supabase
+        .from('invoice_verifications')
+        .update({
+          transfer_rows: rows as unknown as Json,
+          transfer_saved_at: new Date().toISOString(),
+        })
+        .eq('company_id', companyId);
+    }
   };
 
   const handleReset = () => {
@@ -672,7 +682,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
           인보이스 자동 입고
         </h2>
         <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
-          주문서(엑셀) + 인보이스(PDF) 업로드 → 비교 → 기존 폼에 채우기
+          주문서(엑셀) + 인보이스(PDF) 업로드 → 비교 → 입고처리로 이관
         </span>
       </header>
 
@@ -1377,7 +1387,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
               }
               style={{ height: 32, fontSize: 12.5 }}
             >
-              기존 입력 폼에 채우기 (
+              입고처리로 이관 (
               {
                 comparison.rows.filter(
                   (r) => r.status !== 'order_only' && r.invoiceQty > 0,

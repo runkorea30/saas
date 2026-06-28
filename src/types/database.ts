@@ -1077,6 +1077,8 @@ export type Database = {
           order_file_name: string | null
           invoice_file_name: string | null
           last_tab: string
+          transfer_rows: Json
+          transfer_saved_at: string | null
           created_at: string | null
           updated_at: string | null
         }
@@ -1091,6 +1093,8 @@ export type Database = {
           order_file_name?: string | null
           invoice_file_name?: string | null
           last_tab?: string
+          transfer_rows?: Json
+          transfer_saved_at?: string | null
           created_at?: string | null
           updated_at?: string | null
         }
@@ -1105,6 +1109,8 @@ export type Database = {
           order_file_name?: string | null
           invoice_file_name?: string | null
           last_tab?: string
+          transfer_rows?: Json
+          transfer_saved_at?: string | null
           updated_at?: string | null
         }
         Relationships: []

@@ -126,6 +126,36 @@ export function ImportReceivingPage() {
   const [noticeSeaCustomsDate, setNoticeSeaCustomsDate] = useState('');
   const [noticeSeaArrivalText, setNoticeSeaArrivalText] = useState('');
 
+  // 인보이스 검증 → 입고처리 이관본 복원 (companyId 로드 시 1회).
+  // rowInputs 가 초기 빈 상태일 때만 덮어씀 — 사용자가 이미 편집 중이면 보존.
+  const [transferLoaded, setTransferLoaded] = useState(false);
+  useEffect(() => {
+    if (!companyId || transferLoaded) return;
+    setTransferLoaded(true);
+
+    void supabase
+      .from('invoice_verifications')
+      .select('transfer_rows, invoice_no, invoice_date')
+      .eq('company_id', companyId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!data) return;
+        const restored = (data.transfer_rows as unknown as ImportRowInput[]) ?? [];
+        if (restored.length === 0) return;
+        // 첫 행이 비어있는 초기 상태일 때만 복원 — 사용자 편집 보존.
+        const untouched =
+          rowInputs.length === 1 && !rowInputs[0].sourceCode.trim();
+        if (!untouched) return;
+        setRowInputs(restored);
+        setHeader((h) => ({
+          ...h,
+          invoiceNumber: data.invoice_no ?? h.invoiceNumber,
+          invoiceDate: data.invoice_date || h.invoiceDate,
+        }));
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
   // company 로드/갱신 시 폼 초기값 동기화.
   useEffect(() => {
     if (!company) return;
@@ -336,6 +366,16 @@ export function ImportReceivingPage() {
           });
           // 행은 초기화, 헤더는 유지 (연속 입력 편의).
           setRowInputs([createEmptyRow()]);
+          // 이관본도 클리어 — 다음 새로고침 때 빈 상태로 시작.
+          if (companyId) {
+            void supabase
+              .from('invoice_verifications')
+              .update({
+                transfer_rows: [] as unknown as Json,
+                transfer_saved_at: null,
+              })
+              .eq('company_id', companyId);
+          }
         },
         onError: (e) => {
           showToast({ kind: 'error', text: e.message });

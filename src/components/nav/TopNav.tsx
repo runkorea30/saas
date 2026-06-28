@@ -92,6 +92,18 @@ export function TopNav() {
     });
   };
 
+  const includeAll = () => {
+    const next = new Set<string>();
+    saveExcluded(next);
+    setExcluded(next);
+  };
+
+  const restoreDefault = () => {
+    const next = new Set(DEFAULT_EXCLUDED);
+    saveExcluded(next);
+    setExcluded(next);
+  };
+
   return (
     <header
       className="sticky top-0 z-20 h-14 flex items-center border-b border-line"
@@ -192,6 +204,24 @@ export function TopNav() {
                     <span>{cat}</span>
                   </label>
                 ))}
+                {categories.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-line flex justify-between">
+                    <button
+                      type="button"
+                      onClick={includeAll}
+                      className="text-[10px] text-ink-3 hover:text-ink transition-colors"
+                    >
+                      전체 포함
+                    </button>
+                    <button
+                      type="button"
+                      onClick={restoreDefault}
+                      className="text-[10px] text-ink-3 hover:text-ink transition-colors"
+                    >
+                      기본값 복원
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
