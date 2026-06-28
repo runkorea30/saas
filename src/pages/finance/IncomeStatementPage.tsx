@@ -29,6 +29,20 @@ import {
 import { BankExpenseSection } from '@/components/feature/finance/BankExpenseSection';
 
 const BRAND = '#6B1F2A';
+const TARIFF_STORAGE_KEY = 'pl_tariff_rate';
+const DEFAULT_TARIFF_RATE = 8;
+
+function loadTariffRate(): number {
+  if (typeof window === 'undefined') return DEFAULT_TARIFF_RATE;
+  try {
+    const raw = window.localStorage.getItem(TARIFF_STORAGE_KEY);
+    if (raw == null) return DEFAULT_TARIFF_RATE;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : DEFAULT_TARIFF_RATE;
+  } catch {
+    return DEFAULT_TARIFF_RATE;
+  }
+}
 
 function fmtWon(n: number): string {
   const rounded = Math.round(n);
@@ -49,6 +63,15 @@ export function IncomeStatementPage() {
     now.getMonth() + 1,
   ]);
   const [includeVat, setIncludeVat] = useState(true);
+  const [tariffRate, setTariffRateState] = useState<number>(loadTariffRate);
+  const setTariffRate = (n: number) => {
+    setTariffRateState(n);
+    try {
+      window.localStorage.setItem(TARIFF_STORAGE_KEY, String(n));
+    } catch {
+      /* ignore */
+    }
+  };
 
   const yearOptions = useMemo(() => {
     const y = now.getFullYear();
@@ -62,6 +85,7 @@ export function IncomeStatementPage() {
     month: mode === 'monthly' ? month : undefined,
     months: mode === 'custom' ? selectedMonths : undefined,
     includeVat,
+    tariffRate,
   });
 
   const categoriesQ = usePlExpenseCategories(companyId);
@@ -267,6 +291,36 @@ export function IncomeStatementPage() {
                 ))}
               </div>
             </div>
+
+            {/* 관세율 입력 — localStorage 저장 */}
+            <div className="flex items-center gap-1.5 ml-2">
+              <span className="text-xs text-ink-3">관세율</span>
+              <input
+                type="number"
+                value={tariffRate}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (Number.isFinite(n) && n >= 0) setTariffRate(n);
+                }}
+                min={0}
+                max={100}
+                step={0.1}
+                style={{
+                  width: 56,
+                  height: 28,
+                  padding: '0 6px',
+                  border: '1px solid var(--line)',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  textAlign: 'center',
+                  background: 'var(--surface)',
+                  color: 'var(--ink)',
+                  outline: 'none',
+                  fontFamily: 'var(--font-num)',
+                }}
+              />
+              <span className="text-xs text-ink-3">%</span>
+            </div>
           </div>
         </header>
 
@@ -338,7 +392,7 @@ export function IncomeStatementPage() {
                 />
                 <PLRow
                   label="매출원가"
-                  subLabel={`(수입원가 기준, 환율 ₩${DEFAULT_EXCHANGE_RATE.toLocaleString('ko-KR')})`}
+                  subLabel={`(수입원가 기준, 환율 ₩${DEFAULT_EXCHANGE_RATE.toLocaleString('ko-KR')}, 관세 ${tariffRate}%)`}
                   value={-pl.cogs}
                   sub
                 />

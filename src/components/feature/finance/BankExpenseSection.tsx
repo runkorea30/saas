@@ -72,7 +72,7 @@ export function BankExpenseSection({ year, month }: Props) {
 
   const rulesQ = useBankClassifyRules(companyId);
   const rowsQ = useBankExpenseRows(companyId, year, month);
-  const uploadsQ = useBankExpenseUploads(companyId, year, month);
+  const uploadsQ = useBankExpenseUploads(companyId, year);
   const categoriesQ = usePlExpenseCategories(companyId);
 
   const uploadMut = useUploadBankExpenses();
@@ -413,7 +413,7 @@ export function BankExpenseSection({ year, month }: Props) {
               marginBottom: 4,
             }}
           >
-            이번 달({year}년 {month}월) 업로드 이력
+            {year}년 업로드 이력 (XLS 한 파일에 여러 달 데이터 포함 가능)
           </p>
           <div className="space-y-1">
             {uploads.map((u) => (

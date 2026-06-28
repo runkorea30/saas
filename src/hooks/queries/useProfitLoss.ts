@@ -35,6 +35,8 @@ export interface UseProfitLossParams {
   /** custom 모드에서만 사용. 1~12. */
   months?: number[];
   includeVat: boolean;
+  /** 매출원가 관세율(%). 8 = 8% 가산. 0 = 미적용. */
+  tariffRate?: number;
 }
 
 export interface PlExpenseLine {
@@ -141,7 +143,8 @@ function periodLabel(
 }
 
 export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
-  const { companyId, mode, year, month, months, includeVat } = params;
+  const { companyId, mode, year, month, months, includeVat, tariffRate = 0 } =
+    params;
 
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year + 1}-01-01`;
@@ -231,7 +234,8 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
       ),
   });
 
-  // 은행 거래내역 자동분류 — 확인완료 & 미제외 & 카테고리 매칭된 출금만.
+  // 은행 거래내역 자동분류 — 미제외 & 카테고리 매칭된 출금. is_confirmed 무관
+  // (확인은 UI 표식용. 분류만 되면 손익에 즉시 반영).
   const bankExpensesQ = useQuery({
     queryKey: ['bank-expense-rows-pl', companyId, year],
     enabled,
@@ -245,7 +249,6 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
           )
           .eq('company_id', companyId!)
           .eq('year', year)
-          .eq('is_confirmed', true)
           .eq('is_excluded', false)
           .not('pl_category_id', 'is', null),
       ),
@@ -305,8 +308,10 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
     }
     const revenueExVat = revenue / 1.1;
 
-    // 매출원가 = (unit_price_usd / 12) × 환율 × 판매EA, 반품(is_return=true)은 차감.
-    // unit_price_usd 가 null/0 인 품목(택배비 등)은 0 으로 처리.
+    // 매출원가 = (unit_price_usd / 12) × 환율 × (1 + 관세율) × 판매EA,
+    //   반품(is_return=true)은 차감. unit_price_usd null/0 품목(택배비 등) 스킵.
+    // 수입부가세는 환급 대상이므로 원가에 포함하지 않음.
+    const tariffMultiplier = 1 + Math.max(0, tariffRate) / 100;
     let cogs = 0;
     for (const it of items) {
       if (!it.order) continue;
@@ -314,7 +319,8 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
         continue;
       const dzPriceUsd = Number(it.product?.unit_price_usd) || 0;
       if (dzPriceUsd <= 0) continue;
-      const costPerEaKrw = (dzPriceUsd / 12) * DEFAULT_EXCHANGE_RATE;
+      const costPerEaKrw =
+        (dzPriceUsd / 12) * DEFAULT_EXCHANGE_RATE * tariffMultiplier;
       const sign = it.is_return ? -1 : 1;
       cogs += sign * it.quantity * costPerEaKrw;
     }
@@ -438,6 +444,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
     month,
     months,
     includeVat,
+    tariffRate,
     isLoading,
   ]);
 }

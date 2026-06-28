@@ -86,13 +86,16 @@ export function useBankExpenseRows(
   });
 }
 
+/**
+ * 업로드 배치 목록 — 연도 단위. month 필터링 없음.
+ * (XLS 가 여러 달에 걸쳐있을 수 있어 batch.month 로 필터하면 누락 발생)
+ */
 export function useBankExpenseUploads(
   companyId: string | null,
   year: number,
-  month: number,
 ) {
   return useQuery({
-    queryKey: ['bank-expense-uploads', companyId, year, month],
+    queryKey: ['bank-expense-uploads', companyId, year],
     enabled: Boolean(companyId),
     staleTime: 1000 * 60 * 2,
     queryFn: () =>
@@ -104,7 +107,6 @@ export function useBankExpenseUploads(
           )
           .eq('company_id', companyId!)
           .eq('year', year)
-          .eq('month', month)
           .order('created_at', { ascending: false }),
       ),
   });
