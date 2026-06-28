@@ -63,7 +63,7 @@ export function ImportRowsTable({
       }}
     >
       <div style={{ overflowX: 'auto' }}>
-        {/* 헤더 */}
+        {/* 헤더 — 본문 스크롤과 무관하게 상단 고정 */}
         <div
           style={{
             display: 'grid',
@@ -97,30 +97,32 @@ export function ImportRowsTable({
           <HeaderCell align="center">삭제</HeaderCell>
         </div>
 
-        {/* 본문 */}
-        {rows.length === 0 ? (
-          <div
-            style={{
-              padding: 30,
-              textAlign: 'center',
-              color: 'var(--ink-3)',
-              fontSize: 13,
-              minWidth: MIN_WIDTH,
-            }}
-          >
-            아래 [행 추가] 버튼을 눌러 첫 행을 만드세요.
-          </div>
-        ) : (
-          rows.map((r) => (
-            <RowView
-              key={r.id}
-              row={r}
-              onUpdate={(patch) => onUpdateRow(r.id, patch)}
-              onRemove={() => onRemoveRow(r.id)}
-              disabled={disabled}
-            />
-          ))
-        )}
+        {/* 본문 — 8행(약 360px) 고정 + 세로 스크롤. 인보이스 검증 탭과 동일 패턴. */}
+        <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+          {rows.length === 0 ? (
+            <div
+              style={{
+                padding: 30,
+                textAlign: 'center',
+                color: 'var(--ink-3)',
+                fontSize: 13,
+                minWidth: MIN_WIDTH,
+              }}
+            >
+              아래 [행 추가] 버튼을 눌러 첫 행을 만드세요.
+            </div>
+          ) : (
+            rows.map((r) => (
+              <RowView
+                key={r.id}
+                row={r}
+                onUpdate={(patch) => onUpdateRow(r.id, patch)}
+                onRemove={() => onRemoveRow(r.id)}
+                disabled={disabled}
+              />
+            ))
+          )}
+        </div>
       </div>
 
       {/* 행 추가 */}
