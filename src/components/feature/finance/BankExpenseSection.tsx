@@ -186,16 +186,11 @@ export function BankExpenseSection({ year }: Props) {
   };
 
   const handleRowCategory = (rowId: string, value: string) => {
-    if (value === '__exclude__') {
-      updateMut.mutate({
-        id: rowId,
-        patch: {
-          pl_category_id: null,
-          is_excluded: true,
-          exclude_reason: 'other',
-        },
-      });
-    } else if (value === '__clear__') {
+    const row = rows.find((r) => r.id === rowId);
+    if (!row) return;
+
+    // 'clear' 는 단일 행에만 적용 — 잘못된 분류 되돌리기 용도.
+    if (value === '__clear__') {
       updateMut.mutate({
         id: rowId,
         patch: {
@@ -204,16 +199,58 @@ export function BankExpenseSection({ year }: Props) {
           exclude_reason: null,
         },
       });
-    } else {
-      updateMut.mutate({
-        id: rowId,
-        patch: {
-          pl_category_id: value,
-          is_excluded: false,
-          exclude_reason: null,
-        },
-      });
+      return;
     }
+
+    const patch =
+      value === '__exclude__'
+        ? {
+            pl_category_id: null,
+            is_excluded: true,
+            exclude_reason: 'other' as string | null,
+          }
+        : {
+            pl_category_id: value,
+            is_excluded: false,
+            exclude_reason: null,
+          };
+
+    // 동일 counterpart 가 이 화면에 여러 건이면 소급 적용 여부 확인.
+    // 백엔드는 전 기간(전 연도/월)에 동일 counterpart 행을 모두 업데이트.
+    const counterpart = row.counterpart?.trim();
+    if (counterpart && companyId) {
+      const sameCount = rows.filter(
+        (r) => (r.counterpart ?? '').trim() === counterpart,
+      ).length;
+      if (sameCount > 1) {
+        const apply = window.confirm(
+          `"${counterpart}" 항목이 이 화면에 ${sameCount}건 있습니다.\n` +
+            `전체 기간 동일 거래처에 같은 분류를 적용하고,\n` +
+            `다음 업로드부터 자동 분류되도록 규칙으로 저장할까요?`,
+        );
+        if (apply) {
+          updateMut.mutate(
+            {
+              id: rowId,
+              patch,
+              applyToAll: { companyId, counterpart },
+            },
+            {
+              onSuccess: () =>
+                showToast({
+                  kind: 'success',
+                  text: `"${counterpart}" 전체 적용 + 규칙 저장 완료`,
+                }),
+              onError: (e) =>
+                showToast({ kind: 'error', text: e.message }),
+            },
+          );
+          return;
+        }
+      }
+    }
+
+    updateMut.mutate({ id: rowId, patch });
   };
 
   const handleExcludeReason = (rowId: string, reason: string) => {

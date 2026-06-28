@@ -392,7 +392,7 @@ export function IncomeStatementPage() {
                 />
                 <PLRow
                   label="매출원가"
-                  subLabel={`(수입원가 기준, 환율 ₩${DEFAULT_EXCHANGE_RATE.toLocaleString('ko-KR')}, 관세 ${tariffRate}%)`}
+                  subLabel={`(수입원가 기준, 환율 ₩${DEFAULT_EXCHANGE_RATE.toLocaleString('ko-KR')}${tariffRate > 0 ? `, 관세 ${tariffRate}%` : ''})`}
                   value={-pl.cogs}
                   sub
                 />

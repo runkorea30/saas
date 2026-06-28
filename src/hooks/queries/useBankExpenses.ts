@@ -276,21 +276,78 @@ export interface UpdateBankRowArgs {
     exclude_reason: string | null;
     is_confirmed: boolean;
   }>;
+  /**
+   * 정의되면 동일 counterpart 의 모든 행에 patch 적용 + bank_classify_rules
+   * 에 규칙 자동 저장 (다음 업로드부터 자동 매칭).
+   */
+  applyToAll?: {
+    companyId: string;
+    counterpart: string;
+  };
 }
 
 export function useUpdateBankExpenseRow() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: UpdateBankRowArgs) => {
-      const { error } = await supabase
-        .from('bank_expense_rows')
-        .update(args.patch)
-        .eq('id', args.id);
-      if (error) throw error;
+      if (args.applyToAll) {
+        const { companyId, counterpart } = args.applyToAll;
+        // 1) 동일 counterpart 전체 행 patch (전 기간).
+        const { error: updErr } = await supabase
+          .from('bank_expense_rows')
+          .update(args.patch)
+          .eq('company_id', companyId)
+          .eq('counterpart', counterpart);
+        if (updErr) throw updErr;
+
+        // 2) 규칙 저장 — 다음 업로드부터 자동 분류.
+        //    unique 제약이 없으므로 SELECT-then-UPDATE/INSERT.
+        const rulePayload = {
+          action:
+            args.patch.is_excluded === true ? 'exclude' : 'categorize',
+          pl_category_id: args.patch.pl_category_id ?? null,
+          exclude_reason: args.patch.exclude_reason ?? null,
+        };
+        const { data: existing, error: selErr } = await supabase
+          .from('bank_classify_rules')
+          .select('id')
+          .eq('company_id', companyId)
+          .eq('keyword', counterpart)
+          .eq('match_field', 'counterpart')
+          .maybeSingle();
+        if (selErr) throw selErr;
+        if (existing) {
+          const { error: rErr } = await supabase
+            .from('bank_classify_rules')
+            .update(rulePayload)
+            .eq('id', existing.id);
+          if (rErr) throw rErr;
+        } else {
+          const { error: rErr } = await supabase
+            .from('bank_classify_rules')
+            .insert({
+              company_id: companyId,
+              keyword: counterpart,
+              match_field: 'counterpart',
+              sort_order: 200,
+              ...rulePayload,
+            });
+          if (rErr) throw rErr;
+        }
+      } else {
+        const { error } = await supabase
+          .from('bank_expense_rows')
+          .update(args.patch)
+          .eq('id', args.id);
+        if (error) throw error;
+      }
     },
-    onSuccess: () => {
+    onSuccess: (_, args) => {
       qc.invalidateQueries({ queryKey: ['bank-expense-rows'] });
       qc.invalidateQueries({ queryKey: ['bank-expense-rows-pl'] });
+      if (args.applyToAll) {
+        qc.invalidateQueries({ queryKey: ['bank-classify-rules'] });
+      }
     },
   });
 }
