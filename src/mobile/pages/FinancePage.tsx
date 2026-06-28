@@ -21,6 +21,7 @@ import {
   useProfitLoss,
   type CogsDetail,
   type PlExpenseLine,
+  type PlMode,
 } from '@/hooks/queries/useProfitLoss';
 import { RefreshButton } from '../components/RefreshButton';
 
@@ -37,6 +38,9 @@ export function FinancePage() {
   const { companyId } = useCompany();
   const now = new Date();
 
+  const [mode, setMode] = useState<Extract<PlMode, 'monthly' | 'yearly'>>(
+    'monthly',
+  );
   const [year, setYear] = useState<number>(now.getFullYear());
   const [month, setMonth] = useState<number>(now.getMonth() + 1);
   const [includeVat, setIncludeVat] = useState(true);
@@ -48,9 +52,9 @@ export function FinancePage() {
 
   const pl = useProfitLoss({
     companyId,
-    mode: 'monthly',
+    mode,
     year,
-    month,
+    month: mode === 'monthly' ? month : undefined,
     includeVat,
   });
 
@@ -67,6 +71,14 @@ export function FinancePage() {
           }}
         >
           <h1 className="m-page-title">재무 · 손익계산서</h1>
+          <span
+            style={{
+              fontSize: 11,
+              color: 'var(--m-text-secondary)',
+            }}
+          >
+            {pl.periodLabel}
+          </span>
           <div style={{ flex: 1 }} />
           <RefreshButton
             onClick={() => {
@@ -77,7 +89,7 @@ export function FinancePage() {
           />
         </div>
 
-        {/* 컨트롤: 연도/월/부가세 */}
+        {/* 컨트롤: 월별/연간 모드 · 연도 · (월) · 부가세 */}
         <div
           style={{
             display: 'flex',
@@ -86,6 +98,40 @@ export function FinancePage() {
             flexWrap: 'wrap',
           }}
         >
+          {/* 월별/연간 모드 토글 */}
+          <div
+            style={{
+              display: 'flex',
+              border: '1px solid var(--m-border-strong)',
+              borderRadius: 6,
+              overflow: 'hidden',
+            }}
+          >
+            {(['monthly', 'yearly'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                style={{
+                  height: 28,
+                  padding: '0 10px',
+                  fontSize: 11,
+                  border: 'none',
+                  background:
+                    mode === m
+                      ? 'var(--m-primary)'
+                      : 'var(--m-surface)',
+                  color:
+                    mode === m ? '#fff' : 'var(--m-text-secondary)',
+                  cursor: 'pointer',
+                  fontWeight: mode === m ? 600 : 400,
+                }}
+              >
+                {m === 'monthly' ? '월별' : '연간'}
+              </button>
+            ))}
+          </div>
+
           <select
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
@@ -97,17 +143,19 @@ export function FinancePage() {
               </option>
             ))}
           </select>
-          <select
-            value={month}
-            onChange={(e) => setMonth(Number(e.target.value))}
-            style={selectStyle}
-          >
-            {MONTHS.map((m) => (
-              <option key={m} value={m}>
-                {m}월
-              </option>
-            ))}
-          </select>
+          {mode === 'monthly' && (
+            <select
+              value={month}
+              onChange={(e) => setMonth(Number(e.target.value))}
+              style={selectStyle}
+            >
+              {MONTHS.map((m) => (
+                <option key={m} value={m}>
+                  {m}월
+                </option>
+              ))}
+            </select>
+          )}
 
           <div style={{ flex: 1 }} />
 
