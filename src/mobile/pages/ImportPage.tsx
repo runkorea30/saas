@@ -149,6 +149,36 @@ export function ImportPage() {
     setNoticeSeaArrivalText(company.import_notice_sea_arrival_text ?? '');
   }, [company]);
 
+  // 인보이스 검증 → 입고처리 이관본 복원 (companyId 로드 시 1회).
+  // rowInputs 가 초기 빈 상태일 때만 덮어씀 — 사용자가 이미 편집 중이면 보존.
+  const [transferLoaded, setTransferLoaded] = useState(false);
+  useEffect(() => {
+    if (!companyId || transferLoaded) return;
+    setTransferLoaded(true);
+
+    void supabase
+      .from('invoice_verifications')
+      .select('transfer_rows, invoice_no, invoice_date')
+      .eq('company_id', companyId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!data) return;
+        const restored =
+          (data.transfer_rows as unknown as ImportRowInput[]) ?? [];
+        if (restored.length === 0) return;
+        const untouched =
+          rowInputs.length === 1 && !rowInputs[0].sourceCode.trim();
+        if (!untouched) return;
+        setRowInputs(restored);
+        setHeader((h) => ({
+          ...h,
+          invoiceNumber: data.invoice_no ?? h.invoiceNumber,
+          invoiceDate: data.invoice_date || h.invoiceDate,
+        }));
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
   const isSea = noticeTab === 'sea';
   const activeStatus = isSea ? noticeSeaStatus : noticeStatus;
   const setActiveStatus = isSea ? setNoticeSeaStatus : setNoticeStatus;
@@ -326,6 +356,22 @@ export function ImportPage() {
             text: `${rowsToSubmit.length}건 입고 완료`,
           });
           setRowInputs([createEmptyRow()]);
+          // 이관본도 클리어 — 다음 새로고침 때 빈 상태로 시작.
+          if (companyId) {
+            void (async () => {
+              const { error } = await supabase
+                .from('invoice_verifications')
+                .update({
+                  transfer_rows: [] as unknown as Json,
+                  transfer_saved_at: null,
+                })
+                .eq('company_id', companyId);
+              if (error) {
+                // eslint-disable-next-line no-console
+                console.error('[transfer_rows.clear]', error);
+              }
+            })();
+          }
         },
         onError: (e) => {
           showToast({ kind: 'error', text: e.message });

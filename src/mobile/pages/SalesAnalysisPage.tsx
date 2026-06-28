@@ -30,6 +30,7 @@ import {
   type ProductSalesRow,
   type CustomerColumn,
 } from '@/hooks/queries/useSalesAnalysis';
+import { useProfitLoss } from '@/hooks/queries/useProfitLoss';
 import { getCategoryLabel } from '@/constants/categories';
 import { RefreshButton } from '../components/RefreshButton';
 
@@ -149,6 +150,13 @@ export function SalesAnalysisPage() {
           </button>
         </div>
       </header>
+
+      {/* 이번달 손익 요약 카드 — 데스크탑 손익계산서 페이지의 당월 발췌 */}
+      <ProfitLossSummaryCard
+        companyId={companyId}
+        year={now.getFullYear()}
+        month={now.getMonth() + 1}
+      />
 
       {/* 필터 바 */}
       <div
@@ -723,6 +731,157 @@ function EmptyMessage({ text }: { text: string }) {
       }}
     >
       {text}
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────
+// 손익 요약 카드 (당월) — 데스크탑 손익계산서 발췌
+// ───────────────────────────────────────────────────────────
+
+function ProfitLossSummaryCard({
+  companyId,
+  year,
+  month,
+}: {
+  companyId: string | null;
+  year: number;
+  month: number;
+}) {
+  const pl = useProfitLoss({
+    companyId,
+    mode: 'monthly',
+    year,
+    month,
+    includeVat: true,
+  });
+
+  const fmt = (n: number) =>
+    Math.round(n).toLocaleString('ko-KR');
+
+  return (
+    <div style={{ padding: '8px 16px 0' }}>
+      <div
+        style={{
+          background: 'var(--m-surface)',
+          border: '1px solid var(--m-border)',
+          borderRadius: 10,
+          padding: 12,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 8,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'var(--m-text)',
+            }}
+          >
+            이번달 손익
+          </span>
+          <span
+            style={{ fontSize: 10.5, color: 'var(--m-text-secondary)' }}
+          >
+            {year}년 {month}월 · 부가세 포함
+          </span>
+        </div>
+        {pl.isLoading ? (
+          <div
+            style={{
+              fontSize: 11,
+              color: 'var(--m-text-secondary)',
+              padding: '4px 0',
+            }}
+          >
+            계산 중…
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 4, fontSize: 11.5 }}>
+            <PLLine label="매출액" value={pl.displayRevenue} fmt={fmt} />
+            <PLLine
+              label="매출원가"
+              value={-pl.cogs}
+              negative
+              fmt={fmt}
+            />
+            <PLLine
+              label="매출총이익"
+              value={pl.grossProfit}
+              bold
+              border
+              fmt={fmt}
+            />
+            <PLLine
+              label="판관비"
+              value={-pl.totalSellingExpenses}
+              negative
+              fmt={fmt}
+            />
+            <PLLine
+              label="영업이익"
+              value={pl.operatingProfit}
+              bold
+              highlight
+              border
+              fmt={fmt}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PLLine({
+  label,
+  value,
+  negative,
+  bold,
+  highlight,
+  border,
+  fmt,
+}: {
+  label: string;
+  value: number;
+  negative?: boolean;
+  bold?: boolean;
+  highlight?: boolean;
+  border?: boolean;
+  fmt: (n: number) => string;
+}) {
+  const valueColor = highlight
+    ? value >= 0
+      ? 'var(--m-primary)'
+      : 'var(--m-danger, #ef4444)'
+    : negative
+      ? 'var(--m-danger, #ef4444)'
+      : 'var(--m-text)';
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        paddingTop: border ? 4 : 0,
+        borderTop: border ? '1px solid var(--m-border)' : undefined,
+      }}
+    >
+      <span style={{ color: 'var(--m-text-secondary)' }}>{label}</span>
+      <span
+        style={{
+          color: valueColor,
+          fontWeight: bold ? 700 : 500,
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        ₩{fmt(value)}
+      </span>
     </div>
   );
 }

@@ -19,6 +19,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
 import { useCompany } from '@/hooks/useCompany';
 import { usePurchaseOrder } from '@/hooks/queries/usePurchaseOrder';
+import { useOrderNeedEstimate } from '@/hooks/queries/useOrderNeedEstimate';
+import { usePurchaseOrderExcluded } from '@/hooks/usePurchaseOrderExcluded';
 import { useToast } from '@/components/ui/Toast';
 import { supabase } from '@/lib/supabase';
 import {
@@ -77,6 +79,15 @@ export function PurchaseOrderPage() {
   const [threshold, setThreshold] = useState<number>(4000);
   const [thresholdInput, setThresholdInput] = useState<string>('4000');
 
+  // 발주 예상 제외 카테고리 — TopNav 위젯과 동일 localStorage 공유.
+  const { excluded: excludedCategories } = usePurchaseOrderExcluded();
+  // 데스크탑 TopNav 발주 예상 위젯과 동일 계산식.
+  const { estimatedUsd: needEstimateUsd } = useOrderNeedEstimate(
+    companyId,
+    salesBasis,
+    excludedCategories,
+  );
+
   // 새로고침 — usePurchaseOrder 가 노출하지 않는 내부 4개 쿼리를 invalidate.
   // invalidateQueries 는 자동으로 활성 쿼리를 refetch.
   const [refreshing, setRefreshing] = useState(false);
@@ -112,11 +123,12 @@ export function PurchaseOrderPage() {
   const totalUsd = useMemo(() => {
     let sum = 0;
     for (const p of products) {
+      if (excludedCategories.has(p.category)) continue;
       const qty = orderQty.get(p.id) ?? 0;
       if (qty > 0 && p.unit_price_usd) sum += qty * Number(p.unit_price_usd);
     }
     return sum;
-  }, [products, orderQty]);
+  }, [products, orderQty, excludedCategories]);
 
   const thresholdStatus = useMemo(() => {
     return {
@@ -144,6 +156,8 @@ export function PurchaseOrderPage() {
   const handleGenerate = () => {
     const next = new Map<string, number>();
     for (const p of products) {
+      // 제외 카테고리는 추천 발주수량 생성에서 스킵 — 데스크탑과 일치.
+      if (excludedCategories.has(p.category)) continue;
       const qty6mExcl = salesMap.get(p.id) ?? 0;
       const qty3m = calcSalesQty3m(qty6mExcl);
       const baseQty = salesBasis === '1m' ? calcSalesQty1m(qty3m) : qty3m;
@@ -435,6 +449,11 @@ export function PurchaseOrderPage() {
           <KpiCard
             label="총합계"
             value={`$${formatUsd(savedTotalUsd)}`}
+            tone="brand"
+          />
+          <KpiCard
+            label={`발주 예상 (${salesBasis === '1m' ? '1M' : '3M'})`}
+            value={`$${formatUsd(needEstimateUsd)}`}
             tone="brand"
           />
           <KpiCard
