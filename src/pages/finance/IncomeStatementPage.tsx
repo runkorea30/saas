@@ -14,6 +14,7 @@ import { useCompany } from '@/hooks/useCompany';
 import { useToast } from '@/components/ui/Toast';
 import {
   useProfitLoss,
+  DEFAULT_EXCHANGE_RATE,
   type PlMode,
 } from '@/hooks/queries/useProfitLoss';
 import {
@@ -334,7 +335,12 @@ export function IncomeStatementPage() {
                   value={pl.displayRevenue}
                   bold
                 />
-                <PLRow label="매출원가" value={-pl.cogs} sub />
+                <PLRow
+                  label="매출원가"
+                  subLabel={`(수입원가 기준, 환율 ₩${DEFAULT_EXCHANGE_RATE.toLocaleString('ko-KR')})`}
+                  value={-pl.cogs}
+                  sub
+                />
                 <PLDivider />
                 <PLRow
                   label="매출총이익"
@@ -543,6 +549,7 @@ export function IncomeStatementPage() {
 
 function PLRow({
   label,
+  subLabel,
   value,
   sub,
   bold,
@@ -550,6 +557,7 @@ function PLRow({
   badge,
 }: {
   label: string;
+  subLabel?: string;
   value: number;
   sub?: boolean;
   bold?: boolean;
@@ -583,6 +591,18 @@ function PLRow({
       >
         {sub && <span style={{ marginRight: 4, color: 'var(--ink-4)' }}>└</span>}
         {label}
+        {subLabel && (
+          <span
+            style={{
+              marginLeft: 6,
+              fontSize: 10.5,
+              color: 'var(--ink-3)',
+              fontWeight: 400,
+            }}
+          >
+            {subLabel}
+          </span>
+        )}
       </span>
       <div className="flex items-center gap-2">
         {badge && (

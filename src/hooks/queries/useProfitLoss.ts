@@ -6,10 +6,12 @@
  *
  * 데이터 소스:
  *   - orders (매출, deleted_at 제외, status != 'canceled')
- *   - order_items + products.supply_price (매출원가 근사치)
+ *   - order_items + products.unit_price_usd (매출원가 = DZ당 USD × 환율 / 12 × 판매EA)
  *   - import_invoices (운임 = shipping_cost_usd × exchange_rate)
  *   - tax_invoices (부가세, invoice_year/month 기준)
  *   - pl_expenses + pl_expense_categories (월별 판관비)
+ *
+ * 반품(is_return=true) 처리: COGS 에서 동일 단가 × 반품수량을 차감 (net 판매EA × cost).
  *
  * 모든 쿼리는 연도 단위로 한 번에 fetch → mode/month(s) 에 따라 JS 에서 필터.
  * 같은 연도 안에서 모드만 토글하면 캐시 재사용.
@@ -18,6 +20,9 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
+
+/** 매출원가 환산 환율 — 추후 import_invoices 평균환율로 동적 계산 가능. */
+export const DEFAULT_EXCHANGE_RATE = 1300;
 
 export type PlMode = 'monthly' | 'yearly' | 'custom';
 
@@ -66,7 +71,7 @@ interface OrderItemRow {
   quantity: number;
   is_return: boolean;
   order: { order_date: string } | null;
-  product: { supply_price: number | null } | null;
+  product: { unit_price_usd: number | null } | null;
 }
 interface ImportInvoiceRow {
   invoice_date: string;
@@ -149,7 +154,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
         supabase
           .from('order_items')
           .select(
-            'quantity, is_return, order:orders!inner(order_date, status, deleted_at), product:products(supply_price)',
+            'quantity, is_return, order:orders!inner(order_date, status, deleted_at), product:products(unit_price_usd)',
           )
           .eq('company_id', companyId!)
           .is('deleted_at', null)
@@ -257,13 +262,18 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
     }
     const revenueExVat = revenue / 1.1;
 
+    // 매출원가 = (unit_price_usd / 12) × 환율 × 판매EA, 반품(is_return=true)은 차감.
+    // unit_price_usd 가 null/0 인 품목(택배비 등)은 0 으로 처리.
     let cogs = 0;
     for (const it of items) {
-      if (it.is_return) continue;
       if (!it.order) continue;
       if (!isMonthSelected(dateToMonth(it.order.order_date), mode, month, months))
         continue;
-      cogs += it.quantity * (it.product?.supply_price ?? 0);
+      const dzPriceUsd = Number(it.product?.unit_price_usd) || 0;
+      if (dzPriceUsd <= 0) continue;
+      const costPerEaKrw = (dzPriceUsd / 12) * DEFAULT_EXCHANGE_RATE;
+      const sign = it.is_return ? -1 : 1;
+      cogs += sign * it.quantity * costPerEaKrw;
     }
 
     let importCosts = 0;
