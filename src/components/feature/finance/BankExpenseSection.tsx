@@ -68,6 +68,7 @@ export function BankExpenseSection({ year, month }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
 
   const rulesQ = useBankClassifyRules(companyId);
   const rowsQ = useBankExpenseRows(companyId, year, month);
@@ -100,15 +101,29 @@ export function BankExpenseSection({ year, month }: Props) {
   );
   const hasUnclassified = unclassified.length > 0;
 
-  // ───── 파일 선택 ─────
-  const handleFilesSelected = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const next: PendingFile[] = [];
-    for (let i = 0; i < files.length; i++) {
-      next.push({ file: files[i], accountName: '' });
-    }
+  // ───── 파일 선택 / 드래그앤드롭 ─────
+  const handleFiles = (files: File[]) => {
+    if (files.length === 0) return;
+    const next: PendingFile[] = files.map((f) => ({ file: f, accountName: '' }));
     setPendingFiles((prev) => [...prev, ...next]);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!isDragging) setIsDragging(true);
+  };
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files).filter(
+      (f) => /\.xlsx?$/i.test(f.name),
+    );
+    handleFiles(files);
   };
 
   const updatePendingAccountName = (i: number, name: string) => {
@@ -225,45 +240,77 @@ export function BankExpenseSection({ year, month }: Props) {
         padding: 16,
       }}
     >
-      <header className="flex items-start justify-between flex-wrap gap-3 mb-4">
-        <div>
-          <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
-            거래내역 업로드
-          </h2>
-          <p
-            style={{
-              fontSize: 11.5,
-              color: 'var(--ink-3)',
-              marginTop: 2,
-            }}
-          >
-            KB국민은행 XLS 업로드 → 키워드 기반 자동분류 → 확인 후 판관비에 합산.
-          </p>
-        </div>
-        <label
+      <header className="mb-3">
+        <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>
+          거래내역 업로드
+        </h2>
+        <p
           style={{
-            cursor: 'pointer',
-            padding: '6px 12px',
-            background: BRAND,
-            color: '#fff',
-            fontSize: 12.5,
-            borderRadius: 6,
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
+            fontSize: 11.5,
+            color: 'var(--ink-3)',
+            marginTop: 2,
           }}
         >
-          <Upload size={13} />+ XLS 업로드
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xls,.xlsx"
-            multiple
-            onChange={(e) => handleFilesSelected(e.target.files)}
-            style={{ display: 'none' }}
-          />
-        </label>
+          KB국민은행 XLS 업로드 → 키워드 기반 자동분류 → 확인 후 판관비에 합산.
+        </p>
       </header>
+
+      {/* 드롭존 — 클릭 + 드래그앤드롭 병행 */}
+      <label
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className="relative flex flex-col items-center justify-center w-full rounded-lg cursor-pointer transition-colors mb-3"
+        style={{
+          height: 112,
+          border: `2px dashed ${isDragging ? BRAND : 'var(--line-strong, #d6d3d1)'}`,
+          background: isDragging ? `${BRAND}0d` : 'var(--surface-2)',
+        }}
+      >
+        <Upload
+          size={24}
+          color={isDragging ? BRAND : 'var(--ink-3)'}
+          strokeWidth={1.6}
+        />
+        <p
+          style={{
+            marginTop: 8,
+            fontSize: 13,
+            fontWeight: 500,
+            color: isDragging ? BRAND : 'var(--ink-2)',
+          }}
+        >
+          {isDragging
+            ? '파일을 놓으세요'
+            : 'XLS 파일을 드래그하거나 클릭하여 선택'}
+        </p>
+        <p
+          style={{
+            marginTop: 2,
+            fontSize: 11,
+            color: 'var(--ink-3)',
+          }}
+        >
+          KB국민은행 XLS · 여러 파일 동시 가능
+        </p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".xls,.xlsx"
+          multiple
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            handleFiles(files);
+            e.target.value = '';
+          }}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            opacity: 0,
+            cursor: 'pointer',
+          }}
+        />
+      </label>
 
       {/* 업로드 대기 목록 */}
       {pendingFiles.length > 0 && (
