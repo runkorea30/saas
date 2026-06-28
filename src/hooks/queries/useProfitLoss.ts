@@ -41,6 +41,10 @@ export interface PlExpenseLine {
   categoryId: string;
   categoryName: string;
   amount: number;
+  /** 수동 입력분 (pl_expenses). */
+  manual: number;
+  /** 은행 거래내역 자동분류 (bank_expense_rows, is_confirmed=true). */
+  fromBank: number;
 }
 
 export interface ProfitLossData {
@@ -52,7 +56,12 @@ export interface ProfitLossData {
   grossMargin: number;
   importCosts: number;
   sellingExpenses: PlExpenseLine[];
+  /** 카테고리 합 = 수동 + 자동분류. */
   totalSellingExpenses: number;
+  /** 수동 입력분 합. */
+  totalSellingExpensesManual: number;
+  /** 은행 거래내역 자동분류 합 (확인완료). */
+  totalSellingExpensesFromBank: number;
   vatAmount: number;
   operatingProfit: number;
   operatingMargin: number;
@@ -85,6 +94,16 @@ interface TaxInvoiceRow {
 interface PlExpenseRow {
   category_id: string;
   amount_krw: number;
+  month: number;
+  category: {
+    name: string;
+    sort_order: number;
+    is_active: boolean;
+  } | null;
+}
+interface BankExpenseAggRow {
+  withdrawal: number;
+  pl_category_id: string | null;
   month: number;
   category: {
     name: string;
@@ -212,12 +231,33 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
       ),
   });
 
+  // 은행 거래내역 자동분류 — 확인완료 & 미제외 & 카테고리 매칭된 출금만.
+  const bankExpensesQ = useQuery({
+    queryKey: ['bank-expense-rows-pl', companyId, year],
+    enabled,
+    staleTime: 1000 * 60 * 2,
+    queryFn: () =>
+      fetchAllRows<BankExpenseAggRow>(() =>
+        supabase
+          .from('bank_expense_rows')
+          .select(
+            'withdrawal, pl_category_id, month, category:pl_expense_categories(name, sort_order, is_active)',
+          )
+          .eq('company_id', companyId!)
+          .eq('year', year)
+          .eq('is_confirmed', true)
+          .eq('is_excluded', false)
+          .not('pl_category_id', 'is', null),
+      ),
+  });
+
   const isLoading =
     ordersQ.isLoading ||
     itemsQ.isLoading ||
     importsQ.isLoading ||
     taxQ.isLoading ||
-    expensesQ.isLoading;
+    expensesQ.isLoading ||
+    bankExpensesQ.isLoading;
 
   return useMemo<ProfitLossData>(() => {
     const hasNoMonths =
@@ -233,6 +273,8 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
       importCosts: 0,
       sellingExpenses: [],
       totalSellingExpenses: 0,
+      totalSellingExpensesManual: 0,
+      totalSellingExpensesFromBank: 0,
       vatAmount: 0,
       operatingProfit: 0,
       operatingMargin: 0,
@@ -254,6 +296,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
     const imports = importsQ.data ?? [];
     const tax = taxQ.data ?? [];
     const expenses = expensesQ.data ?? [];
+    const bankExpenses = bankExpensesQ.data ?? [];
 
     let revenue = 0;
     for (const o of orders) {
@@ -293,36 +336,60 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
 
     const byCat = new Map<
       string,
-      { name: string; amount: number; sort: number }
+      { name: string; manual: number; fromBank: number; sort: number }
     >();
     for (const e of expenses) {
       if (!e.category || !e.category.is_active) continue;
       if (!isMonthSelected(e.month, mode, month, months)) continue;
       const cur = byCat.get(e.category_id) ?? {
         name: e.category.name,
-        amount: 0,
+        manual: 0,
+        fromBank: 0,
         sort: e.category.sort_order,
       };
-      cur.amount += Number(e.amount_krw) || 0;
+      cur.manual += Number(e.amount_krw) || 0;
       byCat.set(e.category_id, cur);
+    }
+    for (const b of bankExpenses) {
+      if (!b.category || !b.category.is_active) continue;
+      if (!b.pl_category_id) continue;
+      if (!isMonthSelected(b.month, mode, month, months)) continue;
+      const cur = byCat.get(b.pl_category_id) ?? {
+        name: b.category.name,
+        manual: 0,
+        fromBank: 0,
+        sort: b.category.sort_order,
+      };
+      cur.fromBank += Number(b.withdrawal) || 0;
+      byCat.set(b.pl_category_id, cur);
     }
     const sellingExpenses: PlExpenseLine[] = Array.from(byCat.entries())
       .map(([categoryId, v]) => ({
         categoryId,
         categoryName: v.name,
-        amount: v.amount,
+        amount: v.manual + v.fromBank,
+        manual: v.manual,
+        fromBank: v.fromBank,
         _sort: v.sort,
       }))
       .sort((a, b) => a._sort - b._sort || a.categoryName.localeCompare(b.categoryName))
-      .map(({ categoryId, categoryName, amount }) => ({
+      .map(({ categoryId, categoryName, amount, manual, fromBank }) => ({
         categoryId,
         categoryName,
         amount,
+        manual,
+        fromBank,
       }));
-    const totalSellingExpenses = sellingExpenses.reduce(
-      (s, e) => s + e.amount,
+    const totalSellingExpensesManual = sellingExpenses.reduce(
+      (s, e) => s + e.manual,
       0,
     );
+    const totalSellingExpensesFromBank = sellingExpenses.reduce(
+      (s, e) => s + e.fromBank,
+      0,
+    );
+    const totalSellingExpenses =
+      totalSellingExpensesManual + totalSellingExpensesFromBank;
 
     const displayRevenue = includeVat ? revenue : revenueExVat;
     const grossProfit = displayRevenue - cogs;
@@ -348,6 +415,8 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
       importCosts,
       sellingExpenses,
       totalSellingExpenses,
+      totalSellingExpensesManual,
+      totalSellingExpensesFromBank,
       vatAmount,
       operatingProfit,
       operatingMargin,
@@ -363,6 +432,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
     importsQ.data,
     taxQ.data,
     expensesQ.data,
+    bankExpensesQ.data,
     mode,
     year,
     month,

@@ -1065,6 +1065,160 @@ export type Database = {
           },
         ]
       }
+      bank_expense_uploads: {
+        Row: {
+          id: string
+          company_id: string
+          account_name: string | null
+          account_number: string | null
+          upload_date: string
+          year: number
+          month: number
+          row_count: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          account_name?: string | null
+          account_number?: string | null
+          upload_date?: string
+          year: number
+          month: number
+          row_count?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          account_name?: string | null
+          account_number?: string | null
+          upload_date?: string
+          year?: number
+          month?: number
+          row_count?: number
+          created_at?: string
+        }
+        Relationships: []
+      }
+      bank_expense_rows: {
+        Row: {
+          id: string
+          company_id: string
+          upload_id: string
+          transaction_date: string
+          counterpart: string | null
+          memo: string | null
+          description: string | null
+          withdrawal: number
+          deposit: number
+          pl_category_id: string | null
+          exclude_reason: string | null
+          is_excluded: boolean
+          is_confirmed: boolean
+          year: number
+          month: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          upload_id: string
+          transaction_date: string
+          counterpart?: string | null
+          memo?: string | null
+          description?: string | null
+          withdrawal?: number
+          deposit?: number
+          pl_category_id?: string | null
+          exclude_reason?: string | null
+          is_excluded?: boolean
+          is_confirmed?: boolean
+          year: number
+          month: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          upload_id?: string
+          transaction_date?: string
+          counterpart?: string | null
+          memo?: string | null
+          description?: string | null
+          withdrawal?: number
+          deposit?: number
+          pl_category_id?: string | null
+          exclude_reason?: string | null
+          is_excluded?: boolean
+          is_confirmed?: boolean
+          year?: number
+          month?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_expense_rows_upload_id_fkey"
+            columns: ["upload_id"]
+            isOneToOne: false
+            referencedRelation: "bank_expense_uploads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bank_expense_rows_pl_category_id_fkey"
+            columns: ["pl_category_id"]
+            isOneToOne: false
+            referencedRelation: "pl_expense_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bank_classify_rules: {
+        Row: {
+          id: string
+          company_id: string
+          keyword: string
+          match_field: string
+          action: string
+          pl_category_id: string | null
+          exclude_reason: string | null
+          sort_order: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          keyword: string
+          match_field?: string
+          action?: string
+          pl_category_id?: string | null
+          exclude_reason?: string | null
+          sort_order?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          keyword?: string
+          match_field?: string
+          action?: string
+          pl_category_id?: string | null
+          exclude_reason?: string | null
+          sort_order?: number
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_classify_rules_pl_category_id_fkey"
+            columns: ["pl_category_id"]
+            isOneToOne: false
+            referencedRelation: "pl_expense_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pl_expense_categories: {
         Row: {
           id: string

@@ -26,6 +26,7 @@ import {
   usePlExpensesForMonth,
   useSavePlExpense,
 } from '@/hooks/queries/usePlExpenses';
+import { BankExpenseSection } from '@/components/feature/finance/BankExpenseSection';
 
 const BRAND = '#6B1F2A';
 
@@ -349,7 +350,16 @@ export function IncomeStatementPage() {
                   badge={`${pl.grossMargin.toFixed(1)}%`}
                 />
                 <PLRow label="수입비용 (운임)" value={-pl.importCosts} sub />
-                <PLRow label="판매관리비" value={-pl.totalSellingExpenses} sub />
+                <PLRow
+                  label="판매관리비"
+                  subLabel={
+                    pl.totalSellingExpensesFromBank > 0
+                      ? `(수동 ₩${fmtWon(pl.totalSellingExpensesManual)} + 거래내역 ₩${fmtWon(pl.totalSellingExpensesFromBank)})`
+                      : undefined
+                  }
+                  value={-pl.totalSellingExpenses}
+                  sub
+                />
                 <PLDivider />
                 <PLRow
                   label="영업이익"
@@ -540,6 +550,9 @@ export function IncomeStatementPage() {
             </div>
           </section>
         </div>
+
+        {/* 하단 — 거래내역 업로드 섹션 (현재 선택된 year/month 기준) */}
+        <BankExpenseSection year={year} month={month} />
       </main>
     </div>
   );
