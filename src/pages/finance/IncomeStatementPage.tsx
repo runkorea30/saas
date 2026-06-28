@@ -12,12 +12,7 @@ import { useMemo, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useToast } from '@/components/ui/Toast';
-import {
-  useProfitLoss,
-  DEFAULT_EXCHANGE_RATE,
-  type PlMode,
-} from '@/hooks/queries/useProfitLoss';
-// DEFAULT_EXCHANGE_RATE 는 환율 state 초기 fallback 으로만 사용.
+import { useProfitLoss, type PlMode } from '@/hooks/queries/useProfitLoss';
 import {
   usePlExpenseCategories,
   useAddPlExpenseCategory,
@@ -30,33 +25,6 @@ import {
 import { BankExpenseSection } from '@/components/feature/finance/BankExpenseSection';
 
 const BRAND = '#6B1F2A';
-const TARIFF_STORAGE_KEY = 'pl_tariff_rate';
-const DEFAULT_TARIFF_RATE = 8;
-const EXCHANGE_STORAGE_KEY = 'pl_exchange_rate';
-
-function loadTariffRate(): number {
-  if (typeof window === 'undefined') return DEFAULT_TARIFF_RATE;
-  try {
-    const raw = window.localStorage.getItem(TARIFF_STORAGE_KEY);
-    if (raw == null) return DEFAULT_TARIFF_RATE;
-    const n = Number(raw);
-    return Number.isFinite(n) && n >= 0 ? n : DEFAULT_TARIFF_RATE;
-  } catch {
-    return DEFAULT_TARIFF_RATE;
-  }
-}
-
-function loadExchangeRate(): number {
-  if (typeof window === 'undefined') return DEFAULT_EXCHANGE_RATE;
-  try {
-    const raw = window.localStorage.getItem(EXCHANGE_STORAGE_KEY);
-    if (raw == null) return DEFAULT_EXCHANGE_RATE;
-    const n = Number(raw);
-    return Number.isFinite(n) && n > 0 ? n : DEFAULT_EXCHANGE_RATE;
-  } catch {
-    return DEFAULT_EXCHANGE_RATE;
-  }
-}
 
 function fmtWon(n: number): string {
   const rounded = Math.round(n);
@@ -77,25 +45,6 @@ export function IncomeStatementPage() {
     now.getMonth() + 1,
   ]);
   const [includeVat, setIncludeVat] = useState(true);
-  const [tariffRate, setTariffRateState] = useState<number>(loadTariffRate);
-  const setTariffRate = (n: number) => {
-    setTariffRateState(n);
-    try {
-      window.localStorage.setItem(TARIFF_STORAGE_KEY, String(n));
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const [exchangeRate, setExchangeRateState] = useState<number>(loadExchangeRate);
-  const setExchangeRate = (n: number) => {
-    setExchangeRateState(n);
-    try {
-      window.localStorage.setItem(EXCHANGE_STORAGE_KEY, String(n));
-    } catch {
-      /* ignore */
-    }
-  };
 
   const yearOptions = useMemo(() => {
     const y = now.getFullYear();
@@ -109,9 +58,11 @@ export function IncomeStatementPage() {
     month: mode === 'monthly' ? month : undefined,
     months: mode === 'custom' ? selectedMonths : undefined,
     includeVat,
-    tariffRate,
-    exchangeRate,
   });
+
+  // 부가세 제외 모드일 때 raw DB 금액(수동분)을 표시용으로 ÷1.1 한다.
+  // 손익 요약과 카테고리 패널 표시 값이 일치하도록 보정. 입력 필드는 raw 유지.
+  const vatDivisor = includeVat ? 1 : 1.1;
 
   const categoriesQ = usePlExpenseCategories(companyId);
   const categories = categoriesQ.data ?? [];
@@ -325,64 +276,6 @@ export function IncomeStatementPage() {
               </div>
             </div>
 
-            {/* 환율 입력 — localStorage 저장 (기본 1575) */}
-            <div className="flex items-center gap-1.5 ml-2">
-              <span className="text-xs text-ink-3">환율 ₩</span>
-              <input
-                type="number"
-                value={exchangeRate}
-                onChange={(e) => {
-                  const n = Number(e.target.value);
-                  if (Number.isFinite(n) && n > 0) setExchangeRate(n);
-                }}
-                min={1000}
-                max={2000}
-                step={1}
-                style={{
-                  width: 64,
-                  height: 28,
-                  padding: '0 6px',
-                  border: '1px solid var(--line)',
-                  borderRadius: 4,
-                  fontSize: 12,
-                  textAlign: 'center',
-                  background: 'var(--surface)',
-                  color: 'var(--ink)',
-                  outline: 'none',
-                  fontFamily: 'var(--font-num)',
-                }}
-              />
-            </div>
-
-            {/* 관세율 입력 — localStorage 저장 */}
-            <div className="flex items-center gap-1.5 ml-2">
-              <span className="text-xs text-ink-3">관세율</span>
-              <input
-                type="number"
-                value={tariffRate}
-                onChange={(e) => {
-                  const n = Number(e.target.value);
-                  if (Number.isFinite(n) && n >= 0) setTariffRate(n);
-                }}
-                min={0}
-                max={100}
-                step={0.1}
-                style={{
-                  width: 56,
-                  height: 28,
-                  padding: '0 6px',
-                  border: '1px solid var(--line)',
-                  borderRadius: 4,
-                  fontSize: 12,
-                  textAlign: 'center',
-                  background: 'var(--surface)',
-                  color: 'var(--ink)',
-                  outline: 'none',
-                  fontFamily: 'var(--font-num)',
-                }}
-              />
-              <span className="text-xs text-ink-3">%</span>
-            </div>
           </div>
         </header>
 
@@ -454,7 +347,7 @@ export function IncomeStatementPage() {
                 />
                 <PLRow
                   label="매출원가"
-                  subLabel={`(수입원가 기준, 환율 ₩${exchangeRate.toLocaleString('ko-KR')}${tariffRate > 0 ? `, 관세 ${tariffRate}%` : ''})`}
+                  subLabel="(수입원가 기준)"
                   value={-pl.cogs}
                   sub
                 />
@@ -529,7 +422,8 @@ export function IncomeStatementPage() {
             <div className="space-y-1.5">
               {categories.map((cat) => {
                 const fromBank = fromBankByCategory.get(cat.id) ?? 0;
-                const manualSaved = Number(monthExpenseMap.get(cat.id) ?? 0);
+                const manualSavedRaw = Number(monthExpenseMap.get(cat.id) ?? 0);
+                const manualSaved = manualSavedRaw / vatDivisor;
                 const aggregate = aggregateExpenseByCategory.get(cat.id) ?? 0;
 
                 // 우측 값 영역의 표시 모드 결정 — monthly 일 때만 fromBank 고려.

@@ -6,27 +6,28 @@
  *
  * 데이터 소스:
  *   - orders (매출, deleted_at 제외, status != 'canceled')
- *   - order_items + products.unit_price_usd (매출원가 = DZ당 USD × 환율 / 12 × 판매EA)
+ *   - order_items (판매수량/반품)
+ *   - inventory_lots (EA당 수입원가 — lot_type in ['import','opening'], cost_krw < 100000)
  *   - import_invoices (운임 = shipping_cost_usd × exchange_rate)
  *   - tax_invoices (부가세, invoice_year/month 기준)
- *   - pl_expenses + pl_expense_categories (월별 판관비)
+ *   - pl_expenses + pl_expense_categories (월별 판관비 수동분)
+ *   - bank_expense_rows (판관비 거래내역 자동분류)
  *
- * 반품(is_return=true) 처리: COGS 에서 동일 단가 × 반품수량을 차감 (net 판매EA × cost).
+ * 매출원가:
+ *   - product 별 가중평균 cost_krw (lot 단위) × 판매EA. 반품은 동일 단가 차감.
+ *   - cost_krw 에는 환율/관세/통관비/수입부가세가 모두 배분되어 있음.
+ *     → 별도 환율/관세율 파라미터 불필요.
+ *   - cost_krw 는 수입부가세 포함 값이므로 includeVat=false 시 ÷1.1 처리.
  *
- * 모든 쿼리는 연도 단위로 한 번에 fetch → mode/month(s) 에 따라 JS 에서 필터.
- * 같은 연도 안에서 모드만 토글하면 캐시 재사용.
+ * 부가세 포함/제외 (includeVat):
+ *   - true  → 매출/매출원가/수입비용/판관비 모두 raw (부가세 포함).
+ *   - false → 매출/매출원가/수입비용/판관비 모두 ÷1.1 (공급가액 기준)
+ *             + 부가세 라인(tax_invoices.vat_amount)을 별도 차감해 순이익 산출.
  */
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
-
-/**
- * 매출원가 환산 환율 fallback (₩/USD).
- * inventory_lots 역산 결과 실제 수입환율은 ₩1,574~1,579 범위 →
- * 기본값 1,575. 페이지에서 사용자가 직접 조정 가능.
- */
-export const DEFAULT_EXCHANGE_RATE = 1575;
 
 export type PlMode = 'monthly' | 'yearly' | 'custom';
 
@@ -39,10 +40,6 @@ export interface UseProfitLossParams {
   /** custom 모드에서만 사용. 1~12. */
   months?: number[];
   includeVat: boolean;
-  /** 매출원가 관세율(%). 8 = 8% 가산. 0 = 미적용. */
-  tariffRate?: number;
-  /** 매출원가 환산 환율(₩/USD). 미지정 시 DEFAULT_EXCHANGE_RATE. */
-  exchangeRate?: number;
 }
 
 export interface PlExpenseLine {
@@ -51,7 +48,7 @@ export interface PlExpenseLine {
   amount: number;
   /** 수동 입력분 (pl_expenses). */
   manual: number;
-  /** 은행 거래내역 자동분류 (bank_expense_rows, is_confirmed=true). */
+  /** 은행 거래내역 자동분류 (bank_expense_rows). */
   fromBank: number;
 }
 
@@ -68,7 +65,7 @@ export interface ProfitLossData {
   totalSellingExpenses: number;
   /** 수동 입력분 합. */
   totalSellingExpensesManual: number;
-  /** 은행 거래내역 자동분류 합 (확인완료). */
+  /** 은행 거래내역 자동분류 합. */
   totalSellingExpensesFromBank: number;
   vatAmount: number;
   operatingProfit: number;
@@ -85,10 +82,15 @@ interface OrderRow {
   total_amount: number;
 }
 interface OrderItemRow {
+  product_id: string;
   quantity: number;
   is_return: boolean;
   order: { order_date: string } | null;
-  product: { unit_price_usd: number | null } | null;
+}
+interface LotRow {
+  product_id: string;
+  quantity: number;
+  cost_krw: number | null;
 }
 interface ImportInvoiceRow {
   invoice_date: string;
@@ -149,16 +151,7 @@ function periodLabel(
 }
 
 export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
-  const {
-    companyId,
-    mode,
-    year,
-    month,
-    months,
-    includeVat,
-    tariffRate = 0,
-    exchangeRate = DEFAULT_EXCHANGE_RATE,
-  } = params;
+  const { companyId, mode, year, month, months, includeVat } = params;
 
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year + 1}-01-01`;
@@ -182,7 +175,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
   });
 
   const itemsQ = useQuery({
-    queryKey: ['pl-items', companyId, year],
+    queryKey: ['pl-items-cogs', companyId, year],
     enabled,
     staleTime: 1000 * 60 * 5,
     queryFn: () =>
@@ -190,7 +183,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
         supabase
           .from('order_items')
           .select(
-            'quantity, is_return, order:orders!inner(order_date, status, deleted_at), product:products(unit_price_usd)',
+            'product_id, quantity, is_return, order:orders!inner(order_date, status, deleted_at)',
           )
           .eq('company_id', companyId!)
           .is('deleted_at', null)
@@ -198,6 +191,25 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
           .neq('order.status', 'canceled')
           .gte('order.order_date', yearStart)
           .lt('order.order_date', yearEnd),
+      ),
+  });
+
+  // 매출원가 산정용 lot 가중평균 — 회사 전체 lot 단위. 연/월에 무관하게 캐시.
+  // cost_krw >= 100,000 인 lot 은 택배비 등 비정상 opening 항목이라 제외.
+  const lotsQ = useQuery({
+    queryKey: ['pl-lots-cogs', companyId],
+    enabled,
+    staleTime: 1000 * 60 * 5,
+    queryFn: () =>
+      fetchAllRows<LotRow>(() =>
+        supabase
+          .from('inventory_lots')
+          .select('product_id, quantity, cost_krw')
+          .eq('company_id', companyId!)
+          .in('lot_type', ['import', 'opening'])
+          .is('deleted_at', null)
+          .not('cost_krw', 'is', null)
+          .lt('cost_krw', 100000),
       ),
   });
 
@@ -271,6 +283,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
   const isLoading =
     ordersQ.isLoading ||
     itemsQ.isLoading ||
+    lotsQ.isLoading ||
     importsQ.isLoading ||
     taxQ.isLoading ||
     expensesQ.isLoading ||
@@ -310,50 +323,74 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
 
     const orders = ordersQ.data ?? [];
     const items = itemsQ.data ?? [];
+    const lots = lotsQ.data ?? [];
     const imports = importsQ.data ?? [];
     const tax = taxQ.data ?? [];
     const expenses = expensesQ.data ?? [];
     const bankExpenses = bankExpensesQ.data ?? [];
 
-    let revenue = 0;
+    const vatDivisor = includeVat ? 1 : 1.1;
+
+    // ── 매출 (VAT 포함 raw) ────────────────────────────────
+    let revenueRaw = 0;
     for (const o of orders) {
       if (!isMonthSelected(dateToMonth(o.order_date), mode, month, months)) continue;
-      revenue += Number(o.total_amount) || 0;
+      revenueRaw += Number(o.total_amount) || 0;
     }
-    const revenueExVat = revenue / 1.1;
 
-    // 매출원가 = (unit_price_usd / 12) × 환율 × (1 + 관세율) × 판매EA,
-    //   반품(is_return=true)은 차감. unit_price_usd null/0 품목(택배비 등) 스킵.
-    // 수입부가세는 환급 대상이므로 원가에 포함하지 않음.
-    const tariffMultiplier = 1 + Math.max(0, tariffRate) / 100;
-    let cogs = 0;
+    // ── 제품별 가중평균 단가 (lot 단위, KRW/EA, 수입부가세 포함) ─
+    const totalCostMap = new Map<string, number>();
+    const totalQtyMap = new Map<string, number>();
+    for (const lot of lots) {
+      if (lot.cost_krw == null || lot.cost_krw >= 100000) continue;
+      const q = Number(lot.quantity) || 0;
+      const c = Number(lot.cost_krw) || 0;
+      if (q <= 0 || c <= 0) continue;
+      totalCostMap.set(
+        lot.product_id,
+        (totalCostMap.get(lot.product_id) ?? 0) + c * q,
+      );
+      totalQtyMap.set(
+        lot.product_id,
+        (totalQtyMap.get(lot.product_id) ?? 0) + q,
+      );
+    }
+    const avgCostMap = new Map<string, number>();
+    for (const [pid, totalCost] of totalCostMap) {
+      const qty = totalQtyMap.get(pid) ?? 0;
+      if (qty > 0) avgCostMap.set(pid, totalCost / qty);
+    }
+
+    // ── 매출원가 (VAT 포함 raw) — 가중평균 EA당 원가 × 판매EA, 반품 차감 ─
+    let cogsRaw = 0;
     for (const it of items) {
       if (!it.order) continue;
       if (!isMonthSelected(dateToMonth(it.order.order_date), mode, month, months))
         continue;
-      const dzPriceUsd = Number(it.product?.unit_price_usd) || 0;
-      if (dzPriceUsd <= 0) continue;
-      const costPerEaKrw =
-        (dzPriceUsd / 12) * exchangeRate * tariffMultiplier;
+      const avgCost = avgCostMap.get(it.product_id) ?? 0;
+      if (avgCost <= 0) continue;
       const sign = it.is_return ? -1 : 1;
-      cogs += sign * it.quantity * costPerEaKrw;
+      cogsRaw += sign * (Number(it.quantity) || 0) * avgCost;
     }
 
-    let importCosts = 0;
+    // ── 수입비용 (운임, VAT 포함 raw) ──────────────────────
+    let importCostsRaw = 0;
     for (const inv of imports) {
       if (!isMonthSelected(dateToMonth(inv.invoice_date), mode, month, months))
         continue;
-      importCosts +=
+      importCostsRaw +=
         (Number(inv.shipping_cost_usd) || 0) *
         (Number(inv.exchange_rate) || 0);
     }
 
+    // ── 부가세 (tax_invoices.vat_amount, 그 자체가 부가세이므로 ÷1.1 적용 안 함) ─
     let vatAmount = 0;
     for (const t of tax) {
       if (!isMonthSelected(t.invoice_month, mode, month, months)) continue;
       vatAmount += Number(t.vat_amount) || 0;
     }
 
+    // ── 판관비 카테고리 집계 (VAT 포함 raw) ────────────────
     const byCat = new Map<
       string,
       { name: string; manual: number; fromBank: number; sort: number }
@@ -383,16 +420,21 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
       cur.fromBank += Number(b.withdrawal) || 0;
       byCat.set(b.pl_category_id, cur);
     }
+
+    // ── VAT 처리 (각 항목 ÷ vatDivisor) ────────────────────
     const sellingExpenses: PlExpenseLine[] = Array.from(byCat.entries())
       .map(([categoryId, v]) => ({
         categoryId,
         categoryName: v.name,
-        amount: v.manual + v.fromBank,
-        manual: v.manual,
-        fromBank: v.fromBank,
+        amount: (v.manual + v.fromBank) / vatDivisor,
+        manual: v.manual / vatDivisor,
+        fromBank: v.fromBank / vatDivisor,
         _sort: v.sort,
       }))
-      .sort((a, b) => a._sort - b._sort || a.categoryName.localeCompare(b.categoryName))
+      .sort(
+        (a, b) =>
+          a._sort - b._sort || a.categoryName.localeCompare(b.categoryName),
+      )
       .map(({ categoryId, categoryName, amount, manual, fromBank }) => ({
         categoryId,
         categoryName,
@@ -411,7 +453,12 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
     const totalSellingExpenses =
       totalSellingExpensesManual + totalSellingExpensesFromBank;
 
-    const displayRevenue = includeVat ? revenue : revenueExVat;
+    const revenue = revenueRaw;
+    const revenueExVat = revenueRaw / 1.1;
+    const displayRevenue = revenueRaw / vatDivisor;
+    const cogs = cogsRaw / vatDivisor;
+    const importCosts = importCostsRaw / vatDivisor;
+
     const grossProfit = displayRevenue - cogs;
     const grossMargin =
       displayRevenue > 0 ? (grossProfit / displayRevenue) * 100 : 0;
@@ -449,6 +496,7 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
   }, [
     ordersQ.data,
     itemsQ.data,
+    lotsQ.data,
     importsQ.data,
     taxQ.data,
     expensesQ.data,
@@ -458,8 +506,6 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
     month,
     months,
     includeVat,
-    tariffRate,
-    exchangeRate,
     isLoading,
   ]);
 }
