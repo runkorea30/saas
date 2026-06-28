@@ -13,6 +13,7 @@ import { ImportPage } from './pages/ImportPage';
 import { PurchaseOrderPage } from './pages/PurchaseOrderPage';
 import { ProductListPage } from './pages/ProductListPage';
 import { AuditPage } from './pages/AuditPage';
+import { FinancePage } from './pages/FinancePage';
 
 export function MobileApp() {
   return (
@@ -23,6 +24,7 @@ export function MobileApp() {
         <Route path="input" element={<OrderInputPage />} />
         <Route path="sales" element={<SalesAnalysisPage />} />
         <Route path="inventory" element={<InventoryPage />} />
+        <Route path="finance" element={<FinancePage />} />
         <Route path="import" element={<ImportPage />} />
         <Route path="purchase" element={<PurchaseOrderPage />} />
         <Route path="products" element={<ProductListPage />} />

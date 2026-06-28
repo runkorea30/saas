@@ -173,7 +173,8 @@ body.mobile-active #root {
   background: var(--m-surface);
   border-top: 1px solid var(--m-border);
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  /* 5 primary + 더보기 = 6 columns. 좁은 화면에서도 라벨이 잘리지 않도록 글자 축소는 .m-bottom-nav-item 에서 처리. */
+  grid-template-columns: repeat(6, 1fr);
   z-index: 10;
 }
 .m-bottom-nav-item {
@@ -187,7 +188,7 @@ body.mobile-active #root {
   border: 0;
   cursor: pointer;
   position: relative;
-  font-size: 10.5px;
+  font-size: 9.5px;
   padding: 4px 0;
 }
 .m-bottom-nav-item.is-active {

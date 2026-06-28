@@ -12,6 +12,7 @@ import {
   IconList,
   IconMore,
   IconTag,
+  IconTrend,
   IconTruck,
 } from './MobileIcons';
 
@@ -21,11 +22,15 @@ interface TabDef {
   label: string;
 }
 
+// 아이콘 좁은 화면 대응 — 사이즈를 20 으로 축소하여 6 columns 가 안정적으로 들어가게.
+const NAV_ICON_SIZE = 20;
+
 const PRIMARY_TABS: TabDef[] = [
-  { path: '/mobile/orders', icon: <IconList />, label: '주문내역' },
-  { path: '/mobile/input', icon: <IconEdit />, label: '주문입력' },
-  { path: '/mobile/sales', icon: <IconChart />, label: '매출분석' },
-  { path: '/mobile/inventory', icon: <IconBox />, label: '재고현황' },
+  { path: '/mobile/orders', icon: <IconList size={NAV_ICON_SIZE} />, label: '주문내역' },
+  { path: '/mobile/input', icon: <IconEdit size={NAV_ICON_SIZE} />, label: '주문입력' },
+  { path: '/mobile/sales', icon: <IconChart size={NAV_ICON_SIZE} />, label: '매출분석' },
+  { path: '/mobile/inventory', icon: <IconBox size={NAV_ICON_SIZE} />, label: '재고현황' },
+  { path: '/mobile/finance', icon: <IconTrend size={NAV_ICON_SIZE} />, label: '재무' },
 ];
 
 const MORE_PATHS = ['/mobile/import', '/mobile/purchase', '/mobile/products', '/mobile/audit'];
@@ -69,7 +74,7 @@ export function BottomNav() {
           aria-haspopup="dialog"
           aria-expanded={sheetOpen}
         >
-          <IconMore />
+          <IconMore size={NAV_ICON_SIZE} />
           <span>더보기</span>
         </button>
       </nav>

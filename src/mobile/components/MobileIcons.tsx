@@ -66,6 +66,13 @@ export const IconMore = ({ size }: IconProps) => (
   </Svg>
 );
 
+export const IconTrend = ({ size }: IconProps) => (
+  <Svg size={size}>
+    <polyline points="3 17 9 11 13 15 21 7" />
+    <polyline points="14 7 21 7 21 14" />
+  </Svg>
+);
+
 export const IconTruck = ({ size }: IconProps) => (
   <Svg size={size}>
     <rect x="1" y="3" width="15" height="13" />
