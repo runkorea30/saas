@@ -1065,6 +1065,78 @@ export type Database = {
           },
         ]
       }
+      pl_expense_categories: {
+        Row: {
+          id: string
+          company_id: string
+          name: string
+          sort_order: number
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          name: string
+          sort_order?: number
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          name?: string
+          sort_order?: number
+          is_active?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      pl_expenses: {
+        Row: {
+          id: string
+          company_id: string
+          category_id: string
+          year: number
+          month: number
+          amount_krw: number
+          memo: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          company_id: string
+          category_id: string
+          year: number
+          month: number
+          amount_krw: number
+          memo?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          company_id?: string
+          category_id?: string
+          year?: number
+          month?: number
+          amount_krw?: number
+          memo?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pl_expenses_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "pl_expense_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoice_verifications: {
         Row: {
           id: string

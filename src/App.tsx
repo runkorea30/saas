@@ -27,6 +27,7 @@ import { CustomerOrderPage } from '@/pages/customer/CustomerOrderPage';
 import { BankingPage } from '@/pages/finance/BankingPage';
 import { ReceivablesPage } from '@/pages/finance/ReceivablesPage';
 import { TaxInvoicesPage } from '@/pages/finance/TaxInvoicesPage';
+import { IncomeStatementPage } from '@/pages/finance/IncomeStatementPage';
 import { BillingPage } from '@/pages/sales/BillingPage';
 import { DocumentsPage } from '@/pages/documents/DocumentsPage';
 import { MobileApp } from '@/mobile/MobileApp';
@@ -66,7 +67,7 @@ function App() {
           <Route path="receivables" element={<ReceivablesPage />} />
           <Route path="banking" element={<BankingPage />} />
           <Route path="tax-invoices" element={<TaxInvoicesPage />} />
-          <Route path="pnl" element={<PlaceholderPage />} />
+          <Route path="pnl" element={<IncomeStatementPage />} />
         </Route>
 
         <Route path="documents" element={<DocumentsPage />} />
