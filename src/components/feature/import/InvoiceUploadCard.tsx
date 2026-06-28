@@ -629,20 +629,28 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       adjustedQuantity: r.unit === 'DZ' ? r.invoiceQty * 12 : r.invoiceQty,
       totalUsd: parseFloat((r.invoicePrice * r.invoiceQty).toFixed(2)),
     }));
+    // 이관된 행을 DB 에 보존 — 새로고침 후에도 입고처리 폼이 복원됨.
+    // 🔴 PostgrestBuilder 는 thenable — .then()/await 없으면 fetch 가 발송되지 않는다.
+    //    async IIFE 안에서 await 해 요청 실행을 보장.
+    if (companyId) {
+      void (async () => {
+        const { error } = await supabase
+          .from('invoice_verifications')
+          .update({
+            transfer_rows: rows as unknown as Json,
+            transfer_saved_at: new Date().toISOString(),
+          })
+          .eq('company_id', companyId);
+        if (error) {
+          // eslint-disable-next-line no-console
+          console.error('[transfer_rows.save]', error);
+        }
+      })();
+    }
     onFill(rows, {
       invoiceNumber: comparison.invoiceNo,
       invoiceDate: comparison.invoiceDate,
     });
-    // 이관된 행을 DB 에 보존 — 새로고침 후에도 입고처리 폼이 복원됨.
-    if (companyId) {
-      void supabase
-        .from('invoice_verifications')
-        .update({
-          transfer_rows: rows as unknown as Json,
-          transfer_saved_at: new Date().toISOString(),
-        })
-        .eq('company_id', companyId);
-    }
   };
 
   const handleReset = () => {
@@ -654,10 +662,17 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     setError(null);
     setTab('all');
     if (companyId) {
-      void supabase
-        .from('invoice_verifications')
-        .delete()
-        .eq('company_id', companyId);
+      // 🔴 PostgrestBuilder thenable — await 로 실행 보장.
+      void (async () => {
+        const { error } = await supabase
+          .from('invoice_verifications')
+          .delete()
+          .eq('company_id', companyId);
+        if (error) {
+          // eslint-disable-next-line no-console
+          console.error('[invoice_verifications.delete]', error);
+        }
+      })();
     }
   };
 

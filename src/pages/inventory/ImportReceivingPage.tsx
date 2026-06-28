@@ -367,14 +367,21 @@ export function ImportReceivingPage() {
           // 행은 초기화, 헤더는 유지 (연속 입력 편의).
           setRowInputs([createEmptyRow()]);
           // 이관본도 클리어 — 다음 새로고침 때 빈 상태로 시작.
+          // 🔴 PostgrestBuilder thenable — await 로 실행 보장.
           if (companyId) {
-            void supabase
-              .from('invoice_verifications')
-              .update({
-                transfer_rows: [] as unknown as Json,
-                transfer_saved_at: null,
-              })
-              .eq('company_id', companyId);
+            void (async () => {
+              const { error } = await supabase
+                .from('invoice_verifications')
+                .update({
+                  transfer_rows: [] as unknown as Json,
+                  transfer_saved_at: null,
+                })
+                .eq('company_id', companyId);
+              if (error) {
+                // eslint-disable-next-line no-console
+                console.error('[transfer_rows.clear]', error);
+              }
+            })();
           }
         },
         onError: (e) => {
