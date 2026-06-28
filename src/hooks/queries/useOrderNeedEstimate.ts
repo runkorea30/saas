@@ -1,5 +1,5 @@
 /**
- * 홈 대시보드용 — 발주 필요 금액 실시간 추정.
+ * 발주 필요 금액 실시간 추정 — TopNav 우측 고정 위젯용.
  *
  * ⚠️ 발주서 페이지 totalUsd 와 완전히 동일한 계산 방식:
  *   - orderQ = calcOrderQty(baseQty, unit_order || unit)  → 발주 단위 (DZ면 ÷12)
@@ -9,6 +9,7 @@
  * 🔴 company_id 는 useCompany() 에서만.
  * 🔴 calcOrderQty / calcSalesQty1m / calcSalesQty3m 은 calculations.ts 경유.
  * 🟠 usePurchaseOrder 캐시 재활용 — 추가 쿼리 없음.
+ * 🟠 해상(선박) 수입 카테고리(레더다이/스웨이드다이/디글레이저)는 발주 예상 제외.
  */
 import { useMemo } from 'react';
 import { usePurchaseOrder } from './usePurchaseOrder';
@@ -20,30 +21,35 @@ import {
 
 export type OrderBasis = '1m' | '3m';
 
+/** 해상(선박) 수입 카테고리 — 발주 예상에서 제외. */
+const SEA_IMPORT_CATEGORIES: ReadonlySet<string> = new Set([
+  '2-1.레더다이',
+  '2-2.스웨이드다이',
+  '3-1.디글레이저',
+]);
+
 export interface OrderNeedEstimate {
   estimatedUsd: number;
   needCount: number;
-  percent: number;
-  gap: number;
   isLoading: boolean;
 }
 
 export function useOrderNeedEstimate(
   companyId: string | null,
   basis: OrderBasis,
-  threshold: number,
 ): OrderNeedEstimate {
   const { products, salesMap, stockMap, isLoading } = usePurchaseOrder(companyId);
 
   const estimate = useMemo(() => {
     if (isLoading || products.length === 0) {
-      return { estimatedUsd: 0, needCount: 0, percent: 0, gap: threshold };
+      return { estimatedUsd: 0, needCount: 0 };
     }
 
     let totalUsd = 0;
     let needCount = 0;
 
     for (const p of products) {
+      if (SEA_IMPORT_CATEGORIES.has(p.category)) continue;
       if (!p.unit_price_usd || Number(p.unit_price_usd) <= 0) continue;
 
       const qty6m = salesMap.get(p.id) ?? 0;
@@ -65,15 +71,11 @@ export function useOrderNeedEstimate(
       needCount++;
     }
 
-    const rounded = parseFloat(totalUsd.toFixed(2));
-    const percent =
-      threshold > 0
-        ? parseFloat(Math.min((rounded / threshold) * 100, 999).toFixed(1))
-        : 0;
-    const gap = parseFloat((threshold - rounded).toFixed(2));
-
-    return { estimatedUsd: rounded, needCount, percent, gap };
-  }, [products, salesMap, stockMap, basis, threshold, isLoading]);
+    return {
+      estimatedUsd: parseFloat(totalUsd.toFixed(2)),
+      needCount,
+    };
+  }, [products, salesMap, stockMap, basis, isLoading]);
 
   return { ...estimate, isLoading };
 }

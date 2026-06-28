@@ -13,7 +13,6 @@ import {
   useTodayData,
 } from '@/hooks/queries/useHomeDashboard';
 import { HomeHeader } from '@/components/feature/home/HomeHeader';
-import { OrderNeedWidget } from '@/components/feature/home/OrderNeedWidget';
 import { KpiGrid } from '@/components/feature/home/KpiGrid';
 import { TodaySection } from '@/components/feature/home/TodaySection';
 import { RevenueChart } from '@/components/feature/home/RevenueChart';
@@ -55,8 +54,6 @@ export function HomePage() {
           targetPct={targetPct}
           loading={companyLoading || kpiQuery.isLoading || todayQuery.isLoading}
         />
-
-        <OrderNeedWidget />
 
         <div style={{ marginBottom: 20 }}>
           <KpiGrid
