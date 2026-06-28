@@ -63,17 +63,33 @@ export function useBankClassifyRules(companyId: string | null) {
 }
 
 /**
- * 단일 월 또는 전체 연도 행 조회.
- * - month: number → 해당 월만
- * - month: undefined → 연도 전체 (월 무관)
+ * 분류 필터:
+ *   'all'          → 전체
+ *   'excluded'     → is_excluded=true
+ *   'unclassified' → is_excluded=false AND pl_category_id IS NULL
+ *   <uuid>         → pl_category_id = <uuid>
+ */
+export type BankRowCategoryFilter = 'all' | 'excluded' | 'unclassified' | string;
+
+/**
+ * 행 조회 (연/월/분류 필터).
+ * - month: number → 해당 월만 / undefined → 연도 전체
+ * - categoryFilter: 위 BankRowCategoryFilter 참고. 기본 'all'.
  */
 export function useBankExpenseRows(
   companyId: string | null,
   year: number,
   month: number | undefined,
+  categoryFilter: BankRowCategoryFilter = 'all',
 ) {
   return useQuery({
-    queryKey: ['bank-expense-rows', companyId, year, month ?? 'all'],
+    queryKey: [
+      'bank-expense-rows',
+      companyId,
+      year,
+      month ?? 'all',
+      categoryFilter,
+    ],
     enabled: Boolean(companyId),
     staleTime: 1000 * 60 * 2,
     queryFn: () =>
@@ -86,6 +102,13 @@ export function useBankExpenseRows(
           .eq('company_id', companyId!)
           .eq('year', year);
         if (month !== undefined) q = q.eq('month', month);
+        if (categoryFilter === 'excluded') {
+          q = q.eq('is_excluded', true);
+        } else if (categoryFilter === 'unclassified') {
+          q = q.eq('is_excluded', false).is('pl_category_id', null);
+        } else if (categoryFilter !== 'all') {
+          q = q.eq('pl_category_id', categoryFilter);
+        }
         return q.order('transaction_date', { ascending: false });
       }),
   });

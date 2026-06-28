@@ -6,19 +6,20 @@
  *   2. 각 파일에 계좌 별칭 입력
  *   3. [자동분류 실행] — DB unique 제약으로 중복 자동 스킵
  *   4. 토스트: "N건 추가, M건 중복 스킵"
- *   5. 자체 월 선택기(전체 / 데이터 있는 월) — 상단 손익 month 와 독립
- *   6. 리뷰 테이블 (선택된 월 또는 연도 전체) — 미분류 행 상단 정렬 + 빨간 점
- *   7. 미분류 0 건이면 [전체 확인 완료] 활성화 (단일 월 선택 시에만)
+ *   5. 독립 필터: 연도 / 월(전체+1~12) / 분류(전체·판관비 카테고리·미분류·제외)
+ *      → 상단 손익 mode/month/year 와 완전 분리.
+ *   6. 우측 요약: 판관비 반영액 · 전체 출금 · 건수.
+ *   7. 리뷰 테이블 (필터 결과) — 미분류 행 상단 정렬 + 빨간 점.
+ *   8. 미분류 0 건이면 [전체 확인 완료] 활성화 (단일 월 선택 시에만).
  *
- * 🟠 selectedMonth 는 컴포넌트 내부 state — 페이지 mode/month 와 별개.
+ * 🟠 filterYear/Month/Category 는 컴포넌트 내부 state. year prop 은 초기값으로만 사용.
  */
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Trash2, Upload, X } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useToast } from '@/components/ui/Toast';
 import {
   useBankClassifyRules,
-  useBankExpenseMonths,
   useBankExpenseRows,
   useBankExpenseUploads,
   useConfirmAllBankExpenseRows,
@@ -26,6 +27,7 @@ import {
   useUpdateBankExpenseRow,
   useUploadBankExpenses,
   type BankExpenseRow,
+  type BankRowCategoryFilter,
 } from '@/hooks/queries/useBankExpenses';
 import { usePlExpenseCategories } from '@/hooks/queries/usePlExpenseCategories';
 
@@ -37,11 +39,11 @@ interface PendingFile {
 }
 
 interface Props {
-  /** 페이지에서 선택된 연도. 거래내역은 이 연도 범위 내에서 조회. */
+  /** 페이지에서 선택된 연도. 거래내역 필터의 초기 연도로만 사용. */
   year: number;
 }
 
-type SelectedMonth = number | 'all';
+type FilterMonth = number | 'all';
 
 function fmtWon(n: number): string {
   return n.toLocaleString('ko-KR');
@@ -72,16 +74,26 @@ export function BankExpenseSection({ year }: Props) {
 
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState<SelectedMonth>('all');
+
+  // ── 거래내역 독립 필터 (페이지의 손익 연/월 선택과 분리) ─────
+  const [filterYear, setFilterYear] = useState<number>(year);
+  const [filterMonth, setFilterMonth] = useState<FilterMonth>('all');
+  const [filterCategory, setFilterCategory] =
+    useState<BankRowCategoryFilter>('all');
+
+  const yearOptions = useMemo(() => {
+    const y = new Date().getFullYear();
+    return [y - 2, y - 1, y, y + 1];
+  }, []);
 
   const rulesQ = useBankClassifyRules(companyId);
   const rowsQ = useBankExpenseRows(
     companyId,
-    year,
-    selectedMonth === 'all' ? undefined : selectedMonth,
+    filterYear,
+    filterMonth === 'all' ? undefined : filterMonth,
+    filterCategory,
   );
-  const monthsQ = useBankExpenseMonths(companyId, year);
-  const uploadsQ = useBankExpenseUploads(companyId, year);
+  const uploadsQ = useBankExpenseUploads(companyId, filterYear);
   const categoriesQ = usePlExpenseCategories(companyId);
 
   const uploadMut = useUploadBankExpenses();
@@ -91,9 +103,28 @@ export function BankExpenseSection({ year }: Props) {
 
   const rules = rulesQ.data ?? [];
   const rows = rowsQ.data ?? [];
-  const availableMonths = monthsQ.data ?? [];
   const uploads = uploadsQ.data ?? [];
   const categories = categoriesQ.data ?? [];
+
+  // ── 필터 결과 요약: 판관비 반영액 / 전체 출금 / 건수 ─────
+  const summary = useMemo(() => {
+    let sgaAmount = 0;
+    let sgaCount = 0;
+    let totalWithdrawal = 0;
+    for (const r of rows) {
+      totalWithdrawal += r.withdrawal;
+      if (!r.is_excluded && r.pl_category_id) {
+        sgaAmount += r.withdrawal;
+        sgaCount += 1;
+      }
+    }
+    return {
+      sgaAmount,
+      sgaCount,
+      totalWithdrawal,
+      totalCount: rows.length,
+    };
+  }, [rows]);
 
   // 정렬: 미분류(0) → 분류됨(1) → 제외됨(2) → 확인완료(3)
   const sorted = [...rows].sort((a, b) => {
@@ -266,9 +297,9 @@ export function BankExpenseSection({ year }: Props) {
 
   const handleConfirmAll = () => {
     if (!companyId || hasUnclassified) return;
-    if (selectedMonth === 'all') return; // 전체 모드에서는 비활성.
+    if (filterMonth === 'all') return; // 전체 모드에서는 비활성.
     confirmAllMut.mutate(
-      { companyId, year, month: selectedMonth },
+      { companyId, year: filterYear, month: filterMonth },
       {
         onSuccess: () =>
           showToast({ kind: 'success', text: '확인 완료' }),
@@ -461,7 +492,7 @@ export function BankExpenseSection({ year }: Props) {
               marginBottom: 4,
             }}
           >
-            {year}년 업로드 이력 (XLS 한 파일에 여러 달 데이터 포함 가능)
+            {filterYear}년 업로드 이력 (XLS 한 파일에 여러 달 데이터 포함 가능)
           </p>
           <div className="space-y-1">
             {uploads.map((u) => (
@@ -504,50 +535,122 @@ export function BankExpenseSection({ year }: Props) {
         </div>
       )}
 
-      {/* 자체 월 선택기 — 상단 손익 month 와 독립 */}
-      <div className="flex items-center gap-2 mb-3 flex-wrap">
-        <span
+      {/* 거래내역 필터 — 연도/월/분류, 상단 손익 선택과 독립 */}
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
+        <select
+          value={filterYear}
+          onChange={(e) => setFilterYear(Number(e.target.value))}
           style={{
-            fontSize: 11.5,
-            color: 'var(--ink-3)',
-            flexShrink: 0,
+            height: 28,
+            padding: '0 8px',
+            border: '1px solid var(--line)',
+            borderRadius: 4,
+            fontSize: 12,
+            background: 'var(--surface)',
+            color: 'var(--ink)',
+            outline: 'none',
+            minWidth: 88,
           }}
         >
-          거래내역 조회:
-        </span>
-        <div className="flex flex-wrap gap-1">
-          {(['all', ...availableMonths] as SelectedMonth[]).map((m) => {
-            const active = selectedMonth === m;
-            return (
-              <button
-                key={String(m)}
-                type="button"
-                onClick={() => setSelectedMonth(m)}
-                className="transition-colors"
-                style={{
-                  padding: '3px 10px',
-                  fontSize: 11.5,
-                  borderRadius: 4,
-                  border: `1px solid ${active ? BRAND : 'var(--line)'}`,
-                  background: active ? BRAND : 'transparent',
-                  color: active ? '#fff' : 'var(--ink-3)',
-                  cursor: 'pointer',
-                }}
-              >
-                {m === 'all' ? '전체' : `${m}월`}
-              </button>
-            );
-          })}
+          {yearOptions.map((y) => (
+            <option key={y} value={y}>
+              {y}년
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={filterMonth === 'all' ? 'all' : String(filterMonth)}
+          onChange={(e) => {
+            const v = e.target.value;
+            setFilterMonth(v === 'all' ? 'all' : Number(v));
+          }}
+          style={{
+            height: 28,
+            padding: '0 8px',
+            border: '1px solid var(--line)',
+            borderRadius: 4,
+            fontSize: 12,
+            background: 'var(--surface)',
+            color: 'var(--ink)',
+            outline: 'none',
+            minWidth: 100,
+          }}
+        >
+          <option value="all">전체 월</option>
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((m) => (
+            <option key={m} value={m}>
+              {m}월
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={filterCategory}
+          onChange={(e) =>
+            setFilterCategory(e.target.value as BankRowCategoryFilter)
+          }
+          style={{
+            height: 28,
+            padding: '0 8px',
+            border: '1px solid var(--line)',
+            borderRadius: 4,
+            fontSize: 12,
+            background: 'var(--surface)',
+            color: 'var(--ink)',
+            outline: 'none',
+            minWidth: 150,
+          }}
+        >
+          <option value="all">전체 분류</option>
+          <optgroup label="판관비 분류">
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="기타">
+            <option value="unclassified">미분류</option>
+            <option value="excluded">제외 항목</option>
+          </optgroup>
+        </select>
+
+        {/* 요약: 판관비 반영액 / 전체 출금 / 건수 */}
+        <div
+          className="flex items-center gap-3 ml-auto flex-wrap"
+          style={{ fontSize: 11.5, color: 'var(--ink-3)' }}
+        >
+          <span>
+            판관비 반영액{' '}
+            <span
+              className="num"
+              style={{
+                color: BRAND,
+                fontWeight: 600,
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              ₩{fmtWon(summary.sgaAmount)}
+            </span>{' '}
+            ({summary.sgaCount}건)
+          </span>
+          <span style={{ color: 'var(--ink-4)' }}>·</span>
+          <span>
+            전체 출금{' '}
+            <span
+              className="num"
+              style={{
+                color: 'var(--ink-2)',
+                fontWeight: 500,
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              ₩{fmtWon(summary.totalWithdrawal)}
+            </span>{' '}
+            ({summary.totalCount}건)
+          </span>
         </div>
-        <span
-          style={{
-            marginLeft: 'auto',
-            fontSize: 11,
-            color: 'var(--ink-3)',
-          }}
-        >
-          {rows.length}건
-        </span>
       </div>
 
       {/* 리뷰 테이블 */}
@@ -566,9 +669,9 @@ export function BankExpenseSection({ year }: Props) {
             borderRadius: 8,
           }}
         >
-          {selectedMonth === 'all'
-            ? `${year}년 거래내역이 없습니다. 상단 [+ XLS 업로드] 로 시작하세요.`
-            : `${selectedMonth}월 거래내역이 없습니다.`}
+          {filterMonth === 'all'
+            ? `${filterYear}년 거래내역이 없습니다. 상단 드롭존에 XLS 를 올려 시작하세요.`
+            : `${filterYear}년 ${filterMonth}월 거래내역이 없습니다.`}
         </div>
       )}
 
@@ -776,10 +879,10 @@ export function BankExpenseSection({ year }: Props) {
               disabled={
                 hasUnclassified ||
                 confirmAllMut.isPending ||
-                selectedMonth === 'all'
+                filterMonth === 'all'
               }
               title={
-                selectedMonth === 'all'
+                filterMonth === 'all'
                   ? '월을 선택하면 일괄 확인이 가능합니다'
                   : hasUnclassified
                     ? '미분류 항목을 먼저 처리해주세요'
@@ -788,22 +891,22 @@ export function BankExpenseSection({ year }: Props) {
               style={{
                 padding: '6px 14px',
                 background:
-                  hasUnclassified || selectedMonth === 'all'
+                  hasUnclassified || filterMonth === 'all'
                     ? 'var(--surface-2)'
                     : BRAND,
                 color:
-                  hasUnclassified || selectedMonth === 'all'
+                  hasUnclassified || filterMonth === 'all'
                     ? 'var(--ink-3)'
                     : '#fff',
                 fontSize: 12.5,
                 borderRadius: 6,
                 border: 'none',
                 cursor:
-                  hasUnclassified || selectedMonth === 'all'
+                  hasUnclassified || filterMonth === 'all'
                     ? 'not-allowed'
                     : 'pointer',
                 opacity:
-                  hasUnclassified || selectedMonth === 'all' ? 0.6 : 1,
+                  hasUnclassified || filterMonth === 'all' ? 0.6 : 1,
               }}
             >
               전체 확인 완료
