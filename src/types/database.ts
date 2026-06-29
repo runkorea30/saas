@@ -324,6 +324,8 @@ export type Database = {
           import_notice_status: string | null
           industry: string | null
           name: string
+          notice_body: string | null
+          notice_title: string | null
           status: string
           trial_ends_at: string
           updated_at: string
@@ -348,6 +350,8 @@ export type Database = {
           import_notice_status?: string | null
           industry?: string | null
           name: string
+          notice_body?: string | null
+          notice_title?: string | null
           status?: string
           trial_ends_at?: string
           updated_at?: string
@@ -372,6 +376,8 @@ export type Database = {
           import_notice_status?: string | null
           industry?: string | null
           name?: string
+          notice_body?: string | null
+          notice_title?: string | null
           status?: string
           trial_ends_at?: string
           updated_at?: string

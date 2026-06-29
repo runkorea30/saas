@@ -20,6 +20,7 @@ import { OrderEntryPage } from '@/pages/sales/OrderEntryPage';
 import { SalesAnalysisPage } from '@/pages/sales/SalesAnalysisPage';
 import { CustomersPage } from '@/pages/settings/CustomersPage';
 import { CustomerGroupsPage } from '@/pages/settings/CustomerGroupsPage';
+import { PortalNoticePage } from '@/pages/settings/PortalNoticePage';
 import { ProductsPage } from '@/pages/inventory/ProductsPage';
 import { StockPage } from '@/pages/inventory/StockPage';
 import { ImportReceivingPage } from '@/pages/inventory/ImportReceivingPage';
@@ -85,6 +86,7 @@ function App() {
           <Route index element={<Navigate to="/settings/customers" replace />} />
           <Route path="customers" element={<CustomersPage />} />
           <Route path="customer-groups" element={<CustomerGroupsPage />} />
+          <Route path="portal-notice" element={<PortalNoticePage />} />
         </Route>
 
         {/* 레거시 /orders → /sales/orders */}

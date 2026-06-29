@@ -352,7 +352,7 @@ function CustomerOrderShell({
 
         {/* ── 우측 33%: 공지사항 + 수입예정 ── */}
         <aside className="flex min-w-0 flex-1 flex-col gap-3">
-          <NoticePanel fontScale={fontScale} />
+          <NoticePanel companyId={customer.companyId} fontScale={fontScale} />
           <ImportNoticeCard
             companyId={customer.companyId}
             fontScale={fontScale}
@@ -1236,13 +1236,47 @@ function LeftPanel({
 
 // ───────────────────────────────────────────────────────────
 
-function NoticePanel({ fontScale }: { fontScale: number }) {
+function NoticePanel({
+  companyId,
+  fontScale,
+}: {
+  companyId: string;
+  fontScale: number;
+}) {
   const baseFont = 12 * fontScale;
+
+  const { data } = useQuery<{ title: string | null; body: string | null } | null>({
+    queryKey: ['portal-notice', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('companies')
+        .select('notice_title, notice_body')
+        .eq('id', companyId)
+        .maybeSingle();
+      if (error) throw error;
+      return data
+        ? { title: data.notice_title ?? null, body: data.notice_body ?? null }
+        : null;
+    },
+    staleTime: 60_000,
+  });
+
+  const title = data?.title || '공지사항';
+  const body =
+    data?.body ||
+    '평일 오후 4시 이후 접수된 주문은 다음 영업일에 출고됩니다.\n긴급 건은 담당자에게 연락 바랍니다.';
+
   return (
-    <Card title="공지사항">
-      <div style={{ fontSize: baseFont, color: '#44403C', lineHeight: 1.55 }}>
-        평일 오후 4시 이후 접수된 주문은 다음 영업일에 출고됩니다.<br />
-        긴급 건은 담당자에게 연락 바랍니다.
+    <Card title={title}>
+      <div
+        style={{
+          fontSize: baseFont,
+          color: '#44403C',
+          lineHeight: 1.65,
+          whiteSpace: 'pre-line',
+        }}
+      >
+        {body}
       </div>
     </Card>
   );

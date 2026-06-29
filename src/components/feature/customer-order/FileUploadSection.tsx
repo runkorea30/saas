@@ -7,7 +7,7 @@
 import { Upload, Download, Send, Loader2, X } from 'lucide-react';
 import { SectionHeading } from './SectionHeading';
 
-const ACCEPT_EXT = '.xlsx,.xls,.csv,.jpg,.jpeg,.png,.pdf';
+const ACCEPT_EXT = '.xlsx,.xls,.csv,.jpg,.jpeg,.png,.gif,.webp,.pdf';
 
 export interface FileUploadSectionProps {
   file: File | null;
@@ -85,7 +85,7 @@ export function FileUploadSection({
           </span>
         )}
         <span className="text-[11px] text-[#b9aea5]">
-          .xlsx · .xls · .csv (최대 10MB)
+          .xlsx · .xls · .csv · .jpg · .png (최대 10MB)
         </span>
         <input
           id="file-upload-input"
@@ -112,7 +112,7 @@ export function FileUploadSection({
           ) : (
             <Download className="h-3.5 w-3.5" />
           )}
-          주문서 다운로드
+          주문서 엑셀 다운로드
         </button>
         <button
           type="button"
