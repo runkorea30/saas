@@ -17,6 +17,7 @@ import {
   useUploadOrderPhoto,
   useDeleteOrderPhoto,
 } from '@/hooks/queries/useOrderPhotos';
+import { compressImage, logCompressionRate } from '@/utils/compressImage';
 
 interface Props {
   orderId: string;
@@ -51,6 +52,8 @@ export function OrderPhotoSection({
   const [pendingPreviews, setPendingPreviews] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  // 🟠 압축 진행 중 — 카메라 입력 잠금.
+  const [isCompressing, setIsCompressing] = useState(false);
 
   // 부모(바텀시트)에 업로드 상태 브로드캐스트.
   useEffect(() => {
@@ -80,7 +83,7 @@ export function OrderPhotoSection({
   const totalCount = photos.length + pendingFiles.length;
   const canAddMore = !readOnly && totalCount < MAX_PHOTOS;
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     e.target.value = '';
     if (!files.length) return;
@@ -90,9 +93,26 @@ export function OrderPhotoSection({
       return;
     }
     const toAdd = files.slice(0, remaining);
-    const previews = toAdd.map((f) => URL.createObjectURL(f));
-    setPendingFiles((prev) => [...prev, ...toAdd]);
-    setPendingPreviews((prev) => [...prev, ...previews]);
+    setIsCompressing(true);
+    try {
+      // 🟠 Canvas 리사이즈 + JPEG 압축 (병렬). HEIC/오류는 원본 반환.
+      const compressed = await Promise.all(
+        toAdd.map(async (f) => {
+          const out = await compressImage(f, {
+            maxWidth: 1280,
+            maxHeight: 1280,
+            quality: 0.75,
+          });
+          logCompressionRate(f, out);
+          return out;
+        }),
+      );
+      const previews = compressed.map((f) => URL.createObjectURL(f));
+      setPendingFiles((prev) => [...prev, ...compressed]);
+      setPendingPreviews((prev) => [...prev, ...previews]);
+    } finally {
+      setIsCompressing(false);
+    }
   };
 
   const removePending = (index: number) => {
@@ -242,11 +262,15 @@ export function OrderPhotoSection({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
+              disabled={isUploading || isCompressing}
               className={`aspect-square rounded-lg border-2 border-dashed flex items-center justify-center transition-colors ${dashedBorder} ${dashedBg} disabled:opacity-50`}
               aria-label="사진 추가"
             >
-              <Camera size={16} className={iconColor} />
+              {isCompressing ? (
+                <div className="w-4 h-4 border-2 border-white/60 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Camera size={16} className={iconColor} />
+              )}
             </button>
           )}
         </div>
@@ -256,11 +280,20 @@ export function OrderPhotoSection({
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading}
-          className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-dashed text-sm ${dashedBorder} ${dashedBg} ${emptyText}`}
+          disabled={isUploading || isCompressing}
+          className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-dashed text-sm ${dashedBorder} ${dashedBg} ${emptyText} disabled:opacity-60`}
         >
-          <Camera size={16} />
-          <span>출고 사진 촬영 (최대 {MAX_PHOTOS}장)</span>
+          {isCompressing ? (
+            <>
+              <div className="w-4 h-4 border-2 border-white/60 border-t-transparent rounded-full animate-spin" />
+              <span>사진 처리 중...</span>
+            </>
+          ) : (
+            <>
+              <Camera size={16} />
+              <span>출고 사진 촬영 (최대 {MAX_PHOTOS}장)</span>
+            </>
+          )}
         </button>
       )}
 
