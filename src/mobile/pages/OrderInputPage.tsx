@@ -16,7 +16,6 @@ import { useCompany } from '@/hooks/useCompany';
 import { useCustomers } from '@/hooks/queries/useCustomers';
 import { useProducts, type Product } from '@/hooks/queries/useProducts';
 import { calcSupplyPriceByCustomerGrade } from '@/utils/calculations';
-import { OrderPhotoSection } from '@/components/order/OrderPhotoSection';
 import { RefreshButton } from '../components/RefreshButton';
 
 interface EntryRow {
@@ -67,8 +66,6 @@ export function OrderInputPage() {
   const [memo, setMemo] = useState('');
   const [rows, setRows] = useState<EntryRow[]>(() => [makeRow()]);
   const [saving, setSaving] = useState(false);
-  // 🟠 주문 저장 후 OrderPhotoSection 노출용. RPC insert_order Returns: string(uuid).
-  const [savedOrderId, setSavedOrderId] = useState<string | null>(null);
 
   const selectedCustomer = customers.find((c) => c.id === customerId) ?? null;
 
@@ -136,7 +133,7 @@ export function OrderInputPage() {
     if (!canSave || !companyId) return;
     setSaving(true);
     try {
-      const { data, error } = await supabase.rpc('insert_order', {
+      const { error } = await supabase.rpc('insert_order', {
         p_company_id: companyId,
         p_customer_id: customerId,
         p_order_date: orderDate,
@@ -159,8 +156,7 @@ export function OrderInputPage() {
           queryKey: ['inventory-stock', companyId],
         }),
       ]);
-      // 🟠 출고 사진 촬영 단계로 전환. data 는 RPC Returns: string(uuid).
-      setSavedOrderId(typeof data === 'string' ? data : null);
+      navigate('/mobile/orders');
     } catch (err) {
       alert(
         err instanceof Error ? err.message : '저장 중 오류가 발생했습니다.',
@@ -169,75 +165,6 @@ export function OrderInputPage() {
       setSaving(false);
     }
   };
-
-  const handleFinish = () => {
-    navigate('/mobile/orders');
-  };
-
-  // 🟠 저장 완료 후: 사진 촬영 화면으로 전환.
-  if (savedOrderId) {
-    return (
-      <div style={{ paddingBottom: 80 }}>
-        <header className="m-page-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <h1 className="m-page-title">출고 사진 촬영</h1>
-          </div>
-        </header>
-        <div style={{ padding: '12px 16px', display: 'grid', gap: 14 }}>
-          <div
-            style={{
-              padding: '10px 12px',
-              borderRadius: 10,
-              background: 'var(--m-primary-wash, #eff6ff)',
-              border: '1px solid var(--m-primary)',
-              color: 'var(--m-text)',
-              fontSize: 13,
-              lineHeight: 1.5,
-            }}
-          >
-            주문이 저장되었습니다. 분쟁 대비를 위해 포장 사진을 촬영해 주세요. (최대 5장, 5일 후 자동 삭제)
-          </div>
-          <div className="m-card" style={{ padding: 12 }}>
-            <OrderPhotoSection
-              orderId={savedOrderId}
-              companyId={companyId}
-              customerId={customerId}
-              showCamera={true}
-            />
-          </div>
-        </div>
-        <footer
-          style={{
-            position: 'sticky',
-            bottom: 0,
-            padding: '12px 16px',
-            background: 'var(--m-surface)',
-            borderTop: '1px solid var(--m-border)',
-            display: 'flex',
-            gap: 10,
-          }}
-        >
-          <button
-            type="button"
-            onClick={handleFinish}
-            style={{
-              flex: 1,
-              height: 44,
-              borderRadius: 10,
-              border: 0,
-              background: 'var(--m-primary)',
-              color: '#ffffff',
-              fontWeight: 600,
-              fontSize: 14,
-              cursor: 'pointer',
-            }}
-          >
-            완료
-          </button>
-        </footer>
-      </div>
-    );
-  }
 
   return (
     <div style={{ paddingBottom: 80 }}>

@@ -7,10 +7,11 @@
  * 🔴 CLAUDE.md §5: 기존 useOrders 재사용 → fetchAllRows 자동 적용.
  */
 import { useMemo, useState } from 'react';
-import { Camera } from 'lucide-react';
+import { Camera, X } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useOrders } from '@/hooks/queries/useOrders';
 import { useOrderPhotoFlags } from '@/hooks/queries/useOrderPhotos';
+import { OrderPhotoSection } from '@/components/order/OrderPhotoSection';
 import type { Order } from '@/types/orders';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { RefreshButton } from '../components/RefreshButton';
@@ -108,6 +109,16 @@ export function OrderListPage() {
   const orderIds = useMemo(() => orders.map((o) => o.id), [orders]);
   const { data: photoFlags } = useOrderPhotoFlags(orderIds, companyId);
 
+  // 🟠 출고 사진 바텀시트 모달 — 카드 하단 버튼 클릭 시 열림.
+  const [photoModal, setPhotoModal] = useState<{
+    orderId: string;
+    customerId: string | null;
+  } | null>(null);
+
+  const openPhotoModal = (orderId: string, customerId: string | null) => {
+    setPhotoModal({ orderId, customerId });
+  };
+
   const selected = orders.find((o) => o.id === selectedId) ?? orders[0] ?? null;
   const showDetail = isUnfolded && selected !== null;
 
@@ -161,6 +172,9 @@ export function OrderListPage() {
                 hasPhoto={photoFlags?.has(o.id) ?? false}
                 selected={isUnfolded && selected?.id === o.id}
                 onClick={() => setSelectedId(o.id)}
+                onOpenPhoto={() =>
+                  openPhotoModal(o.id, o.customer?.id ?? null)
+                }
               />
             ))}
           </div>
@@ -173,6 +187,35 @@ export function OrderListPage() {
           <OrderDetail order={selected!} />
         </div>
       )}
+
+      {/* 출고 사진 바텀시트 — 카드 촬영/조회 버튼 진입점 */}
+      {photoModal && (
+        <div className="fixed inset-0 z-50 flex items-end">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setPhotoModal(null)}
+          />
+          <div className="relative w-full bg-[#1a1a1a] rounded-t-2xl p-4 pb-8 space-y-3">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-sm font-semibold text-white">출고 사진</h3>
+              <button
+                type="button"
+                onClick={() => setPhotoModal(null)}
+                aria-label="닫기"
+              >
+                <X size={18} className="text-white/60" />
+              </button>
+            </div>
+            <OrderPhotoSection
+              orderId={photoModal.orderId}
+              companyId={companyId}
+              customerId={photoModal.customerId}
+              showCamera={true}
+              theme="dark"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -182,19 +225,29 @@ function OrderCard({
   hasPhoto,
   selected,
   onClick,
+  onOpenPhoto,
 }: {
   order: Order;
   hasPhoto: boolean;
   selected: boolean;
   onClick: () => void;
+  onOpenPhoto: () => void;
 }) {
   const qty = order.items.reduce((s, it) => s + (it.quantity ?? 0), 0);
   const grade = order.customer?.grade ?? null;
   const status = statusBadge(order.status);
+  // 🟠 외부 button(전체 카드)과의 nested-button 방지: div 로 변경 + 키보드 활성화 직접 처리.
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       className="m-card"
       style={{
         textAlign: 'left',
@@ -235,23 +288,6 @@ function OrderCard({
         >
           {status.label}
         </span>
-        {hasPhoto && (
-          <span
-            className="m-badge"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 3,
-              background: 'var(--m-success, #16a34a)22',
-              color: 'var(--m-success, #16a34a)',
-              border: '1px solid var(--m-success, #16a34a)',
-            }}
-            title="출고 사진 촬영 완료"
-          >
-            <Camera size={10} />
-            <span>촬영완료</span>
-          </span>
-        )}
       </div>
       <div
         style={{
@@ -275,7 +311,59 @@ function OrderCard({
       >
         ₩{fmtWon(order.total_amount)}
       </div>
-    </button>
+
+      {/* 카드 하단: 사진 상태 + 촬영/조회 버튼 — 카드 클릭과 분리 */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginTop: 4,
+          paddingTop: 8,
+          borderTop: '1px solid var(--m-border)',
+        }}
+      >
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            fontSize: 11,
+            color: hasPhoto
+              ? 'var(--m-success, #16a34a)'
+              : 'var(--m-text-secondary)',
+          }}
+        >
+          <Camera size={12} />
+          <span>{hasPhoto ? '촬영완료' : '사진 없음'}</span>
+        </span>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenPhoto();
+          }}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            fontSize: 11,
+            fontWeight: 600,
+            padding: '4px 10px',
+            borderRadius: 999,
+            border: 0,
+            cursor: 'pointer',
+            background: hasPhoto
+              ? 'var(--m-border)'
+              : 'var(--m-primary)',
+            color: hasPhoto ? 'var(--m-text)' : '#ffffff',
+          }}
+        >
+          <Camera size={12} />
+          <span>{hasPhoto ? '사진 보기/추가' : '출고 촬영'}</span>
+        </button>
+      </div>
+    </div>
   );
 }
 

@@ -3,6 +3,7 @@
  *
  * - showCamera=true: 모바일 촬영 모드 (capture="environment" 후면카메라 기본)
  * - readOnly=true: 데스크탑 조회 전용 (삭제/촬영 버튼 숨김)
+ * - theme='dark': 어두운 배경(바텀시트 등) 위 렌더링용 색상 분기
  * - 최대 5장, 5일 후 자동 만료(DB + Storage)
  *
  * 🔴 CLAUDE.md §1: companyId 는 useCompany() 결과를 prop 으로 받음.
@@ -21,6 +22,7 @@ interface Props {
   customerId?: string | null;
   showCamera?: boolean;
   readOnly?: boolean;
+  theme?: 'light' | 'dark';
 }
 
 export function OrderPhotoSection({
@@ -29,6 +31,7 @@ export function OrderPhotoSection({
   customerId,
   showCamera = false,
   readOnly = false,
+  theme = 'light',
 }: Props) {
   const { data: photos = [], isLoading } = useOrderPhotos(orderId, companyId);
   const uploadMutation = useUploadOrderPhoto(companyId);
@@ -37,6 +40,19 @@ export function OrderPhotoSection({
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
 
   const canUpload = !readOnly && photos.length < 5;
+  const dark = theme === 'dark';
+
+  // 🟠 다크 테마는 흰색/투명 톤, 라이트는 stone 톤.
+  const labelText = dark ? 'text-white/80' : 'text-stone-600';
+  const subText = dark ? 'text-white/40' : 'text-stone-400';
+  const iconColor = dark ? 'text-white/60' : 'text-stone-400';
+  const emptyText = dark ? 'text-white/40' : 'text-stone-400';
+  const tileBg = dark ? 'bg-white/5' : 'bg-stone-100';
+  const dashedBorder = dark ? 'border-white/30' : 'border-stone-300';
+  const dashedBg = dark
+    ? 'bg-white/5 hover:bg-white/10'
+    : 'bg-stone-50 hover:bg-stone-100';
+  const spinnerBorder = dark ? 'border-white/40' : 'border-stone-400';
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -70,13 +86,13 @@ export function OrderPhotoSection({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <Camera size={14} className="text-stone-400" />
-          <span className="text-xs font-medium text-stone-600">
+          <Camera size={14} className={iconColor} />
+          <span className={`text-xs font-medium ${labelText}`}>
             출고 사진 {photos.length > 0 ? `(${photos.length}/5)` : ''}
           </span>
         </div>
         {photos.length > 0 && (
-          <div className="flex items-center gap-1 text-[10px] text-stone-400">
+          <div className={`flex items-center gap-1 text-[10px] ${subText}`}>
             <Clock size={10} />
             <span>5일 후 자동 삭제</span>
           </div>
@@ -88,7 +104,7 @@ export function OrderPhotoSection({
           {photos.map((photo) => (
             <div
               key={photo.id}
-              className="relative aspect-square rounded-lg overflow-hidden bg-stone-100 cursor-pointer group"
+              className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer group ${tileBg}`}
               onClick={() => setPreviewPhoto(photo.storage_url)}
             >
               <img
@@ -120,13 +136,13 @@ export function OrderPhotoSection({
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={uploadMutation.isPending}
-              className="aspect-square rounded-lg border-2 border-dashed border-stone-300 flex items-center justify-center bg-stone-50 hover:bg-stone-100 transition-colors"
+              className={`aspect-square rounded-lg border-2 border-dashed flex items-center justify-center transition-colors ${dashedBorder} ${dashedBg}`}
               aria-label="사진 추가"
             >
               {uploadMutation.isPending ? (
-                <div className="w-4 h-4 border-2 border-stone-400 border-t-transparent rounded-full animate-spin" />
+                <div className={`w-4 h-4 border-2 border-t-transparent rounded-full animate-spin ${spinnerBorder}`} />
               ) : (
-                <Camera size={16} className="text-stone-400" />
+                <Camera size={16} className={iconColor} />
               )}
             </button>
           )}
@@ -138,11 +154,11 @@ export function OrderPhotoSection({
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={uploadMutation.isPending}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-dashed border-stone-300 bg-stone-50 hover:bg-stone-100 transition-colors text-sm text-stone-500"
+          className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-dashed text-sm ${dashedBorder} ${dashedBg} ${emptyText}`}
         >
           {uploadMutation.isPending ? (
             <>
-              <div className="w-4 h-4 border-2 border-stone-400 border-t-transparent rounded-full animate-spin" />
+              <div className={`w-4 h-4 border-2 border-t-transparent rounded-full animate-spin ${spinnerBorder}`} />
               <span>업로드 중...</span>
             </>
           ) : (
@@ -155,7 +171,7 @@ export function OrderPhotoSection({
       )}
 
       {!showCamera && photos.length === 0 && (
-        <div className="flex items-center gap-1.5 py-2 text-xs text-stone-400">
+        <div className={`flex items-center gap-1.5 py-2 text-xs ${emptyText}`}>
           <ImageOff size={13} />
           <span>촬영된 사진 없음 (모바일 앱에서 촬영)</span>
         </div>
@@ -173,7 +189,7 @@ export function OrderPhotoSection({
 
       {previewPhoto && (
         <div
-          className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center"
+          className="fixed inset-0 bg-black/90 z-[60] flex items-center justify-center"
           onClick={() => setPreviewPhoto(null)}
         >
           <button
