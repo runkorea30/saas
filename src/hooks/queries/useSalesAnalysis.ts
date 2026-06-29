@@ -142,7 +142,7 @@ async function fetchSalesYear(
         .lt('order.order_date', toIso) as never,
   );
 
-  return rows
+  const out = rows
     .filter((r) => r.order && r.order.customer)
     .map((r) => ({
       order_id: r.order_id,
@@ -158,13 +158,42 @@ async function fetchSalesYear(
       is_return: r.is_return,
       order_total_amount: r.order!.total_amount,
     }));
+
+  // 🟡 진단용 — 새 코드(v3) 로드 + total_amount SoT 적용 검증.
+  //    콘솔에 호미화방 2월 = 586750 / 디엔에스 3월 = 4985640 이 찍히면 정상.
+  if (typeof window !== 'undefined') {
+    const orderTotals = new Map<string, { date: string; cust: string; amt: number }>();
+    for (const r of out) {
+      if (!orderTotals.has(r.order_id)) {
+        orderTotals.set(r.order_id, {
+          date: r.order_date,
+          cust: r.customer_name,
+          amt: r.order_total_amount,
+        });
+      }
+    }
+    const byMonthCust = new Map<string, number>();
+    for (const o of orderTotals.values()) {
+      const utc = new Date(o.date);
+      const kst = new Date(utc.getTime() + 9 * 3600 * 1000);
+      const m = kst.getUTCMonth() + 1;
+      const k = `${o.cust}|${m}월`;
+      byMonthCust.set(k, (byMonthCust.get(k) ?? 0) + o.amt);
+    }
+    // eslint-disable-next-line no-console
+    console.log('[sales-analysis v3] total_amount 기준 검증', {
+      '호미화방 2월': byMonthCust.get('㈜호미화방|2월') ?? 0,
+      '디엔에스 3월': byMonthCust.get('디엔에스|3월') ?? 0,
+    });
+  }
+  return out;
 }
 
 export function useSalesAnalysis(companyId: string | null, year: number) {
   return useQuery<SalesRawRow[]>({
     // 🔴 queryKey 'v2' — orders.total_amount 기준으로 산식이 변경되어 기존 'sales-analysis'
     //    캐시(레거시 items.amount 합산값)와 강제 분리.
-    queryKey: ['sales-analysis-v2', companyId, year],
+    queryKey: ['sales-analysis-v3', companyId, year],
     enabled: Boolean(companyId),
     queryFn: () => fetchSalesYear(companyId!, year),
     staleTime: 0,
