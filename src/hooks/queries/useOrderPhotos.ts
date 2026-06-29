@@ -80,6 +80,42 @@ export function useOrderPhotoFlags(
   });
 }
 
+/**
+ * 여러 주문의 사진을 한 번에 가져와 order_id 별로 그룹핑한 Map 반환.
+ * 주문내역 카드의 인라인 썸네일 렌더용.
+ */
+export function useOrderPhotosByOrders(
+  orderIds: string[],
+  companyId: string | null,
+) {
+  return useQuery<Map<string, OrderPhoto[]>>({
+    queryKey: [
+      'order-photos-by-orders',
+      companyId,
+      orderIds.slice().sort().join(','),
+    ],
+    enabled: !!companyId && orderIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await DB.from('order_photos')
+        .select('*')
+        .eq('company_id', companyId!)
+        .in('order_id', orderIds)
+        .gt('expires_at', new Date().toISOString())
+        .order('taken_at', { ascending: true });
+      if (error) throw error;
+      const rows = (data ?? []) as unknown as OrderPhoto[];
+      const map = new Map<string, OrderPhoto[]>();
+      for (const p of rows) {
+        const list = map.get(p.order_id) ?? [];
+        list.push(p);
+        map.set(p.order_id, list);
+      }
+      return map;
+    },
+    staleTime: 30_000,
+  });
+}
+
 export function useUploadOrderPhoto(companyId: string | null) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -131,6 +167,7 @@ export function useUploadOrderPhoto(companyId: string | null) {
         queryKey: ['order-photos', companyId, variables.orderId],
       });
       queryClient.invalidateQueries({ queryKey: ['order-photo-flags', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['order-photos-by-orders', companyId] });
     },
   });
 }
@@ -161,6 +198,7 @@ export function useDeleteOrderPhoto(companyId: string | null) {
         queryKey: ['order-photos', companyId, orderId],
       });
       queryClient.invalidateQueries({ queryKey: ['order-photo-flags', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['order-photos-by-orders', companyId] });
     },
   });
 }

@@ -10,7 +10,7 @@ import { useMemo, useState } from 'react';
 import { Camera, X } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useOrders } from '@/hooks/queries/useOrders';
-import { useOrderPhotoFlags } from '@/hooks/queries/useOrderPhotos';
+import { useOrderPhotosByOrders, type OrderPhoto } from '@/hooks/queries/useOrderPhotos';
 import { OrderPhotoSection } from '@/components/order/OrderPhotoSection';
 import type { Order } from '@/types/orders';
 import { useMediaQuery } from '../hooks/useMediaQuery';
@@ -107,7 +107,7 @@ export function OrderListPage() {
   };
 
   const orderIds = useMemo(() => orders.map((o) => o.id), [orders]);
-  const { data: photoFlags } = useOrderPhotoFlags(orderIds, companyId);
+  const { data: photosByOrder } = useOrderPhotosByOrders(orderIds, companyId);
 
   // 🟠 출고 사진 바텀시트 모달 — 카드 하단 버튼 클릭 시 열림.
   const [photoModal, setPhotoModal] = useState<{
@@ -176,7 +176,7 @@ export function OrderListPage() {
               <OrderCard
                 key={o.id}
                 order={o}
-                hasPhoto={photoFlags?.has(o.id) ?? false}
+                photos={photosByOrder?.get(o.id) ?? []}
                 selected={isUnfolded && selected?.id === o.id}
                 onClick={() => setSelectedId(o.id)}
                 onOpenPhoto={() =>
@@ -233,17 +233,21 @@ export function OrderListPage() {
 
 function OrderCard({
   order,
-  hasPhoto,
+  photos,
   selected,
   onClick,
   onOpenPhoto,
 }: {
   order: Order;
-  hasPhoto: boolean;
+  photos: OrderPhoto[];
   selected: boolean;
   onClick: () => void;
   onOpenPhoto: () => void;
 }) {
+  const hasPhoto = photos.length > 0;
+  const THUMB_LIMIT = 4;
+  const thumbs = photos.slice(0, THUMB_LIMIT);
+  const extra = Math.max(0, photos.length - THUMB_LIMIT);
   const qty = order.items.reduce((s, it) => s + (it.quantity ?? 0), 0);
   const grade = order.customer?.grade ?? null;
   const status = statusBadge(order.status);
@@ -323,31 +327,87 @@ function OrderCard({
         ₩{fmtWon(order.total_amount)}
       </div>
 
-      {/* 카드 하단: 사진 상태 + 촬영/조회 버튼 — 카드 클릭과 분리 */}
+      {/* 카드 하단: 출고 사진 — 썸네일 직접 표시 + 촬영/추가 버튼 */}
       <div
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
           marginTop: 4,
           paddingTop: 8,
           borderTop: '1px solid var(--m-border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
         }}
       >
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            fontSize: 11,
-            color: hasPhoto
-              ? 'var(--m-success, #16a34a)'
-              : 'var(--m-text-secondary)',
-          }}
-        >
-          <Camera size={12} />
-          <span>{hasPhoto ? '촬영완료' : '사진 없음'}</span>
-        </span>
+        {hasPhoto ? (
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenPhoto();
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              cursor: 'pointer',
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            {thumbs.map((p) => (
+              <div
+                key={p.id}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 6,
+                  overflow: 'hidden',
+                  background: 'var(--m-border)',
+                  flex: '0 0 auto',
+                }}
+              >
+                <img
+                  src={p.storage_url}
+                  alt="출고사진"
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    display: 'block',
+                  }}
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.visibility = 'hidden';
+                  }}
+                />
+              </div>
+            ))}
+            {extra > 0 && (
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: 'var(--m-text-secondary)',
+                  marginLeft: 2,
+                }}
+              >
+                +{extra}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: 11,
+              color: 'var(--m-text-secondary)',
+            }}
+          >
+            <Camera size={12} />
+            <span>사진 없음</span>
+          </span>
+        )}
         <button
           type="button"
           onClick={(e) => {
@@ -364,10 +424,9 @@ function OrderCard({
             borderRadius: 999,
             border: 0,
             cursor: 'pointer',
-            background: hasPhoto
-              ? 'var(--m-border)'
-              : 'var(--m-primary)',
+            background: hasPhoto ? 'var(--m-border)' : 'var(--m-primary)',
             color: hasPhoto ? 'var(--m-text)' : '#ffffff',
+            flex: '0 0 auto',
           }}
         >
           <Camera size={12} />
