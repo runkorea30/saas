@@ -8,6 +8,10 @@
  * - 연도 1회만 서버 fetch (order_items + orders + customers + products JOIN).
  * - 탭/필터 별 피벗은 클라이언트에서 useMemo + 본 파일의 pivot* 헬퍼.
  *
+ * 🔴 금액 집계 SoT 는 `orders.total_amount` (공급가 + VAT 기준).
+ *    `order_items.amount` 는 일부 레거시 데이터에서 판매가로 저장된 케이스가 있어
+ *    합계 산출에는 사용하지 않는다. 제품별 수량 집계에는 `order_items.quantity` 사용.
+ * 🟠 동일 order_id 가 N 개 item 으로 펼쳐져 들어오므로 월별/일별 합계는 order_id 중복제거.
  * 🟠 KST 기준 월/일 산정 — Vercel(UTC) 환경에서도 한국 회계상 월/일이 일관되게 잡힘.
  */
 import { useQuery } from '@tanstack/react-query';
@@ -29,7 +33,11 @@ export interface SalesRawRow {
   product_name: string;
   product_category: string;
   quantity: number;
+  /** order_items.amount — 제품별/수량 분석 용. 금액 합계에는 사용 금지. */
   amount: number;
+  is_return: boolean;
+  /** orders.total_amount — 금액 합계의 SoT. 같은 order_id 의 모든 행에서 동일값. */
+  order_total_amount: number;
 }
 
 export interface MonthlySalesRow {
@@ -98,6 +106,7 @@ interface RawJoinRow {
   order: {
     order_date: string;
     company_id: string;
+    total_amount: number;
     customer: { id: string; name: string } | null;
   } | null;
   product: {
@@ -116,18 +125,19 @@ async function fetchSalesYear(
   const fromIso = new Date(`${year}-01-01T00:00:00+09:00`).toISOString();
   const toIso = new Date(`${year + 1}-01-01T00:00:00+09:00`).toISOString();
 
+  // 🟠 SQL 단계의 is_return 필터 제거 — 환불만 있는 주문도 orders.total_amount 합계에는
+  //    반영되어야 함. 수량(제품별 탭)에서는 JS 단계에서 is_return=false 필터 적용.
   const rows = await fetchAllRows<RawJoinRow>(
     () =>
       supabase
         .from('order_items')
         .select(
           `order_id, quantity, amount, is_return,
-           order:orders!inner(order_date, company_id,
+           order:orders!inner(order_date, company_id, total_amount,
              customer:customers(id, name)),
            product:products(id, code, name, category)`,
         )
         .eq('company_id', companyId)
-        .eq('is_return', false)
         .gte('order.order_date', fromIso)
         .lt('order.order_date', toIso) as never,
   );
@@ -145,6 +155,8 @@ async function fetchSalesYear(
       product_category: r.product?.category ?? '',
       quantity: r.quantity,
       amount: r.amount,
+      is_return: r.is_return,
+      order_total_amount: r.order!.total_amount,
     }));
 }
 
@@ -162,16 +174,20 @@ export function useSalesAnalysis(companyId: string | null, year: number) {
 // ───────────────────────────────────────────────────────────
 
 /**
- * 월별매출 (거래처 × 월) 피벗.
+ * 월별매출 (거래처 × 월) 피벗 — orders.total_amount 기준.
+ * 🔴 같은 order_id 의 item 행이 N 개 펼쳐져 있으므로 order_id 별로 1회만 합산.
  * - customerFilter null → 전체. 합계 내림차순.
  */
 export function pivotMonthly(
   rows: SalesRawRow[],
   customerFilter: string | null,
 ): MonthlySalesRow[] {
+  const seenOrders = new Set<string>();
   const map = new Map<string, MonthlySalesRow>();
   for (const r of rows) {
     if (customerFilter && r.customer_id !== customerFilter) continue;
+    if (seenOrders.has(r.order_id)) continue;
+    seenOrders.add(r.order_id);
     const { m } = kstParts(r.order_date);
     let row = map.get(r.customer_id);
     if (!row) {
@@ -183,14 +199,15 @@ export function pivotMonthly(
       };
       map.set(r.customer_id, row);
     }
-    row.monthly[m] = (row.monthly[m] ?? 0) + r.amount;
-    row.total += r.amount;
+    row.monthly[m] = (row.monthly[m] ?? 0) + r.order_total_amount;
+    row.total += r.order_total_amount;
   }
   return Array.from(map.values()).sort((a, b) => b.total - a.total);
 }
 
 /**
- * 일별매출 (날짜 × 거래처) 피벗.
+ * 일별매출 (날짜 × 거래처) 피벗 — orders.total_amount 기준.
+ * 🔴 같은 order_id 의 item 행이 N 개 펼쳐져 있으므로 order_id 별로 1회만 합산.
  * - monthFilter 비어있으면 전체 월. customerFilter null → 전체 거래처.
  * - 날짜 내림차순. 거래처 컬럼은 실제 데이터 있는 거래처만 한글 정렬.
  */
@@ -202,6 +219,7 @@ export function pivotDaily(
   const monthSet = new Set(monthFilter);
   const dateMap = new Map<string, DailySalesRow>();
   const custMap = new Map<string, CustomerColumn>();
+  const seenOrders = new Set<string>();
 
   for (const r of rows) {
     if (customerFilter && r.customer_id !== customerFilter) continue;
@@ -209,6 +227,8 @@ export function pivotDaily(
       const { m } = kstParts(r.order_date);
       if (!monthSet.has(m)) continue;
     }
+    if (seenOrders.has(r.order_id)) continue;
+    seenOrders.add(r.order_id);
     const dateKey = kstDateKey(r.order_date);
     let row = dateMap.get(dateKey);
     if (!row) {
@@ -216,8 +236,8 @@ export function pivotDaily(
       dateMap.set(dateKey, row);
     }
     row.byCustomer[r.customer_id] =
-      (row.byCustomer[r.customer_id] ?? 0) + r.amount;
-    row.total += r.amount;
+      (row.byCustomer[r.customer_id] ?? 0) + r.order_total_amount;
+    row.total += r.order_total_amount;
     if (!custMap.has(r.customer_id)) {
       custMap.set(r.customer_id, {
         id: r.customer_id,
@@ -253,6 +273,8 @@ export function pivotByProduct(
 
   for (const r of rows) {
     if (!r.product_id) continue;
+    // 🟠 수량 분석은 정상 출고만. (SQL 단계의 is_return 필터 제거 후 JS 단계 가드)
+    if (r.is_return) continue;
     if (customerFilter && r.customer_id !== customerFilter) continue;
     if (categoryFilter && r.product_category !== categoryFilter) continue;
     if (

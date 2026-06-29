@@ -10,8 +10,9 @@
  * 🔴 CLAUDE.md §5: 모든 목록 조회는 useSalesAnalysis (fetchAllRows 경유).
  * 🟠 연도 1회 fetch 후 클라이언트 피벗 — 탭/필터 전환 시 재요청 없음.
  *
- * 🟡 매출 금액 기준: order_items.amount 그대로 사용.
- *    현재 INSERT 정책상 amount = quantity × 공급가 (거래처 포털·OPS 양쪽).
+ * 🔴 매출 금액 기준: orders.total_amount (공급가 + VAT). useSalesAnalysis 피벗에서
+ *    order_id 중복제거 후 합산. order_items.amount 는 일부 레거시에서 판매가로 저장되어
+ *    합계 산출에는 사용하지 않는다. 수량 분석은 order_items.quantity 사용.
  */
 import { useMemo, useState } from 'react';
 import { Download, Search } from 'lucide-react';
