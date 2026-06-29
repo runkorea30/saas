@@ -9,7 +9,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Filter } from 'lucide-react';
+import { Filter, LogOut } from 'lucide-react';
 import { isSectionActive, navSections } from './navConfig';
 import { useCompany } from '@/hooks/useCompany';
 import {
@@ -25,7 +25,7 @@ function fmtUsd(v: number): string {
   });
 }
 
-export function TopNav() {
+export function TopNav({ onLogout }: { onLogout: () => Promise<void> }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { companyId } = useCompany();
@@ -175,6 +175,18 @@ export function TopNav() {
             )}
           </div>
         </nav>
+
+        <button
+          type="button"
+          onClick={() => {
+            void onLogout();
+          }}
+          className="ml-auto inline-flex items-center gap-1.5 h-7 px-3 rounded-md border border-line text-xs text-ink-3 hover:text-ink hover:bg-stone-50 transition-colors"
+          title="로그아웃"
+        >
+          <LogOut size={12} />
+          로그아웃
+        </button>
       </div>
     </header>
   );

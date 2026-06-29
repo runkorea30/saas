@@ -14,7 +14,7 @@ import { useCompany } from '@/hooks/useCompany';
 import { useToast } from './ui/Toast';
 import { supabase } from '@/lib/supabase';
 
-export function Shell() {
+export function Shell({ onLogout }: { onLogout: () => Promise<void> }) {
   const { companyId } = useCompany();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -78,7 +78,7 @@ export function Shell() {
       className="min-h-screen text-ink"
       style={{ background: 'var(--bg)' }}
     >
-      <TopNav />
+      <TopNav onLogout={onLogout} />
       <SectionNav />
       <main>
         <Outlet />
