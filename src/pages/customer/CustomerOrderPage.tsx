@@ -241,13 +241,12 @@ function isDirectShipping(memo: string | null): boolean {
 }
 
 /**
- * 주문 소계 = Σ(quantity × unit_price).
- * 🟠 unit_price 에는 주문 시점의 공급가가 저장됨 (CustomerOrderInput / 파일업로드 모두).
- *    items.amount 는 과거 일부 데이터에서 판매가 기준으로 저장된 경우가 있어 신뢰 불가.
- * 🟠 customer.grade 가 함수 시그니처에 없으므로 등급 재계산 불가 → 저장된 unit_price 사용.
+ * 주문 소계 = orders.total_amount (단일 진실 원본).
+ * 🔴 DB 정합화 완료 후: orders.total_amount = SUM(order_items.amount) 가 보장됨.
+ *    이전에는 unit_price 재계산으로 합산했으나 레거시 데이터의 판매가/공급가 혼재로 부풀려지는 버그가 있었음.
  */
 function calcOrderTotal(order: OrderDetail): number {
-  return order.items.reduce((s, it) => s + it.quantity * it.unit_price, 0);
+  return order.total_amount;
 }
 
 function fmtWon(v: number): string {
