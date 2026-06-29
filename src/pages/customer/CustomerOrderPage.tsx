@@ -2005,6 +2005,117 @@ function TodayOrders({
 
 // ───────────────────────────────────────────────────────────
 
+/**
+ * 날짜별 주문 내역 명세서 xlsx 다운로드.
+ * 거래처 포털 전용 — 해당 날짜의 전체 품목을 한 시트에 출력.
+ */
+function handleDownloadStatement(
+  date: string,
+  orders: OrderDetail[],
+  customer: CustomerSession,
+): void {
+  const borderAll = {
+    top:    { style: 'thin' },
+    bottom: { style: 'thin' },
+    left:   { style: 'thin' },
+    right:  { style: 'thin' },
+  } as const;
+
+  const headerStyle = {
+    font: { bold: true, sz: 10 },
+    fill: { patternType: 'solid', fgColor: { rgb: 'FFE5E7EB' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: borderAll,
+  };
+  const cellStyle = {
+    font: { sz: 10 },
+    alignment: { vertical: 'center' },
+    border: borderAll,
+  };
+  const cellRight = {
+    ...cellStyle,
+    alignment: { horizontal: 'right', vertical: 'center' },
+    numFmt: '#,##0',
+  };
+  const totalStyle = {
+    font: { bold: true, sz: 10 },
+    fill: { patternType: 'solid', fgColor: { rgb: 'FFFFF9C4' } },
+    alignment: { horizontal: 'right', vertical: 'center' },
+    border: borderAll,
+    numFmt: '#,##0',
+  };
+  const totalLabelStyle = {
+    font: { bold: true, sz: 10 },
+    fill: { patternType: 'solid', fgColor: { rgb: 'FFFFF9C4' } },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: borderAll,
+  };
+
+  type Cell = { v?: string | number; f?: string; t: 's' | 'n'; s?: object };
+  const t = (v: string, s?: object): Cell => ({ v, t: 's', ...(s ? { s } : {}) });
+  const n = (v: number, s?: object): Cell => ({ v, t: 'n', ...(s ? { s } : {}) });
+
+  const wsData: Cell[][] = [];
+  wsData.push([
+    t('No.',        headerStyle),
+    t('제품코드',   headerStyle),
+    t('제품명',     headerStyle),
+    t('수량',       headerStyle),
+    t('공급단가',   headerStyle),
+    t('공급금액',   headerStyle),
+  ]);
+
+  let rowNo = 1;
+  let grandTotal = 0;
+  let grandQty = 0;
+
+  for (const order of orders) {
+    for (const item of order.items) {
+      if (!item.product) continue;
+      const supplyPrice = calcSupplyPriceByCustomerGrade(
+        item.product.sell_price,
+        customer.grade,
+        item.product,
+      );
+      const amount = item.quantity * supplyPrice;
+      grandTotal += amount;
+      grandQty   += item.quantity;
+
+      wsData.push([
+        n(rowNo++,                cellRight),
+        t(item.product.code,      { ...cellStyle, alignment: { horizontal: 'center', vertical: 'center' } }),
+        t(item.product.name,      cellStyle),
+        n(item.quantity,          cellRight),
+        n(supplyPrice,            cellRight),
+        n(amount,                 cellRight),
+      ]);
+    }
+  }
+
+  wsData.push([
+    t('합계', totalLabelStyle),
+    t('',     totalLabelStyle),
+    t('',     totalLabelStyle),
+    n(grandQty,   totalStyle),
+    t('',         totalLabelStyle),
+    n(grandTotal, totalStyle),
+  ]);
+
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols'] = [
+    { wch: 6  },
+    { wch: 16 },
+    { wch: 32 },
+    { wch: 8  },
+    { wch: 12 },
+    { wch: 14 },
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '명세서');
+  XLSX.writeFile(wb, `명세서_${customer.customerName}_${date}.xlsx`);
+}
+
 function MonthlyOrders({
   customer,
   fontScale,
@@ -2016,7 +2127,6 @@ function MonthlyOrders({
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
-  const { showToast } = useToast();
 
   const monthlyQuery = useQuery<OrderDetail[]>({
     queryKey: ['customer-orders-monthly-v3', customer.customerId, year, month],
@@ -2126,8 +2236,8 @@ function MonthlyOrders({
               onToggle={() =>
                 setExpandedDate(expandedDate === date ? null : date)
               }
-              onStatement={() =>
-                showToast({ kind: 'info', text: '명세서 기능 준비 중입니다.' })
+              onStatement={(date, orders) =>
+                handleDownloadStatement(date, orders, customer)
               }
               baseFont={baseFont}
               customer={customer}
@@ -2156,7 +2266,7 @@ function MonthlyDateCard({
   orders: OrderDetail[];
   expanded: boolean;
   onToggle: () => void;
-  onStatement: () => void;
+  onStatement: (date: string, orders: OrderDetail[]) => void;
   baseFont: number;
   customer: CustomerSession;
   photosByOrder?: Map<string, OrderPhoto[]>;
@@ -2216,7 +2326,7 @@ function MonthlyDateCard({
           role="button"
           onClick={(e) => {
             e.stopPropagation();
-            onStatement();
+            onStatement(date, orders);
           }}
           style={{
             ...secondaryBtn,
