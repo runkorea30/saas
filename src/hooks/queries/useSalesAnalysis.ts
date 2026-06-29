@@ -162,10 +162,12 @@ async function fetchSalesYear(
 
 export function useSalesAnalysis(companyId: string | null, year: number) {
   return useQuery<SalesRawRow[]>({
-    queryKey: ['sales-analysis', companyId, year],
+    // 🔴 queryKey 'v2' — orders.total_amount 기준으로 산식이 변경되어 기존 'sales-analysis'
+    //    캐시(레거시 items.amount 합산값)와 강제 분리.
+    queryKey: ['sales-analysis-v2', companyId, year],
     enabled: Boolean(companyId),
     queryFn: () => fetchSalesYear(companyId!, year),
-    staleTime: 60_000,
+    staleTime: 0,
   });
 }
 
