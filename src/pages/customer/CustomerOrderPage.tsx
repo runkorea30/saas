@@ -6,7 +6,8 @@
  */
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, LogOut, Trash2 } from 'lucide-react';
+import { Loader2, LogOut, Trash2, X } from 'lucide-react';
+import { useOrderPhotosByOrders, type OrderPhoto } from '@/hooks/queries/useOrderPhotos';
 // xlsx-js-style 은 SheetJS xlsx 의 fork — 동일 API + 셀 스타일(s) 지원.
 // parseOrderExcel(read) 과 handleDownloadOrderForm(write+style) 모두 한 import 로 처리.
 import * as XLSX from 'xlsx-js-style';
@@ -1902,6 +1903,8 @@ function TodayOrders({
   const orders = todayQuery.data ?? [];
   const totalSum = orders.reduce((s, o) => s + calcOrderTotal(o), 0);
   const baseFont = 12 * fontScale;
+  const orderIds = orders.map((o) => o.id);
+  const { data: photosByOrder } = useOrderPhotosByOrders(orderIds, customer.companyId);
 
   return (
     <section
@@ -1961,6 +1964,7 @@ function TodayOrders({
               baseFont={baseFont}
               showTime
               customer={customer}
+              photos={photosByOrder?.get(o.id) ?? []}
             />
           ))}
         </div>
@@ -2001,6 +2005,8 @@ function MonthlyOrders({
   const orders = monthlyQuery.data ?? [];
   const monthSum = orders.reduce((s, o) => s + calcOrderTotal(o), 0);
   const baseFont = 12 * fontScale;
+  const orderIds = orders.map((o) => o.id);
+  const { data: photosByOrder } = useOrderPhotosByOrders(orderIds, customer.companyId);
 
   /** 날짜별로 묶고 정렬 (날짜 내림차순). */
   const dateGroups = (() => {
@@ -2095,6 +2101,7 @@ function MonthlyOrders({
               }
               baseFont={baseFont}
               customer={customer}
+              photosByOrder={photosByOrder}
             />
           ))}
         </div>
@@ -2113,6 +2120,7 @@ function MonthlyDateCard({
   onStatement,
   baseFont,
   customer,
+  photosByOrder,
 }: {
   date: string;
   orders: OrderDetail[];
@@ -2121,6 +2129,7 @@ function MonthlyDateCard({
   onStatement: () => void;
   baseFont: number;
   customer: CustomerSession;
+  photosByOrder?: Map<string, OrderPhoto[]>;
 }) {
   const totalAmount = orders.reduce((s, o) => s + calcOrderTotal(o), 0);
   const itemCount = orders.reduce((s, o) => s + o.items.length, 0);
@@ -2218,6 +2227,7 @@ function MonthlyDateCard({
               orders={regular}
               baseFont={baseFont}
               customer={customer}
+              photosByOrder={photosByOrder}
             />
           )}
           {extra.length > 0 && (
@@ -2226,6 +2236,7 @@ function MonthlyDateCard({
               orders={extra}
               baseFont={baseFont}
               customer={customer}
+              photosByOrder={photosByOrder}
             />
           )}
         </div>
@@ -2239,11 +2250,13 @@ function OrderGroupSection({
   orders,
   baseFont,
   customer,
+  photosByOrder,
 }: {
   title: '주문' | '추가주문';
   orders: OrderDetail[];
   baseFont: number;
   customer: CustomerSession;
+  photosByOrder?: Map<string, OrderPhoto[]>;
 }) {
   return (
     <div>
@@ -2265,6 +2278,7 @@ function OrderGroupSection({
             baseFont={baseFont}
             showTime
             customer={customer}
+            photos={photosByOrder?.get(o.id) ?? []}
           />
         ))}
       </div>
@@ -2279,15 +2293,18 @@ function OrderCard({
   baseFont,
   showTime,
   customer,
+  photos = [],
 }: {
   order: OrderDetail;
   baseFont: number;
   showTime?: boolean;
   customer: CustomerSession;
+  photos?: OrderPhoto[];
 }) {
   const subtotal = calcOrderTotal(order);
   const extra = isExtraOrder(order.memo);
   const direct = isDirectShipping(order.memo);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   return (
     <div
@@ -2402,6 +2419,93 @@ function OrderCard({
           </tbody>
         </table>
       </div>
+      {photos.length > 0 && (
+        <div
+          style={{
+            padding: '8px 10px',
+            borderTop: '1px solid #F3F4F6',
+            background: '#FAFAF9',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+        >
+          <span style={{ fontSize: 11, color: '#6B7280', fontWeight: 600 }}>
+            출고 사진
+          </span>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flex: 1 }}>
+            {photos.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setPreviewUrl(p.storage_url)}
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 6,
+                  overflow: 'hidden',
+                  border: '1px solid #E5E7EB',
+                  padding: 0,
+                  cursor: 'pointer',
+                  background: '#FFFFFF',
+                }}
+                aria-label="출고 사진 크게 보기"
+              >
+                <img
+                  src={p.storage_url}
+                  alt="출고사진"
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    display: 'block',
+                  }}
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.visibility = 'hidden';
+                  }}
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {previewUrl && (
+        <div
+          onClick={() => setPreviewUrl(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.9)',
+            zIndex: 100,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setPreviewUrl(null)}
+            aria-label="닫기"
+            style={{
+              position: 'absolute',
+              top: 16,
+              right: 16,
+              background: 'transparent',
+              border: 0,
+              color: '#FFFFFF',
+              cursor: 'pointer',
+            }}
+          >
+            <X size={28} />
+          </button>
+          <img
+            src={previewUrl}
+            alt="출고사진 원본"
+            style={{ maxWidth: '95%', maxHeight: '95%', objectFit: 'contain' }}
+          />
+        </div>
+      )}
     </div>
   );
 }
