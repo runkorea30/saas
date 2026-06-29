@@ -172,7 +172,23 @@ export function OrderPhotoSection({
     deleteMutation.mutate({ photoId, storagePath, orderId });
   };
 
-  if (isLoading) return null;
+  // 🟠 로딩 중에도 섹션 헤더는 유지 → 데스크탑 상세 패널에서
+  //    사진 영역이 '있다'는 시각적 단서를 항상 제공.
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5">
+          <Camera size={14} className={dark ? 'text-white/60' : 'text-stone-400'} />
+          <span className={`text-xs font-medium ${dark ? 'text-white/80' : 'text-stone-600'}`}>
+            출고 사진
+          </span>
+          <span className={`text-[10px] ${dark ? 'text-white/40' : 'text-stone-400'}`}>
+            불러오는 중…
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">

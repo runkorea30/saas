@@ -419,7 +419,16 @@ export function OrderDetailPane({
   return (
     <div
       className="card-surface"
-      style={{ padding: 0, position: 'sticky', top: 24, overflow: 'hidden' }}
+      style={{
+        padding: 0,
+        position: 'sticky',
+        top: 24,
+        // 🟠 sticky + 컨텐츠가 viewport 보다 크면 하단(출고 사진 등) 클리핑 발생.
+        //    내부 스크롤 + horizontal clip(rounded corner 유지) 으로 해결.
+        maxHeight: 'calc(100vh - 48px)',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+      }}
     >
       {/* Header — 압축형 */}
       <div
