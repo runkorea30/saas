@@ -29,4 +29,13 @@ export const supabase = createClient<Database, 'mochicraft_demo'>(url, anonKey, 
     autoRefreshToken: true,
     detectSessionInUrl: true,
   },
+  global: {
+    // 🟡 Phase 2 임시: RLS가 anon 정책 기반이므로 DB 요청 시 Auth 헤더 제거.
+    // 로그인 세션은 OPS 진입 게이트(useOpsAuth)에서만 사용하고
+    // 실제 DB 쿼리는 항상 anon 키로 전송해 기존 RLS 정책이 동작하게 함.
+    // 🔴 Phase 3(RLS authenticated 전환) 시 이 옵션 제거.
+    headers: {
+      Authorization: `Bearer ${anonKey}`,
+    },
+  },
 });
