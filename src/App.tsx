@@ -9,9 +9,11 @@
  *
  * 🟠 BrowserRouter는 `main.tsx`에서 이미 래핑 — 여기서는 Routes/Route만.
  */
+import { useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Shell } from '@/components/Shell';
 import { PlaceholderPage } from '@/components/common/PlaceholderPage';
+import { cleanupExpiredPhotos } from '@/hooks/queries/useOrderPhotos';
 import { HomePage } from '@/pages/HomePage';
 import { OrdersPage } from '@/pages/sales/OrdersPage';
 import { OrderEntryPage } from '@/pages/sales/OrderEntryPage';
@@ -33,6 +35,13 @@ import { DocumentsPage } from '@/pages/documents/DocumentsPage';
 import { MobileApp } from '@/mobile/MobileApp';
 
 function App() {
+  // 🟠 앱 시작 시 만료된 출고사진 일괄 정리 (DB + RPC 폴백).
+  useEffect(() => {
+    cleanupExpiredPhotos().catch((err) => {
+      console.error('만료 사진 정리 실패:', err);
+    });
+  }, []);
+
   return (
     <Routes>
       {/* 거래처 전용 주문서 페이지 — OPS Shell 바깥 독립 라우트 */}

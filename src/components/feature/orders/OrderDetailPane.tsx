@@ -22,6 +22,7 @@ import { useCompany } from '@/hooks/useCompany';
 import { useOrderItems, type OrderItemRow } from '@/hooks/queries/useOrderItems';
 import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 import { useProducts, type Product } from '@/hooks/queries/useProducts';
+import { OrderPhotoSection } from '@/components/order/OrderPhotoSection';
 import type { Order, OrderItemDraft } from '@/types/orders';
 
 export function OrderDetailPane({
@@ -962,6 +963,20 @@ export function OrderDetailPane({
         )}
       </div>
 
+      {/* 🟠 출고 사진 — 데스크탑은 조회 전용 (모바일 앱에서 촬영). */}
+      <div
+        style={{
+          padding: '8px 20px 16px',
+          borderTop: '1px solid var(--line)',
+        }}
+      >
+        <OrderPhotoSection
+          orderId={order.id}
+          companyId={companyId}
+          readOnly={true}
+          showCamera={false}
+        />
+      </div>
     </div>
   );
 }

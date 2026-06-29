@@ -7,8 +7,10 @@
  * 🔴 CLAUDE.md §5: 기존 useOrders 재사용 → fetchAllRows 자동 적용.
  */
 import { useMemo, useState } from 'react';
+import { Camera } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useOrders } from '@/hooks/queries/useOrders';
+import { useOrderPhotoFlags } from '@/hooks/queries/useOrderPhotos';
 import type { Order } from '@/types/orders';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { RefreshButton } from '../components/RefreshButton';
@@ -103,6 +105,9 @@ export function OrderListPage() {
     void ordersQuery.refetch();
   };
 
+  const orderIds = useMemo(() => orders.map((o) => o.id), [orders]);
+  const { data: photoFlags } = useOrderPhotoFlags(orderIds, companyId);
+
   const selected = orders.find((o) => o.id === selectedId) ?? orders[0] ?? null;
   const showDetail = isUnfolded && selected !== null;
 
@@ -153,6 +158,7 @@ export function OrderListPage() {
               <OrderCard
                 key={o.id}
                 order={o}
+                hasPhoto={photoFlags?.has(o.id) ?? false}
                 selected={isUnfolded && selected?.id === o.id}
                 onClick={() => setSelectedId(o.id)}
               />
@@ -173,10 +179,12 @@ export function OrderListPage() {
 
 function OrderCard({
   order,
+  hasPhoto,
   selected,
   onClick,
 }: {
   order: Order;
+  hasPhoto: boolean;
   selected: boolean;
   onClick: () => void;
 }) {
@@ -227,6 +235,23 @@ function OrderCard({
         >
           {status.label}
         </span>
+        {hasPhoto && (
+          <span
+            className="m-badge"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+              background: 'var(--m-success, #16a34a)22',
+              color: 'var(--m-success, #16a34a)',
+              border: '1px solid var(--m-success, #16a34a)',
+            }}
+            title="출고 사진 촬영 완료"
+          >
+            <Camera size={10} />
+            <span>촬영완료</span>
+          </span>
+        )}
       </div>
       <div
         style={{
