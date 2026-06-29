@@ -114,9 +114,16 @@ export function OrderListPage() {
     orderId: string;
     customerId: string | null;
   } | null>(null);
+  // 🔴 업로드 진행 중에는 모달 닫기 차단 (네트워크 취소 방지).
+  const [photoUploading, setPhotoUploading] = useState(false);
 
   const openPhotoModal = (orderId: string, customerId: string | null) => {
     setPhotoModal({ orderId, customerId });
+  };
+
+  const closePhotoModal = () => {
+    if (photoUploading) return;
+    setPhotoModal(null);
   };
 
   const selected = orders.find((o) => o.id === selectedId) ?? orders[0] ?? null;
@@ -193,15 +200,18 @@ export function OrderListPage() {
         <div className="fixed inset-0 z-50 flex items-end">
           <div
             className="absolute inset-0 bg-black/60"
-            onClick={() => setPhotoModal(null)}
+            onClick={closePhotoModal}
+            style={photoUploading ? { pointerEvents: 'none' } : undefined}
           />
           <div className="relative w-full bg-[#1a1a1a] rounded-t-2xl p-4 pb-8 space-y-3">
             <div className="flex items-center justify-between mb-1">
               <h3 className="text-sm font-semibold text-white">출고 사진</h3>
               <button
                 type="button"
-                onClick={() => setPhotoModal(null)}
+                onClick={closePhotoModal}
+                disabled={photoUploading}
                 aria-label="닫기"
+                className="disabled:opacity-30"
               >
                 <X size={18} className="text-white/60" />
               </button>
@@ -212,6 +222,7 @@ export function OrderListPage() {
               customerId={photoModal.customerId}
               showCamera={true}
               theme="dark"
+              onUploadingChange={setPhotoUploading}
             />
           </div>
         </div>
