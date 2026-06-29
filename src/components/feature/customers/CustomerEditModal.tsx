@@ -35,6 +35,8 @@ interface FormState {
   business_type: string;
   business_category: string;
   tax_email: string;
+  login_id: string;
+  login_password: string;
 }
 
 function initFromCustomer(c: Customer): FormState {
@@ -54,6 +56,8 @@ function initFromCustomer(c: Customer): FormState {
     business_type: c.business_type ?? '',
     business_category: c.business_category ?? '',
     tax_email: c.tax_email ?? '',
+    login_id: c.login_id ?? '',
+    login_password: c.login_password ?? '',
   };
 }
 
@@ -124,6 +128,8 @@ export function CustomerEditModal({ open, customer, companyId, onClose }: Props)
       business_type: form.business_type.trim() || null,
       business_category: form.business_category.trim() || null,
       tax_email: form.tax_email.trim() || null,
+      login_id: form.login_id.trim() || null,
+      login_password: form.login_password.trim() || null,
     };
 
     try {
@@ -279,7 +285,52 @@ export function CustomerEditModal({ open, customer, companyId, onClose }: Props)
           />
         </Field>
 
-        {/* ───── 섹션 2: 세금계산서 발행 정보 ───── */}
+        {/* ───── 섹션 2: 포털 로그인 정보 ───── */}
+        <div
+          style={{
+            borderTop: '1px solid var(--line)',
+            paddingTop: 14,
+            marginTop: 2,
+          }}
+        >
+          <SectionLabel>포털 로그인 정보</SectionLabel>
+          <div style={{ marginTop: 10 }}>
+            <Row>
+              <Field label="로그인 ID" style={{ flex: 1 }}>
+                <input
+                  type="text"
+                  value={form.login_id}
+                  onChange={(e) => update('login_id', e.target.value)}
+                  placeholder="예: sns2025"
+                  disabled={busy}
+                  style={inputStyle}
+                />
+              </Field>
+              <Field label="비밀번호" style={{ flex: 1 }}>
+                <input
+                  type="text"
+                  value={form.login_password}
+                  onChange={(e) => update('login_password', e.target.value)}
+                  placeholder="예: 1234"
+                  disabled={busy}
+                  style={inputStyle}
+                />
+              </Field>
+            </Row>
+            <p
+              style={{
+                fontSize: 11,
+                color: 'var(--ink-3)',
+                marginTop: 6,
+                lineHeight: 1.5,
+              }}
+            >
+              거래처 포털(customer-order)의 로그인 아이디/비밀번호입니다. 비워두면 로그인 불가.
+            </p>
+          </div>
+        </div>
+
+        {/* ───── 섹션 3: 세금계산서 발행 정보 ───── */}
         <div
           style={{
             borderTop: '1px solid var(--line)',

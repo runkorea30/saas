@@ -59,6 +59,8 @@ export interface Customer {
   business_type: string | null;
   business_category: string | null;
   tax_email: string | null;
+  login_id: string | null;
+  login_password: string | null;
   business: CustomerBusinessRef | null;
   /** 그룹 소속 거래처일 때만 조인 결과. group_id IS NULL 이면 null. */
   customer_groups: CustomerGroupRef | null;
@@ -91,6 +93,7 @@ const CUSTOMER_SELECT = `
   settlement_cycle, bank_aliases, is_active, created_at, group_id,
   business_registration_number, ceo_name,
   business_address, business_type, business_category, tax_email,
+  login_id, login_password,
   business:businesses ( id, name, business_number ),
   customer_groups (
     name, billing_name,
@@ -193,6 +196,8 @@ export type CustomerUpdateInput = Partial<{
   business_type: string | null;
   business_category: string | null;
   tax_email: string | null;
+  login_id: string | null;
+  login_password: string | null;
 }>;
 
 export function useUpdateCustomer(companyId: string | null) {
