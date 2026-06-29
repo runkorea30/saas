@@ -93,7 +93,6 @@ function useBillingOrders(params: {
           .eq('company_id', companyId!)
           .eq('customer_id', customerId!)
           .eq('status', 'confirmed')
-          .is('deleted_at', null)
           .gte('order_date', startDate)
           .lt('order_date', endDate)
           .order('order_date', { ascending: true }),

@@ -98,7 +98,6 @@ export function useOrderItems(orderId: string | null, companyId: string | null) 
           .select(ORDER_ITEM_SELECT)
           .eq('company_id', companyId!)
           .eq('order_id', orderId!)
-          .is('deleted_at', null)
           .order('created_at', { ascending: true })
           .returns<OrderItemJoinRow[]>(),
       );

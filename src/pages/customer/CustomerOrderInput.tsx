@@ -65,7 +65,6 @@ async function fetchActiveProducts(companyId: string): Promise<ProductRow[]> {
       )
       .eq('company_id', companyId)
       .eq('is_active', true)
-      .is('deleted_at', null)
       .order('name', { ascending: true }),
   );
 }

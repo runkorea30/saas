@@ -63,7 +63,6 @@ export function useInventoryDetail(
             )
             .eq('company_id', companyId!)
             .eq('product_id', productId!)
-            .is('deleted_at', null)
             .order('lot_date', { ascending: false })
             .returns<InventoryLotRow[]>(),
         ),

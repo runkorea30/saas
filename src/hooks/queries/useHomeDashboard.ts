@@ -293,8 +293,7 @@ async function fetchLowStock(
   const { count: lotCount } = (await supabase
     .from('inventory_lots')
     .select('id', { count: 'exact', head: true })
-    .eq('company_id', companyId)
-    .is('deleted_at', null)) as { count: number | null };
+    .eq('company_id', companyId)) as { count: number | null };
   const { count: txCount } = (await supabase
     .from('inventory_transactions')
     .select('id', { count: 'exact', head: true })
@@ -315,8 +314,7 @@ async function fetchLowStock(
         .from('products')
         .select('id, code, name, unit, safety_stock, reorder_point')
         .eq('company_id', companyId)
-        .eq('is_active', true)
-        .is('deleted_at', null),
+        .eq('is_active', true),
     ),
     calcCurrentStockByProduct(companyId),
     calcOrderSuggestionByProduct(companyId),
@@ -438,7 +436,6 @@ async function fetchTimelineOrders(companyId: string): Promise<TimelineEvent[]> 
       .from('orders')
       .select('id, order_date, total_amount, customer:customers(name)')
       .eq('company_id', companyId)
-      .is('deleted_at', null)
       .order('order_date', { ascending: false })
       .limit(8),
   );

@@ -28,8 +28,7 @@ export function useInventoryStock(companyId: string | null) {
         supabase
           .from('inventory_lots')
           .select('id', { count: 'exact', head: true })
-          .eq('company_id', companyId!)
-          .is('deleted_at', null),
+          .eq('company_id', companyId!),
       ]);
       if (lotsCountResult.error) throw lotsCountResult.error;
       return {

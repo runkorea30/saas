@@ -70,7 +70,6 @@ async function fetchOrdersWithItems(
          items:order_items ( order_id, quantity, amount, is_return )`,
       )
       .eq('company_id', companyId)
-      .is('deleted_at', null)
       .gte('order_date', startIso)
       .lt('order_date', endIso)
       .order('order_date', { ascending: true }),
@@ -183,8 +182,7 @@ export async function calcReceivables(
       .from('orders')
       .select('customer_id, order_date, total_amount')
       .eq('company_id', companyId)
-      .eq('customer_id', customerId)
-      .is('deleted_at', null),
+      .eq('customer_id', customerId),
   );
   const sales = orders.reduce((s, o) => s + o.total_amount, 0);
 
@@ -239,8 +237,7 @@ export async function calcCustomerAggregates(
     supabase
       .from('orders')
       .select('customer_id, order_date, total_amount')
-      .eq('company_id', companyId)
-      .is('deleted_at', null),
+      .eq('company_id', companyId),
   );
 
   const byCust = new Map<
@@ -321,8 +318,7 @@ export async function calcInventoryValue(companyId: string): Promise<number> {
     supabase
       .from('inventory_lots')
       .select('product_id, lot_type, quantity, remaining_quantity, cost_krw')
-      .eq('company_id', companyId)
-      .is('deleted_at', null),
+      .eq('company_id', companyId),
   );
   let sum = 0;
   for (const lot of lots) {
@@ -404,8 +400,7 @@ export async function calcCurrentStockByProduct(
       supabase
         .from('inventory_lots')
         .select('product_id, lot_type, quantity, lot_date')
-        .eq('company_id', companyId)
-        .is('deleted_at', null),
+        .eq('company_id', companyId),
     ),
     fetchAllRows<TxSliceRow>(() =>
       supabase
@@ -423,11 +418,10 @@ export async function calcCurrentStockByProduct(
         supabase
           .from('order_items')
           .select(
-            'product_id, quantity, order:orders!inner(order_date, company_id, deleted_at)',
+            'product_id, quantity, order:orders!inner(order_date, company_id)',
           )
           .eq('company_id', companyId)
           .eq('is_return', false)
-          .is('deleted_at', null)
           .gte('order.order_date', yearStart)
           .lt('order.order_date', yearEnd),
       );
@@ -496,10 +490,9 @@ export async function calcOrderSuggestionByProduct(
   const rows = await fetchAllRows<SoldRow>(() =>
     supabase
       .from('order_items')
-      .select('product_id, quantity, order:orders!inner(order_date, company_id, deleted_at)')
+      .select('product_id, quantity, order:orders!inner(order_date, company_id)')
       .eq('company_id', companyId)
       .eq('is_return', false)
-      .is('deleted_at', null)
       .gte('order.order_date', lookbackStart.toISOString())
       .lt('order.order_date', now.toISOString()),
   );
@@ -591,7 +584,7 @@ export async function calcApproxProfitMargin(
     amount: number;
     is_return: boolean;
     product: { supply_price: number } | null;
-    order: { order_date: string; deleted_at: string | null } | null;
+    order: { order_date: string } | null;
   }
 
   const items = await fetchAllRows<ItemWithProduct>(() =>
@@ -600,10 +593,9 @@ export async function calcApproxProfitMargin(
       .select(
         `quantity, amount, is_return,
          product:products ( supply_price ),
-         order:orders!inner ( order_date, deleted_at )`,
+         order:orders!inner ( order_date )`,
       )
       .eq('company_id', companyId)
-      .is('deleted_at', null)
       .gte('order.order_date', start)
       .lt('order.order_date', end),
   );

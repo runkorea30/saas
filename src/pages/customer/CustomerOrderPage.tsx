@@ -226,7 +226,6 @@ async function fetchOrdersWithItems(
     .eq('customer_id', customerId)
     .gte('order_date', start.toISOString())
     .lt('order_date', end.toISOString())
-    .is('deleted_at', null)
     .order('order_date', { ascending: false });
   if (error) throw error;
   return (data ?? []) as unknown as OrderDetail[];
@@ -589,7 +588,6 @@ function LeftPanel({
         )
         .eq('company_id', customer.companyId)
         .eq('is_active', true)
-        .is('deleted_at', null)
         .order('category', { ascending: true })
         .order('name', { ascending: true });
       if (error) throw error;
@@ -1383,8 +1381,7 @@ function ImportNoticeCard({
           .from('products')
           .select('id, code, name, category, is_active')
           .eq('company_id', companyId)
-          .eq('is_active', true)
-          .is('deleted_at', null),
+          .eq('is_active', true),
       ]);
       if (prodRes.error) throw prodRes.error;
       const items: ImportNoticeProduct[] = [];

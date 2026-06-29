@@ -1,5 +1,5 @@
 /**
- * 주문 합계 동기화 유틸 — `orders.total_amount = SUM(order_items.amount WHERE deleted_at IS NULL)`.
+ * 주문 합계 동기화 유틸 — `orders.total_amount = SUM(order_items.amount)`.
  *
  * 🔴 CLAUDE.md §1: company_id 필터 필수 (RLS + 프론트 이중 방어).
  * 🟠 아이템(order_items)을 INSERT/UPDATE/DELETE 한 직후 반드시 호출해서
@@ -25,8 +25,7 @@ export async function syncOrderTotal(args: SyncOrderTotalArgs): Promise<number> 
     .from('order_items')
     .select('amount')
     .eq('order_id', orderId)
-    .eq('company_id', companyId)
-    .is('deleted_at', null);
+    .eq('company_id', companyId);
   if (selErr) throw selErr;
 
   const total = (items ?? []).reduce(

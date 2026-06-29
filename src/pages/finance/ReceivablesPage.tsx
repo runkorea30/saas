@@ -116,7 +116,6 @@ function useDrilldownOrders(
           .eq('company_id', companyId!)
           .in('customer_id', customerIds)
           .not('status', 'in', '("draft","canceled")')
-          .is('deleted_at', null)
           .order('order_date', { ascending: false }),
       );
 

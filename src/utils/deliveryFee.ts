@@ -9,8 +9,7 @@
  *
  * 🔴 CLAUDE.md §1: 모든 쿼리에 company_id 필터.
  * 🟠 orders.is_direct_shipping 컬럼이 자동생성 타입에 미반영 → .returns&lt;T&gt;() 로 응답 타입 강제.
- * 🟠 order_items 는 soft delete 정책 → 제거 시 deleted_at = NOW(). total_amount 재계산 시
- *    deleted_at IS NULL 행만 합산.
+ * 🟠 order_items 는 hard delete 정책 — DELETE 후 orders.total_amount 재계산.
  */
 import { supabase } from '@/lib/supabase';
 import { syncOrderTotal } from '@/utils/orderTotal';
@@ -60,7 +59,6 @@ export async function calcDeliveryFee(args: {
     .eq('customer_id', args.customerId)
     .gte('order_date', todayStart.toISOString())
     .lte('order_date', todayEnd.toISOString())
-    .is('deleted_at', null)
     .returns<TodayOrderRow[]>();
 
   if (error) {
@@ -105,25 +103,22 @@ export async function calcDeliveryFee(args: {
 }
 
 /**
- * 기존 주문에서 택배비 행을 soft delete 하고 orders.total_amount 재계산.
+ * 기존 주문에서 택배비 행을 hard delete 하고 orders.total_amount 재계산.
  * 실패해도 새 주문 INSERT 는 진행하도록 throw 하지 않고 콘솔 로그만 남김.
  */
 export async function removeDeliveryFeeFromOrder(args: {
   companyId: string;
   orderId: string;
 }): Promise<void> {
-  const nowIso = new Date().toISOString();
-
   const { error: delErr } = await supabase
     .from('order_items')
-    .update({ deleted_at: nowIso })
+    .delete()
     .eq('order_id', args.orderId)
     .eq('company_id', args.companyId)
-    .eq('product_id', DELIVERY_FEE_PRODUCT_ID)
-    .is('deleted_at', null);
+    .eq('product_id', DELIVERY_FEE_PRODUCT_ID);
   if (delErr) {
     // eslint-disable-next-line no-console
-    console.error('[deliveryFee] soft delete failed', delErr);
+    console.error('[deliveryFee] delete failed', delErr);
     return;
   }
 

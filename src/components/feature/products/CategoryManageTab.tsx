@@ -67,8 +67,7 @@ export function CategoryManageTab() {
         .from('products')
         .update({ is_active: activate })
         .eq('company_id', companyId)
-        .eq('category', category)
-        .is('deleted_at', null);
+        .eq('category', category);
       if (error) throw error;
       await queryClient.invalidateQueries({ queryKey: ['products', companyId] });
       const label = category === '' ? '(분류없음)' : category;

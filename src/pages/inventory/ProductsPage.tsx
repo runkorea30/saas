@@ -262,10 +262,9 @@ export function ProductsPage() {
     try {
       const { error } = await supabase
         .from('products')
-        .update({ deleted_at: new Date().toISOString() })
+        .delete()
         .in('id', ids)
-        .eq('company_id', companyId)
-        .is('deleted_at', null);
+        .eq('company_id', companyId);
       if (error) throw error;
       await queryClient.invalidateQueries({ queryKey: ['products', companyId] });
       setChecked({});
@@ -326,8 +325,7 @@ export function ProductsPage() {
         .from('products')
         .update(updateData)
         .in('id', ids)
-        .eq('company_id', companyId)
-        .is('deleted_at', null);
+        .eq('company_id', companyId);
       if (error) throw error;
       await queryClient.invalidateQueries({ queryKey: ['products', companyId] });
       setChecked({});
@@ -366,8 +364,7 @@ export function ProductsPage() {
         .from('products')
         .update({ unit_order: next })
         .eq('id', productId)
-        .eq('company_id', companyId)
-        .is('deleted_at', null);
+        .eq('company_id', companyId);
       if (error) throw error;
       await queryClient.invalidateQueries({ queryKey: ['products', companyId] });
     } catch (e) {
@@ -399,8 +396,7 @@ export function ProductsPage() {
         .from('products')
         .update({ unit_order: unitOrder })
         .in('id', ids)
-        .eq('company_id', companyId)
-        .is('deleted_at', null);
+        .eq('company_id', companyId);
       if (error) throw error;
       await queryClient.invalidateQueries({ queryKey: ['products', companyId] });
       showToast({
@@ -435,8 +431,7 @@ export function ProductsPage() {
         .from('products')
         .update({ is_active: active })
         .in('id', ids)
-        .eq('company_id', companyId)
-        .is('deleted_at', null);
+        .eq('company_id', companyId);
       if (error) throw error;
       await queryClient.invalidateQueries({ queryKey: ['products', companyId] });
       setChecked({});

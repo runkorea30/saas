@@ -22,7 +22,7 @@ import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 interface SoldRow {
   product_id: string;
   quantity: number;
-  order: { order_date: string; deleted_at: string | null } | null;
+  order: { order_date: string } | null;
 }
 
 /**
@@ -47,11 +47,10 @@ async function fetchSalesQty6mExcluding(
     supabase
       .from('order_items')
       .select(
-        'product_id, quantity, order:orders!inner(order_date, company_id, deleted_at)',
+        'product_id, quantity, order:orders!inner(order_date, company_id)',
       )
       .eq('company_id', companyId)
       .eq('is_return', false)
-      .is('deleted_at', null)
       .gte('order.order_date', sixMonthsBack.toISOString())
       .lt('order.order_date', currentMonthStart.toISOString()),
   );

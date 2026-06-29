@@ -98,7 +98,6 @@ interface RawJoinRow {
   order: {
     order_date: string;
     company_id: string;
-    deleted_at: string | null;
     customer: { id: string; name: string } | null;
   } | null;
   product: {
@@ -123,13 +122,12 @@ async function fetchSalesYear(
         .from('order_items')
         .select(
           `order_id, quantity, amount, is_return,
-           order:orders!inner(order_date, company_id, deleted_at,
+           order:orders!inner(order_date, company_id,
              customer:customers(id, name)),
            product:products(id, code, name, category)`,
         )
         .eq('company_id', companyId)
         .eq('is_return', false)
-        .is('deleted_at', null)
         .gte('order.order_date', fromIso)
         .lt('order.order_date', toIso) as never,
   );

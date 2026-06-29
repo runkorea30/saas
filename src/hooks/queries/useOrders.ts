@@ -47,7 +47,6 @@ export function useOrders({ companyId, range }: UseOrdersParams) {
           .from('orders')
           .select(ORDER_SELECT)
           .eq('company_id', companyId!)
-          .is('deleted_at', null)
           .gte('order_date', range.start)
           .lt('order_date', range.end)
           .order('order_date', { ascending: false })

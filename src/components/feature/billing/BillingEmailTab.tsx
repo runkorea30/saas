@@ -109,7 +109,6 @@ function useMonthlyAllOrders(params: {
           .select(ORDER_SELECT)
           .eq('company_id', companyId!)
           .eq('status', 'confirmed')
-          .is('deleted_at', null)
           .gte('order_date', startDate)
           .lt('order_date', endDate)
           .order('order_date', { ascending: true }),

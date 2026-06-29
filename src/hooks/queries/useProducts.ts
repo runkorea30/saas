@@ -3,7 +3,8 @@
  *
  * 🔴 CLAUDE.md §1: company_id 필터 필수 (RLS + 프론트 이중 방어).
  * 🔴 CLAUDE.md §5: fetchAllRows 경유.
- * 🟠 soft delete: deleted_at IS NULL 필터, 삭제 시 deleted_at = now().
+ * 🟠 삭제 정책: hard delete (DELETE). order_items/inventory_lots FK 가 참조 중이면
+ *    DB 가 차단 — 호출부에서 에러 메시지로 사용자에게 안내.
  *
  * Mutation 에러 처리:
  * - PostgrestError.code === '23505' (UNIQUE 위반) → "이미 사용 중인 제품코드입니다"
@@ -77,7 +78,7 @@ function mapPostgrestError(err: PostgrestError | null): Error | null {
 }
 
 // ───────────────────────────────────────────────────────────
-// useProducts — 목록 (deleted_at IS NULL, code ASC)
+// useProducts — 목록 (code ASC)
 // ───────────────────────────────────────────────────────────
 
 export function useProducts(companyId: string | null) {
@@ -90,7 +91,6 @@ export function useProducts(companyId: string | null) {
           .from('products')
           .select(PRODUCT_SELECT)
           .eq('company_id', companyId!)
-          .is('deleted_at', null)
           .order('code', { ascending: true }),
       );
       return rows;
@@ -134,7 +134,6 @@ export function useUpdateProduct(companyId: string | null) {
         .update(changes)
         .eq('id', id)
         .eq('company_id', companyId)
-        .is('deleted_at', null)
         .select(PRODUCT_SELECT)
         .single();
       const mapped = mapPostgrestError(error);
@@ -155,10 +154,9 @@ export function useDeleteProduct(companyId: string | null) {
       if (!companyId) throw new Error('회사 정보가 없습니다.');
       const { error } = await supabase
         .from('products')
-        .update({ deleted_at: new Date().toISOString() })
+        .delete()
         .eq('id', id)
-        .eq('company_id', companyId)
-        .is('deleted_at', null);
+        .eq('company_id', companyId);
       const mapped = mapPostgrestError(error);
       if (mapped) throw mapped;
     },

@@ -47,8 +47,7 @@ export function useRecentImportInvoices(companyId: string | null) {
         .from('inventory_lots')
         .select('invoice_id')
         .in('invoice_id', invoiceIds)
-        .eq('company_id', companyId)
-        .is('deleted_at', null);
+        .eq('company_id', companyId);
       if (lotErr) throw lotErr;
 
       const countMap = new Map<string, number>();

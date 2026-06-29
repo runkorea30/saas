@@ -125,24 +125,10 @@ export function OrderListTable(props: OrderListTableProps) {
     }
     setDeletingId(orderId);
     try {
-      const nowIso = new Date().toISOString();
-
-      // 1. order_items soft delete
-      const { error: itemsError } = await supabase
-        .from('order_items')
-        .update({ deleted_at: nowIso })
-        .eq('order_id', orderId);
-
-      if (itemsError) {
-        console.error('order_items 삭제 오류:', itemsError);
-        alert('주문 삭제 중 오류가 발생했습니다: ' + itemsError.message);
-        return;
-      }
-
-      // 2. orders soft delete
+      // 🟠 order_items 는 FK ON DELETE CASCADE 로 자동 삭제됨 (orders → order_items).
       const { error: orderError } = await supabase
         .from('orders')
-        .update({ deleted_at: nowIso })
+        .delete()
         .eq('id', orderId);
 
       if (orderError) {
@@ -151,7 +137,6 @@ export function OrderListTable(props: OrderListTableProps) {
         return;
       }
 
-      // 3. 캐시 무효화
       queryClient.invalidateQueries({ queryKey: ['orders', companyId] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stock', companyId] });
     } catch (err) {

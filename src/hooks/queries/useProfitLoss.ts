@@ -183,7 +183,6 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
           .select('order_date, total_amount')
           .eq('company_id', companyId!)
           .neq('status', 'canceled')
-          .is('deleted_at', null)
           .gte('order_date', yearStart)
           .lt('order_date', yearEnd),
       ),
@@ -198,11 +197,9 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
         supabase
           .from('order_items')
           .select(
-            'product_id, quantity, is_return, order:orders!inner(order_date, status, deleted_at)',
+            'product_id, quantity, is_return, order:orders!inner(order_date, status)',
           )
           .eq('company_id', companyId!)
-          .is('deleted_at', null)
-          .is('order.deleted_at', null)
           .neq('order.status', 'canceled')
           .gte('order.order_date', yearStart)
           .lt('order.order_date', yearEnd),
@@ -221,11 +218,9 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
         supabase
           .from('order_items')
           .select(
-            'product_id, quantity, is_return, order:orders!inner(order_date, status, deleted_at)',
+            'product_id, quantity, is_return, order:orders!inner(order_date, status)',
           )
           .eq('company_id', companyId!)
-          .is('deleted_at', null)
-          .is('order.deleted_at', null)
           .neq('order.status', 'canceled')
           .lt('order.order_date', yearStart),
       ),
@@ -246,7 +241,6 @@ export function useProfitLoss(params: UseProfitLossParams): ProfitLossData {
           .select('product_id, quantity, cost_krw, lot_type, lot_date')
           .eq('company_id', companyId!)
           .in('lot_type', ['import', 'opening'])
-          .is('deleted_at', null)
           .not('cost_krw', 'is', null)
           .lt('cost_krw', 100000),
       ),
