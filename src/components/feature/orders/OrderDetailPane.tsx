@@ -1321,8 +1321,8 @@ function TrackingNumberSection({
       style={{
         marginTop: 8,
         padding: '8px 10px',
-        background: '#F8FAFC',
-        border: '1px solid #E2E8F0',
+        background: 'var(--tracking-wash-bg)',
+        border: '1px solid var(--tracking-wash-border)',
         borderRadius: 6,
         display: 'flex',
         flexDirection: 'column',
@@ -1336,7 +1336,7 @@ function TrackingNumberSection({
           gap: 5,
           fontSize: 10,
           fontWeight: 600,
-          color: '#475569',
+          color: 'var(--tracking-label-color)',
           letterSpacing: '0.04em',
         }}
       >
@@ -1367,9 +1367,10 @@ function TrackingNumberSection({
                 height: 28,
                 padding: '0 6px',
                 fontSize: 12,
-                border: '1px solid #CBD5E1',
+                border: '1px solid var(--tracking-input-border)',
                 borderRadius: 4,
-                background: '#FFFFFF',
+                background: 'var(--tracking-input-bg)',
+                color: 'var(--tracking-input-color)',
                 outline: 'none',
                 minWidth: 96,
               }}
@@ -1390,8 +1391,10 @@ function TrackingNumberSection({
                 height: 28,
                 padding: '0 8px',
                 fontSize: 12,
-                border: '1px solid #CBD5E1',
+                border: '1px solid var(--tracking-input-border)',
                 borderRadius: 4,
+                background: 'var(--tracking-input-bg)',
+                color: 'var(--tracking-input-color)',
                 outline: 'none',
               }}
             />

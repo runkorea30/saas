@@ -68,6 +68,18 @@
     --shadow: 0 1px 0 rgba(60, 40, 20, 0.04), 0 2px 8px rgba(60, 40, 20, 0.05);
     --shadow-lg: 0 10px 30px rgba(60, 40, 20, 0.08), 0 2px 6px rgba(60, 40, 20, 0.05);
 
+    /* 컴포넌트 한정 토큰 — OrderListTable 추가주문 행 + OrderDetailPane 송장 wash.
+       라이트 기본값은 기존 hex 그대로 유지하고 [data-theme='dark-gray'] 에서만
+       오버라이드. True Dark / 세피아는 이 값을 그대로 상속 (사용자 요청). */
+    --row-extra-bg: #fffbeb;            /* amber-50 — 추가주문 행 배경 */
+    --row-extra-bg-hover: #fef3c7;      /* amber-100 — 호버 */
+    --tracking-wash-bg: #F8FAFC;        /* slate-50 — 송장 입력 박스 */
+    --tracking-wash-border: #E2E8F0;    /* slate-200 */
+    --tracking-input-bg: #FFFFFF;
+    --tracking-input-border: #CBD5E1;   /* slate-300 */
+    --tracking-input-color: #1C1917;
+    --tracking-label-color: #475569;    /* slate-600 — 송장번호 라벨 */
+
     /* Fonts */
     --font-kr: 'Pretendard Variable', Pretendard, -apple-system, system-ui, sans-serif;
     --font-num: 'Inter Tight', 'Pretendard Variable', ui-sans-serif, sans-serif;
@@ -231,6 +243,21 @@
     --border: 60 2% 28%;                   /* --line */
     --input: 60 2% 28%;
     --ring: 351 40% 43%;
+
+    /* ── 다크그레이 전용 컴포넌트 토큰 오버라이드 ──
+       라이트 amber-50/slate-50 wash 가 다크그레이 배경(#2C2C2A) 위에서
+       거의 흰색으로 떠 보이는 문제 해결.
+       추가주문 행: warning 톤 살짝 도는 다크그레이. 카드(#3A3A38)와
+       비슷한 명도지만 미세한 톤 차이로 식별 가능.
+       송장 wash: 카드보다 살짝 어두운 톤, 내부 입력창은 배경(#2C2C2A) 동일. */
+    --row-extra-bg: #363430;
+    --row-extra-bg-hover: #423E32;
+    --tracking-wash-bg: #363634;
+    --tracking-wash-border: #4A4A47;
+    --tracking-input-bg: #2C2C2A;
+    --tracking-input-border: #4A4A47;
+    --tracking-input-color: #F1EFE8;
+    --tracking-label-color: #95918A;
   }
 
   /* ════════════════════════════════════════════════════════════════════

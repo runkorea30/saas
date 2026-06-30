@@ -252,7 +252,7 @@ export function OrderListTable(props: OrderListTableProps) {
                     : isChecked
                       ? 'var(--surface-2)'
                       : isAdd
-                        ? '#fffbeb' // amber-50 — 추가주문 행 식별용 연노랑
+                        ? 'var(--row-extra-bg)' // 추가주문 행 식별 (다크그레이 한정 어둡게 오버라이드)
                         : 'transparent',
                   cursor: 'pointer',
                   alignItems: 'center',
@@ -262,7 +262,7 @@ export function OrderListTable(props: OrderListTableProps) {
                   setHoveredId(o.id);
                   if (!sel)
                     e.currentTarget.style.background = isAdd
-                      ? '#fef3c7' // amber-100 — 추가주문 호버 강조
+                      ? 'var(--row-extra-bg-hover)' // 추가주문 호버
                       : 'var(--surface-2)';
                 }}
                 onMouseLeave={(e) => {
@@ -271,7 +271,7 @@ export function OrderListTable(props: OrderListTableProps) {
                     e.currentTarget.style.background = isChecked
                       ? 'var(--surface-2)'
                       : isAdd
-                        ? '#fffbeb'
+                        ? 'var(--row-extra-bg)'
                         : 'transparent';
                 }}
               >
