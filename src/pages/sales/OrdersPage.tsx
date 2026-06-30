@@ -303,6 +303,8 @@ export function OrdersPage() {
         id: o.id,
         order_date: o.order_date,
         memo: o.memo,
+        is_direct_shipping: o.is_direct_shipping ?? null,
+        shipping_info: (o.shipping_info ?? null) as InvoiceCustomerGroup['orders'][number]['shipping_info'],
         items: o.items.map((it) => ({
           id: it.id,
           product: {

@@ -45,10 +45,32 @@ export interface InvoiceItem {
   is_return: boolean;
 }
 
+/**
+ * 직송 행 — orders.shipping_info(jsonb 배열) 의 한 항목.
+ * 포털 LeftPanel 에서 입력한 한글/영문 필드명이 혼재할 수 있어 양쪽 폴백.
+ */
+export interface ShippingInfoRow {
+  name?: string | null;
+  recipient?: string | null;
+  zipcode?: string | null;
+  zipCode?: string | null;
+  address?: string | null;
+  phone1?: string | null;
+  phone2?: string | null;
+  product?: string | null;
+  customer?: string | null;
+  credit?: string | null;
+  [key: string]: unknown;
+}
+
 export interface InvoiceOrder {
   id: string;
   order_date: string;
   memo?: string | null;
+  /** 직송 여부 — orders.is_direct_shipping 컬럼. */
+  is_direct_shipping?: boolean | null;
+  /** 직송 배송지 정보 배열 — orders.shipping_info (jsonb). */
+  shipping_info?: ShippingInfoRow[] | string | null;
   items: InvoiceItem[];
 }
 
@@ -89,8 +111,33 @@ function sectionLabel(index: number): string {
   return index === 0 ? '주문서' : '추가주문';
 }
 
-function isDirectShip(memo?: string | null): boolean {
-  return !!memo && memo.includes('직송');
+/**
+ * 직송 판정 — orders.is_direct_shipping 컬럼 기준.
+ * 🟠 레거시 폴백: 컬럼이 누락된 과거 데이터의 경우 memo 의 '직송' 키워드로 대체.
+ */
+function isDirectShip(order: InvoiceOrder): boolean {
+  if (order.is_direct_shipping) return true;
+  return !!order.memo && order.memo.includes('직송');
+}
+
+/** shipping_info(jsonb 배열 또는 JSON 문자열) → 정규화된 행 배열. */
+function parseShippingRows(
+  raw: InvoiceOrder['shipping_info'],
+): ShippingInfoRow[] {
+  if (!raw) return [];
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as ShippingInfoRow[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(raw) ? raw : [];
+}
+
+function shippingCell(v: unknown): string {
+  return v == null ? '' : String(v);
 }
 
 /**
@@ -281,7 +328,7 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                     }}
                   >
                     <span>{sectionLabel(oi)}</span>
-                    {isDirectShip(o.memo) && (
+                    {isDirectShip(o) && (
                       <span
                         style={{
                           fontSize: '8.5pt',
@@ -297,6 +344,72 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                       </span>
                     )}
                   </div>
+
+                  {/* 직송 배송지 정보 — is_direct_shipping=true 일 때만 표시.
+                      shipping_info 행 N개를 각각 한 줄로: 받는사람 / 우편번호 / 주소 / 연락처1·2 */}
+                  {isDirectShip(o) &&
+                    (() => {
+                      const rows = parseShippingRows(o.shipping_info);
+                      if (rows.length === 0) return null;
+                      return (
+                        <div
+                          style={{
+                            border: '1px solid #cdd6e0',
+                            borderTop: 'none',
+                            padding: '2mm 3mm',
+                            fontSize: '9pt',
+                            background: '#fafbfc',
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, marginBottom: '1mm' }}>
+                            직송 배송지 ({rows.length}건)
+                          </div>
+                          {rows.map((r, ri) => {
+                            const recipient = shippingCell(r.name ?? r.recipient);
+                            const zip = shippingCell(r.zipcode ?? r.zipCode);
+                            const addr = shippingCell(r.address);
+                            const ph1 = shippingCell(r.phone1);
+                            const ph2 = shippingCell(r.phone2);
+                            const phones = [ph1, ph2].filter(Boolean).join(' · ');
+                            return (
+                              <div
+                                key={ri}
+                                style={{
+                                  display: 'flex',
+                                  gap: '3mm',
+                                  flexWrap: 'wrap',
+                                  paddingTop: ri === 0 ? 0 : '0.5mm',
+                                  paddingBottom: '0.5mm',
+                                  borderTop:
+                                    ri === 0 ? 'none' : '1px dashed #cdd6e0',
+                                }}
+                              >
+                                {recipient && (
+                                  <span>
+                                    <b>받는사람</b> {recipient}
+                                  </span>
+                                )}
+                                {zip && (
+                                  <span>
+                                    <b>우편번호</b> {zip}
+                                  </span>
+                                )}
+                                {addr && (
+                                  <span>
+                                    <b>주소</b> {addr}
+                                  </span>
+                                )}
+                                {phones && (
+                                  <span>
+                                    <b>연락처</b> {phones}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
 
                   <table
                     style={{
