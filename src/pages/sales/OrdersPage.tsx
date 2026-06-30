@@ -67,6 +67,22 @@ function toIso(d: Date): string {
   return d.toISOString();
 }
 
+/**
+ * ISO 문자열(UTC) → KST 기준 yyyy-mm-dd. 주문 묶음 키 용도.
+ *
+ * 🔴 .slice(0, 10) 만 쓰면 KST 자정~09시 등록 건이 UTC 기준 전날로 매핑되어
+ *    "어제 주문서에 추가" 증상이 발생한다. UTC ms 에 +9h 후 getUTC* 컴포넌트
+ *    조합으로 브라우저 타임존과 무관하게 KST 날짜 추출.
+ */
+function kstDateKey(iso: string): string {
+  const d = new Date(iso);
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  const y = kst.getUTCFullYear();
+  const m = String(kst.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(kst.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export function OrdersPage() {
   const { companyId, isLoading: companyLoading } = useCompany();
   const queryClient = useQueryClient();
@@ -154,7 +170,7 @@ export function OrdersPage() {
   const groupedOrders: OrderWithGroupInfo[] = useMemo(() => {
     const groupMap = new Map<string, Order[]>();
     for (const o of filtered) {
-      const dateKey = o.order_date.slice(0, 10);
+      const dateKey = kstDateKey(o.order_date);
       const customerKey = o.customer?.id ?? `__no_customer_${o.id}`;
       const key = `${dateKey}__${customerKey}`;
       if (!groupMap.has(key)) groupMap.set(key, []);
