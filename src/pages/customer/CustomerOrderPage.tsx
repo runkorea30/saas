@@ -1111,7 +1111,10 @@ function LeftPanel({
   const handleDragLeave = () => setDragOver(false);
 
   return (
-    <div className="grid grid-cols-3 grid-rows-[auto_auto] gap-3">
+    <div
+      className="grid grid-rows-[auto_auto] gap-3"
+      style={{ gridTemplateColumns: '1.3fr 0.85fr 0.85fr' }}
+    >
       {/* 1열, 2행 span — 파일 업로드 */}
       <div className="col-start-1 row-span-2">
         <FileUploadSection
