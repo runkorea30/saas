@@ -6,7 +6,7 @@
  * 🔴 CLAUDE.md §1: company_id 는 useCompany() 에서.
  * 🔴 CLAUDE.md §5: 기존 useOrders 재사용 → fetchAllRows 자동 적용.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, ExternalLink, X } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useOrders } from '@/hooks/queries/useOrders';
@@ -203,20 +203,42 @@ export function OrderListPage() {
   const handleSelectGroup = (orderIds: string[]) =>
     setViewSel({ kind: 'group', orderIds });
 
+  // 🟠 펼침(Z Fold) 2열 모드: 좌/우 패널이 각각 독립 스크롤이라야 좌측 스크롤
+  //    중 우측 상세가 같이 밀려나가지 않음. 우측 새 항목 선택 시 우측 스크롤
+  //    위치를 맨 위로 리셋해 이전 선택의 잔여 스크롤 영향 차단.
+  const detailScrollRef = useRef<HTMLDivElement | null>(null);
+  const detailKey =
+    effectiveViewSel?.kind === 'single'
+      ? `s:${effectiveViewSel.orderId}`
+      : effectiveViewSel?.kind === 'group'
+        ? `g:${effectiveViewSel.orderIds.join(',')}`
+        : 'none';
+  useEffect(() => {
+    if (!isUnfolded) return;
+    if (detailScrollRef.current) detailScrollRef.current.scrollTop = 0;
+  }, [detailKey, isUnfolded]);
+
   return (
     <div
       style={{
         display: 'flex',
         flexDirection: isUnfolded ? 'row' : 'column',
-        minHeight: '100%',
+        // 펼침: 부모(.mobile-content) 높이를 채우고 overflow 차단 → 좌/우가 각각
+        // 자체 overflow-y:auto 로 독립 스크롤. 접힘: 기존처럼 페이지 전체가 흐름.
+        ...(isUnfolded
+          ? { height: '100%', overflow: 'hidden' }
+          : { minHeight: '100%' }),
       }}
     >
-      {/* 좌측(또는 단일) 리스트 — 펼침 시 35% */}
+      {/* 좌측(또는 단일) 리스트 — 펼침 시 35% + 자체 스크롤 */}
       <div
         style={{
           flex: isUnfolded ? '0 0 35%' : '1 1 auto',
           borderRight: isUnfolded ? '1px solid var(--m-border)' : 'none',
           minHeight: 0,
+          ...(isUnfolded
+            ? { height: '100%', overflowY: 'auto', overflowX: 'hidden' }
+            : {}),
         }}
       >
         <header className="m-page-header">
@@ -264,9 +286,20 @@ export function OrderListPage() {
         )}
       </div>
 
-      {/* 우측 상세 (펼침 한정) — single: OrderDetail, group: OrderGroupDetail */}
+      {/* 우측 상세 (펼침 한정) — single: OrderDetail, group: OrderGroupDetail.
+          자체 overflow-y:auto + 새 항목 선택 시 useEffect 로 scrollTop=0 리셋. */}
       {showDetail && (
-        <div style={{ flex: 1, minWidth: 0, padding: '12px 16px' }}>
+        <div
+          ref={detailScrollRef}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            padding: '12px 16px',
+            height: '100%',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+          }}
+        >
           {effectiveViewSel?.kind === 'group' ? (
             <OrderGroupDetail orders={detailOrders} />
           ) : (
