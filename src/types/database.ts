@@ -1471,6 +1471,8 @@ export type Database = {
           total_amount: number
           tracking_numbers: Json | null
           attachment_url: string | null
+          is_direct_shipping: boolean | null
+          shipping_info: Json | null
           updated_at: string
         }
         Insert: {
@@ -1487,6 +1489,8 @@ export type Database = {
           total_amount: number
           tracking_numbers?: Json | null
           attachment_url?: string | null
+          is_direct_shipping?: boolean | null
+          shipping_info?: Json | null
           updated_at?: string
         }
         Update: {
@@ -1503,6 +1507,8 @@ export type Database = {
           total_amount?: number
           tracking_numbers?: Json | null
           attachment_url?: string | null
+          is_direct_shipping?: boolean | null
+          shipping_info?: Json | null
           updated_at?: string
         }
         Relationships: [

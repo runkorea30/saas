@@ -70,11 +70,12 @@ interface OrderRow {
   id: string;
   customer_id: string;
   order_date: string;
+  is_direct_shipping: boolean | null;
   order_items: OrderItemRow[];
 }
 
 const ORDER_SELECT = `
-  id, customer_id, order_date,
+  id, customer_id, order_date, is_direct_shipping,
   order_items (
     id, product_id, quantity, unit_price, amount, is_return,
     products (
@@ -83,6 +84,11 @@ const ORDER_SELECT = `
     )
   )
 `;
+
+/** 주문 단위 직송 건수 — BillingPrintView 헤더 요약용. */
+function countDirectShipping(orders: OrderRow[]): number {
+  return orders.reduce((n, o) => n + (o.is_direct_shipping ? 1 : 0), 0);
+}
 
 function nextMonthStartIso(year: number, month: number): string {
   if (month === 12) return `${year + 1}-01-01`;
@@ -239,6 +245,7 @@ async function renderPrintViewOffscreen(props: {
   month: number;
   groups: BillingDateGroup[];
   documentTitle: '청구서' | '거래명세서';
+  directShippingCount?: number;
 }): Promise<{ element: HTMLDivElement; cleanup: () => void }> {
   const container = document.createElement('div');
   // A4 폭(210mm) 고정, 화면 밖, 색깔 보존.
@@ -444,6 +451,7 @@ export function BillingEmailTab({
 
     const orders = ordersByCustomer.get(kakaoModal.customer.id) ?? [];
     const groups = buildDateGroups(orders);
+    const directShippingCount = countDirectShipping(orders);
     const documentTitle: '청구서' | '거래명세서' = kakaoModal.isAlpha
       ? '거래명세서'
       : '청구서';
@@ -456,6 +464,7 @@ export function BillingEmailTab({
         month: selectedMonth,
         groups,
         documentTitle,
+        directShippingCount,
       });
       cleanupFn = cleanup;
 
@@ -507,6 +516,7 @@ export function BillingEmailTab({
 
       const orders = ordersByCustomer.get(customer.id) ?? [];
       const groups = buildDateGroups(orders);
+      const directShippingCount = countDirectShipping(orders);
 
       let cleanupFn: (() => void) | null = null;
       try {
@@ -525,6 +535,7 @@ export function BillingEmailTab({
           month: selectedMonth,
           groups,
           documentTitle,
+          directShippingCount,
         });
         cleanupFn = cleanup;
         const pdfBase64 = await generateBillingPdfBase64(element);

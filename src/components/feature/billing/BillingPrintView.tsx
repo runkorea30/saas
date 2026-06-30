@@ -60,6 +60,11 @@ export interface BillingPrintViewProps {
   month: number;
   groups: BillingDateGroup[];
   documentTitle: '청구서' | '거래명세서';
+  /**
+   * 이번 달 직송 주문 건수 — 헤더에 한 줄 요약 표시.
+   * 0 또는 미지정이면 표시 생략. 상세 표시는 정책상 거래명세서(InvoicePrintView)만.
+   */
+  directShippingCount?: number;
 }
 
 // ── 포맷 / 계산 헬퍼 ──────────────────────────────────────────────────
@@ -104,6 +109,7 @@ export function BillingPrintView({
   month,
   groups,
   documentTitle,
+  directShippingCount = 0,
 }: BillingPrintViewProps) {
   const grandTotal = groups.reduce((s, g) => s + groupSubtotal(g), 0);
   const paddedMonth = String(month).padStart(2, '0');
@@ -153,6 +159,18 @@ export function BillingPrintView({
             <div style={{ marginTop: '2mm', fontSize: '10pt' }}>
               기간: {year}년 {paddedMonth}월
             </div>
+            {directShippingCount > 0 && (
+              <div
+                style={{
+                  marginTop: '1mm',
+                  fontSize: '9.5pt',
+                  color: '#333',
+                  fontWeight: 600,
+                }}
+              >
+                · 이번 달 직송 {directShippingCount}건 포함
+              </div>
+            )}
             <div style={{ marginTop: '1mm', fontSize: '10pt', color: '#333' }}>
               아래와 같이 청구드립니다.
             </div>

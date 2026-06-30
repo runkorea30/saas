@@ -51,11 +51,12 @@ interface OrderRow {
   id: string;
   order_date: string;
   memo: string | null;
+  is_direct_shipping: boolean | null;
   order_items: OrderItemRow[];
 }
 
 const ORDER_SELECT = `
-  id, order_date, memo,
+  id, order_date, memo, is_direct_shipping,
   order_items (
     id, product_id, quantity, unit_price, amount, is_return,
     products (
@@ -209,6 +210,12 @@ function PreviewTab({
     year: selectedYear,
     month: selectedMonth,
   });
+
+  // 직송 주문 건수 — 청구서 헤더 요약용. 주문 단위(같은 주문 여러 행이어도 1).
+  const directShippingCount = useMemo(
+    () => orders.reduce((n, o) => n + (o.is_direct_shipping ? 1 : 0), 0),
+    [orders],
+  );
 
   const dateGroups = useMemo<BillingDateGroup[]>(() => {
     const map = new Map<string, BillingItem[]>();
@@ -413,6 +420,7 @@ function PreviewTab({
             month={selectedMonth}
             groups={dateGroups}
             documentTitle={documentTitle}
+            directShippingCount={directShippingCount}
           />
         )}
       </div>
