@@ -19,7 +19,7 @@ export function DirectShippingSection({
   children,
 }: DirectShippingSectionProps) {
   return (
-    <section className="flex h-full flex-col overflow-hidden rounded-lg border border-[#ece6e0] bg-white shadow-sm">
+    <section className="flex h-full flex-col overflow-hidden rounded-lg border border-[var(--p-card-bg)] bg-[var(--p-card-bg)] shadow-sm">
       <div className="flex w-full shrink-0 items-center justify-between px-4 py-3.5">
         <SectionHeading
           title="직송 정보"
@@ -28,7 +28,7 @@ export function DirectShippingSection({
         <button
           type="button"
           onClick={onAdd}
-          className="inline-flex items-center gap-1.5 rounded-md bg-[#f6efea] px-3 py-1.5 text-[12.5px] font-semibold text-[#6B1F2A] transition-colors hover:bg-[#efe4dd]"
+          className="inline-flex items-center gap-1.5 rounded-md bg-[var(--p-card-bg)] px-3 py-1.5 text-[12.5px] font-semibold text-[var(--p-brand)] transition-colors hover:bg-[var(--p-card-bg)]"
         >
           <Plus className="h-3.5 w-3.5" />
           추가

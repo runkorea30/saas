@@ -9,10 +9,10 @@ export interface SectionHeadingProps {
 export function SectionHeading({ title, hint }: SectionHeadingProps) {
   return (
     <div className="flex items-center gap-2">
-      <span className="h-3.5 w-[3px] rounded-sm bg-[#6B1F2A]" />
-      <span className="text-sm font-semibold text-[#2b2521]">{title}</span>
+      <span className="h-3.5 w-[3px] rounded-sm bg-[var(--p-brand)]" />
+      <span className="text-sm font-semibold text-[var(--p-ink)]">{title}</span>
       {hint && (
-        <span className="text-[11px] font-normal text-[#b3a89f]">{hint}</span>
+        <span className="text-[11px] font-normal text-[var(--p-ink-3)]">{hint}</span>
       )}
     </div>
   );

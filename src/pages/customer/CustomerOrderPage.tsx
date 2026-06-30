@@ -328,7 +328,7 @@ export function CustomerOrderPage() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: '#F5F5F4',
+          background: 'var(--p-bg)',
         }}
       >
         <Loader2 size={28} style={{ animation: 'spin 1s linear infinite' }} />
@@ -366,7 +366,7 @@ function CustomerOrderShell({
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#f8f7f5] text-[#312b27]">
+    <div className="flex min-h-screen flex-col bg-[var(--p-bg)] text-[var(--p-ink)]">
       <Header
         customer={customer}
         fontScale={fontScale}
@@ -489,7 +489,7 @@ function Header({
                   borderRadius: 4,
                   border: 'none',
                   background: active ? 'var(--p-surface)' : 'transparent',
-                  color: active ? 'var(--p-ink)' : 'var(--p-ink-3)',
+                  color: active ? 'var(--p-ink)' : 'var(--p-ink-2)',
                   cursor: 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -1240,13 +1240,13 @@ function LeftPanel({
       {/* 2행 2~3열 span — 직송 정보 */}
       <div className="col-span-2 col-start-2 row-start-2">
         <DirectShippingSection onAdd={addShippingRow}>
-          <div className="mb-2 rounded-md border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-[12px] font-medium text-[#991B1B]">
+          <div className="mb-2 rounded-md border border-[var(--p-danger-soft-border)] bg-[var(--p-danger-soft-bg)] px-3 py-2 text-[12px] font-medium text-[var(--p-danger-strong)]">
             ⚠ 절대주의: 직송은 직송정보부터 입력하세요. 일반주문시와 구분해주세요
           </div>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-[12px]">
               <thead>
-                <tr className="bg-[#FAFAF9]">
+                <tr className="bg-[var(--p-bg)]">
                   <ShipTh>받는사람</ShipTh>
                   <ShipTh>우편번호</ShipTh>
                   <ShipTh>주소</ShipTh>
@@ -1261,7 +1261,7 @@ function LeftPanel({
               </thead>
               <tbody>
                 {shipping.map((row, i) => (
-                  <tr key={i} className="border-t border-[#F5F5F4]">
+                  <tr key={i} className="border-t border-[var(--p-bg)]">
                     <ShipTd>
                       <CellInput
                         value={row.name}
@@ -1322,7 +1322,7 @@ function LeftPanel({
                         type="button"
                         onClick={() => removeShippingRow(i)}
                         title="행 삭제"
-                        className="cursor-pointer border-none bg-transparent p-1 text-[#78716C] hover:text-[#dc2626]"
+                        className="cursor-pointer border-none bg-transparent p-1 text-[var(--p-ink-3)] hover:text-[var(--p-danger-strong)]"
                       >
                         <Trash2 size={13} />
                       </button>
@@ -1381,7 +1381,7 @@ function NoticePanel({
       <div
         style={{
           fontSize: baseFont,
-          color: '#44403C',
+          color: 'var(--p-ink-2)',
           lineHeight: 1.65,
           whiteSpace: 'pre-line',
         }}
@@ -1576,8 +1576,8 @@ function ImportNoticeCard({
   return (
     <section
       style={{
-        background: '#FFFFFF',
-        border: '1px solid #E7E5E4',
+        background: 'var(--p-card-bg)',
+        border: '1px solid var(--p-line)',
         borderRadius: 10,
         padding: 16,
       }}
@@ -1606,9 +1606,9 @@ function ImportNoticeCard({
             fontWeight: 600,
             border: '1.5px solid',
             cursor: 'pointer',
-            backgroundColor: tab === 'fedex' ? '#6B1F2A' : 'white',
-            color: tab === 'fedex' ? 'white' : '#6B1F2A',
-            borderColor: '#6B1F2A',
+            backgroundColor: tab === 'fedex' ? 'var(--p-brand)' : 'white',
+            color: tab === 'fedex' ? 'white' : 'var(--p-brand)',
+            borderColor: 'var(--p-brand)',
           }}
         >
           ✈️ 페덱스
@@ -1628,9 +1628,9 @@ function ImportNoticeCard({
             fontWeight: 600,
             border: '1.5px solid',
             cursor: 'pointer',
-            backgroundColor: tab === 'sea' ? '#6B1F2A' : 'white',
-            color: tab === 'sea' ? 'white' : '#6B1F2A',
-            borderColor: '#6B1F2A',
+            backgroundColor: tab === 'sea' ? 'var(--p-brand)' : 'white',
+            color: tab === 'sea' ? 'white' : 'var(--p-brand)',
+            borderColor: 'var(--p-brand)',
           }}
         >
           🚢 해상운송
@@ -1650,9 +1650,9 @@ function ImportNoticeCard({
             fontWeight: 600,
             border: '1.5px solid',
             cursor: 'pointer',
-            backgroundColor: tab === 'soldout' ? '#ef4444' : 'white',
-            color: tab === 'soldout' ? 'white' : '#ef4444',
-            borderColor: '#ef4444',
+            backgroundColor: tab === 'soldout' ? 'var(--p-danger-solid)' : 'white',
+            color: tab === 'soldout' ? 'white' : 'var(--p-danger-solid)',
+            borderColor: 'var(--p-danger-solid)',
           }}
         >
           🚫 품절
@@ -1672,9 +1672,9 @@ function ImportNoticeCard({
             fontWeight: 600,
             border: '1.5px solid',
             cursor: 'pointer',
-            backgroundColor: tab === 'low' ? '#f59e0b' : 'white',
-            color: tab === 'low' ? 'white' : '#f59e0b',
-            borderColor: '#f59e0b',
+            backgroundColor: tab === 'low' ? 'var(--p-warning-solid)' : 'white',
+            color: tab === 'low' ? 'white' : 'var(--p-warning-solid)',
+            borderColor: 'var(--p-warning-solid)',
           }}
         >
           ⚠️ 재고부족
@@ -1697,7 +1697,7 @@ function ImportNoticeCard({
             style={{
               fontSize: 14,
               fontWeight: 600,
-              color: '#1C1917',
+              color: 'var(--p-ink)',
               flexShrink: 0,
             }}
           >
@@ -1708,7 +1708,7 @@ function ImportNoticeCard({
               style={{
                 fontSize: 15,
                 fontWeight: 700,
-                color: '#2563EB',
+                color: 'var(--p-info)',
               }}
             >
               {activeShipment.arrivalText}
@@ -1775,9 +1775,9 @@ function ImportStepper({ shipment }: { shipment: ImportNoticeShipment }) {
         const isCurrent = i === currentIdx;
         const isDone = i <= currentIdx;
         const reached = isDone;
-        const bg = reached ? '#2563EB' : '#F5F5F4';
-        const fg = reached ? '#FFFFFF' : '#9CA3AF';
-        const border = reached ? '#2563EB' : '#D6D3D1';
+        const bg = reached ? 'var(--p-info)' : 'var(--p-bg)';
+        const fg = reached ? '#FFFFFF' : 'var(--p-ink-4)';
+        const border = reached ? 'var(--p-info)' : 'var(--p-line-strong)';
         const dateText = isDone ? stepDates[i] : null;
         return (
           <div
@@ -1821,7 +1821,7 @@ function ImportStepper({ shipment }: { shipment: ImportNoticeShipment }) {
                 style={{
                   fontSize: 9,
                   marginTop: 4,
-                  color: isCurrent ? '#2563EB' : '#6B7280',
+                  color: isCurrent ? 'var(--p-info)' : 'var(--p-ink-3)',
                   fontWeight: isCurrent ? 600 : 400,
                   textAlign: 'center',
                   lineHeight: 1.2,
@@ -1835,7 +1835,7 @@ function ImportStepper({ shipment }: { shipment: ImportNoticeShipment }) {
                   style={{
                     fontSize: 8,
                     marginTop: 2,
-                    color: '#9CA3AF',
+                    color: 'var(--p-ink-4)',
                     textAlign: 'center',
                     lineHeight: 1.2,
                     wordBreak: 'keep-all',
@@ -1853,7 +1853,7 @@ function ImportStepper({ shipment }: { shipment: ImportNoticeShipment }) {
                   marginTop: 10,
                   marginLeft: 2,
                   marginRight: 2,
-                  background: i < currentIdx ? '#2563EB' : '#E5E7EB',
+                  background: i < currentIdx ? 'var(--p-info)' : 'var(--p-line)',
                   opacity: i < currentIdx ? 0.55 : 1,
                   flexShrink: 0,
                 }}
@@ -1897,7 +1897,7 @@ function ProductList({
         style={{
           height: 400,
           overflowY: 'auto',
-          border: '1px solid #F3F4F6',
+          border: '1px solid var(--p-line-soft)',
           borderRadius: 6,
         }}
       >
@@ -1907,7 +1907,7 @@ function ProductList({
               padding: 16,
               textAlign: 'center',
               fontSize: 11,
-              color: '#9CA3AF',
+              color: 'var(--p-ink-4)',
             }}
           >
             {emptyText}
@@ -1919,14 +1919,14 @@ function ProductList({
                 style={{
                   position: 'sticky',
                   top: 0,
-                  background: '#FAFAF9',
+                  background: 'var(--p-bg)',
                   padding: '4px 8px',
                   fontSize: 10,
                   fontWeight: 600,
-                  color: '#6B7280',
+                  color: 'var(--p-ink-3)',
                   letterSpacing: '0.05em',
                   textTransform: 'uppercase',
-                  borderBottom: '1px solid #E5E7EB',
+                  borderBottom: '1px solid var(--p-line)',
                 }}
               >
                 {cat}
@@ -1940,13 +1940,13 @@ function ProductList({
                     gap: 8,
                     fontSize: baseFont,
                     padding: '5px 8px',
-                    borderTop: idx === 0 ? 'none' : '1px solid #F3F4F6',
+                    borderTop: idx === 0 ? 'none' : '1px solid var(--p-line-soft)',
                   }}
                 >
                   <span
                     style={{
                       fontFamily: 'var(--font-num)',
-                      color: '#6B7280',
+                      color: 'var(--p-ink-3)',
                       width: 84,
                       flexShrink: 0,
                     }}
@@ -1955,7 +1955,7 @@ function ProductList({
                   </span>
                   <span
                     style={{
-                      color: '#1F2937',
+                      color: 'var(--p-ink)',
                       flex: 1,
                       display: 'flex',
                       alignItems: 'center',
@@ -1981,9 +1981,9 @@ function ProductList({
                           borderRadius: 999,
                           fontSize: 9,
                           fontWeight: 600,
-                          background: '#FEE2E2',
-                          color: '#B91C1C',
-                          border: '1px solid #FECACA',
+                          background: 'var(--p-danger-wash)',
+                          color: 'var(--p-danger)',
+                          border: '1px solid var(--p-danger-soft-border)',
                           flexShrink: 0,
                           whiteSpace: 'nowrap',
                           fontFamily:
@@ -1999,7 +1999,7 @@ function ProductList({
                     <span
                       style={{
                         fontFamily: 'var(--font-num)',
-                        color: '#B45309',
+                        color: 'var(--p-warning-strong)',
                         fontWeight: 600,
                         flexShrink: 0,
                       }}
@@ -2049,8 +2049,8 @@ function TodayOrders({
   return (
     <section
       style={{
-        background: '#FFFFFF',
-        border: '1px solid #E5E7EB',
+        background: 'var(--p-card-bg)',
+        border: '1px solid var(--p-line)',
         borderRadius: 10,
         padding: 16,
         display: 'flex',
@@ -2070,7 +2070,7 @@ function TodayOrders({
             margin: 0,
             fontSize: 15,
             fontWeight: 600,
-            color: '#1C1917',
+            color: 'var(--p-ink)',
           }}
         >
           오늘 주문 내역
@@ -2079,7 +2079,7 @@ function TodayOrders({
           style={{
             fontSize: 13,
             fontWeight: 600,
-            color: '#1F2937',
+            color: 'var(--p-ink)',
             fontVariantNumeric: 'tabular-nums',
           }}
         >
@@ -2088,11 +2088,11 @@ function TodayOrders({
       </div>
 
       {todayQuery.isLoading ? (
-        <div style={{ fontSize: baseFont, color: '#6B7280', textAlign: 'center', padding: '24px 0' }}>
+        <div style={{ fontSize: baseFont, color: 'var(--p-ink-3)', textAlign: 'center', padding: '24px 0' }}>
           불러오는 중…
         </div>
       ) : orders.length === 0 ? (
-        <div style={{ fontSize: baseFont, color: '#9CA3AF', textAlign: 'center', padding: '32px 0' }}>
+        <div style={{ fontSize: baseFont, color: 'var(--p-ink-4)', textAlign: 'center', padding: '32px 0' }}>
           오늘 주문내역이 없습니다
         </div>
       ) : (
@@ -2169,8 +2169,8 @@ function MonthlyOrders({
   return (
     <section
       style={{
-        background: '#FFFFFF',
-        border: '1px solid #E5E7EB',
+        background: 'var(--p-card-bg)',
+        border: '1px solid var(--p-line)',
         borderRadius: 10,
         padding: 16,
         display: 'flex',
@@ -2192,7 +2192,7 @@ function MonthlyOrders({
             margin: 0,
             fontSize: 15,
             fontWeight: 600,
-            color: '#1C1917',
+            color: 'var(--p-ink)',
           }}
         >
           주문 내역 총 {fmtWon(monthSum)}
@@ -2224,11 +2224,11 @@ function MonthlyOrders({
       </div>
 
       {monthlyQuery.isLoading ? (
-        <div style={{ fontSize: baseFont, color: '#6B7280', textAlign: 'center', padding: '24px 0' }}>
+        <div style={{ fontSize: baseFont, color: 'var(--p-ink-3)', textAlign: 'center', padding: '24px 0' }}>
           불러오는 중…
         </div>
       ) : dateGroups.length === 0 ? (
-        <div style={{ fontSize: baseFont, color: '#9CA3AF', textAlign: 'center', padding: '32px 0' }}>
+        <div style={{ fontSize: baseFont, color: 'var(--p-ink-4)', textAlign: 'center', padding: '32px 0' }}>
           등록된 주문이 없습니다
         </div>
       ) : (
@@ -2287,10 +2287,10 @@ function MonthlyDateCard({
   return (
     <div
       style={{
-        border: '1px solid #E5E7EB',
+        border: '1px solid var(--p-line)',
         borderRadius: 8,
         overflow: 'hidden',
-        background: '#FFFFFF',
+        background: 'var(--p-card-bg)',
       }}
     >
       <button
@@ -2299,7 +2299,7 @@ function MonthlyDateCard({
         style={{
           width: '100%',
           padding: '10px 12px',
-          background: expanded ? '#F9FAFB' : '#FFFFFF',
+          background: expanded ? 'var(--p-bg)' : 'var(--p-card-bg)',
           border: 'none',
           textAlign: 'left',
           cursor: 'pointer',
@@ -2309,15 +2309,15 @@ function MonthlyDateCard({
           fontSize: baseFont + 1,
         }}
       >
-        <span style={{ fontWeight: 600, color: '#1C1917' }}>{date}</span>
+        <span style={{ fontWeight: 600, color: 'var(--p-ink)' }}>{date}</span>
         {hasExtra && <Badge kind="extra" />}
         {hasDirect && <Badge kind="direct" />}
         <span style={{ flex: 1 }} />
-        <span style={{ color: '#6B7280' }}>{orders.length}건</span>
+        <span style={{ color: 'var(--p-ink-3)' }}>{orders.length}건</span>
         <span
           style={{
             fontWeight: 600,
-            color: '#1F2937',
+            color: 'var(--p-ink)',
             fontVariantNumeric: 'tabular-nums',
           }}
         >
@@ -2328,17 +2328,17 @@ function MonthlyDateCard({
         <div
           style={{
             padding: 12,
-            borderTop: '1px solid #E5E7EB',
+            borderTop: '1px solid var(--p-line)',
             display: 'flex',
             flexDirection: 'column',
             gap: 12,
-            background: '#FAFAF9',
+            background: 'var(--p-bg)',
           }}
         >
           <div
             style={{
               fontSize: 11,
-              color: '#6B7280',
+              color: 'var(--p-ink-3)',
               fontVariantNumeric: 'tabular-nums',
             }}
           >
@@ -2387,7 +2387,7 @@ function OrderGroupSection({
         style={{
           fontSize: 11,
           fontWeight: 600,
-          color: '#374151',
+          color: 'var(--p-ink-2)',
           marginBottom: 6,
         }}
       >
@@ -2432,17 +2432,17 @@ function OrderCard({
   return (
     <div
       style={{
-        border: '1px solid #E5E7EB',
+        border: '1px solid var(--p-line)',
         borderRadius: 8,
-        background: '#FFFFFF',
+        background: 'var(--p-card-bg)',
         overflow: 'hidden',
       }}
     >
       <div
         style={{
           padding: '8px 10px',
-          background: '#FAFAF9',
-          borderBottom: '1px solid #F3F4F6',
+          background: 'var(--p-bg)',
+          borderBottom: '1px solid var(--p-line-soft)',
           display: 'flex',
           alignItems: 'center',
           gap: 6,
@@ -2453,11 +2453,11 @@ function OrderCard({
         <Badge kind={extra ? 'extra' : 'regular'} />
         {direct && <Badge kind="direct" />}
         {showTime && (
-          <span style={{ color: '#6B7280', fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ color: 'var(--p-ink-3)', fontVariantNumeric: 'tabular-nums' }}>
             {formatHM(order.order_date)}
           </span>
         )}
-        <span style={{ color: '#6B7280' }}>{order.items.length}건</span>
+        <span style={{ color: 'var(--p-ink-3)' }}>{order.items.length}건</span>
         <span style={{ flex: 1 }} />
         {/* 🔴 주문 단위 송장번호 — 여러 건이어도 각 카드마다 자기 것만 정확히 표시.
             직송 주문(direct=true)은 "직송" 뱃지와 나란히 보여 거래처가 곧바로
@@ -2481,9 +2481,9 @@ function OrderCard({
                     padding: '0 8px',
                     fontSize: 10.5,
                     fontWeight: 600,
-                    color: hasUrl ? '#1D4ED8' : '#475569',
-                    background: hasUrl ? '#EFF6FF' : '#F1F5F9',
-                    border: `1px solid ${hasUrl ? '#BFDBFE' : '#CBD5E1'}`,
+                    color: hasUrl ? 'var(--p-info)' : 'var(--p-ink-3)',
+                    background: hasUrl ? 'var(--p-info-wash)' : 'var(--p-bg)',
+                    border: `1px solid ${hasUrl ? 'var(--p-info-strong-border)' : 'var(--p-input-border)'}`,
                     borderRadius: 999,
                     cursor: hasUrl ? 'pointer' : 'default',
                     fontVariantNumeric: 'tabular-nums',
@@ -2498,7 +2498,7 @@ function OrderCard({
         <span
           style={{
             fontWeight: 600,
-            color: '#1F2937',
+            color: 'var(--p-ink)',
             fontVariantNumeric: 'tabular-nums',
           }}
         >
@@ -2514,7 +2514,7 @@ function OrderCard({
           }}
         >
           <thead>
-            <tr style={{ background: '#FFFFFF' }}>
+            <tr style={{ background: 'var(--p-card-bg)' }}>
               <ItemTh align="left">코드</ItemTh>
               <ItemTh align="left">제품명</ItemTh>
               <ItemTh align="right">수량</ItemTh>
@@ -2530,7 +2530,7 @@ function OrderCard({
                   style={{
                     padding: 12,
                     textAlign: 'center',
-                    color: '#9CA3AF',
+                    color: 'var(--p-ink-4)',
                     fontSize: baseFont - 1,
                   }}
                 >
@@ -2552,7 +2552,7 @@ function OrderCard({
                 return (
                   <tr
                     key={it.id}
-                    style={{ borderTop: '1px solid #F3F4F6' }}
+                    style={{ borderTop: '1px solid var(--p-line-soft)' }}
                   >
                     <ItemTd align="left">
                       <span style={{ fontFamily: 'var(--font-num)' }}>
@@ -2582,15 +2582,15 @@ function OrderCard({
         <div
           style={{
             padding: '8px 10px',
-            borderTop: '1px solid #F3F4F6',
-            background: '#FAFAF9',
+            borderTop: '1px solid var(--p-line-soft)',
+            background: 'var(--p-bg)',
             display: 'flex',
             alignItems: 'center',
             gap: 8,
             flexWrap: 'wrap',
           }}
         >
-          <span style={{ fontSize: 11, color: '#6B7280', fontWeight: 600 }}>
+          <span style={{ fontSize: 11, color: 'var(--p-ink-3)', fontWeight: 600 }}>
             출고 사진
           </span>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flex: 1 }}>
@@ -2604,10 +2604,10 @@ function OrderCard({
                   height: 48,
                   borderRadius: 6,
                   overflow: 'hidden',
-                  border: '1px solid #E5E7EB',
+                  border: '1px solid var(--p-line)',
                   padding: 0,
                   cursor: 'pointer',
-                  background: '#FFFFFF',
+                  background: 'var(--p-card-bg)',
                 }}
                 aria-label="출고 사진 크게 보기"
               >
@@ -2671,9 +2671,9 @@ function OrderCard({
 
 function Badge({ kind }: { kind: 'regular' | 'extra' | 'direct' }) {
   const styles: Record<string, { bg: string; fg: string; label: string }> = {
-    regular: { bg: '#DCFCE7', fg: '#15803D', label: '주문' },
-    extra: { bg: '#FEF3C7', fg: '#A16207', label: '추가주문' },
-    direct: { bg: '#DBEAFE', fg: '#1D4ED8', label: '직송' },
+    regular: { bg: 'var(--p-success-wash)', fg: 'var(--p-success)', label: '주문' },
+    extra: { bg: 'var(--p-warning-wash)', fg: 'var(--p-warning)', label: '추가주문' },
+    direct: { bg: 'var(--p-info-soft-bg)', fg: 'var(--p-info)', label: '직송' },
   };
   const s = styles[kind];
   return (
@@ -2706,7 +2706,7 @@ function ItemTh({
         padding: '6px 10px',
         fontSize: 11,
         fontWeight: 600,
-        color: '#6B7280',
+        color: 'var(--p-ink-3)',
         textAlign: align,
         whiteSpace: 'nowrap',
       }}
@@ -2727,7 +2727,7 @@ function ItemTd({
     <td
       style={{
         padding: '6px 10px',
-        color: '#1F2937',
+        color: 'var(--p-ink)',
         textAlign: align,
         whiteSpace: 'nowrap',
         fontVariantNumeric: 'tabular-nums',
@@ -2752,8 +2752,8 @@ function Card({
   return (
     <section
       style={{
-        background: '#FFFFFF',
-        border: '1px solid #E7E5E4',
+        background: 'var(--p-card-bg)',
+        border: '1px solid var(--p-line)',
         borderRadius: 10,
         padding: 16,
       }}
@@ -2766,7 +2766,7 @@ function Card({
           marginBottom: 12,
           fontSize: 14,
           fontWeight: 600,
-          color: '#1C1917',
+          color: 'var(--p-ink)',
         }}
       >
         {icon}
@@ -2790,7 +2790,7 @@ function ShipTh({
         padding: '8px 6px',
         fontSize: 11,
         fontWeight: 600,
-        color: '#44403C',
+        color: 'var(--p-ink-2)',
         textAlign: 'left',
         whiteSpace: 'nowrap',
         width,
@@ -2835,10 +2835,10 @@ function CellInput({
         height: 28,
         padding: '0 6px',
         fontSize: 12,
-        border: '1px solid #E7E5E4',
+        border: '1px solid var(--p-line)',
         borderRadius: 4,
         outline: 'none',
-        background: '#FFFFFF',
+        background: 'var(--p-card-bg)',
       }}
     />
   );
@@ -2854,10 +2854,10 @@ function ReadOnlyCell({ value }: { value: string }) {
         height: 28,
         padding: '0 6px',
         fontSize: 12,
-        border: '1px solid #E7E5E4',
+        border: '1px solid var(--p-line)',
         borderRadius: 4,
-        background: '#F5F5F4',
-        color: '#57534E',
+        background: 'var(--p-bg)',
+        color: 'var(--p-ink-3)',
         display: 'flex',
         alignItems: 'center',
         whiteSpace: 'nowrap',
@@ -2874,9 +2874,9 @@ const smallSelect: React.CSSProperties = {
   flex: 1,
   height: 30,
   padding: '0 8px',
-  border: '1px solid #D6D3D1',
+  border: '1px solid var(--p-line-strong)',
   borderRadius: 6,
   fontSize: 12,
-  background: '#FFFFFF',
+  background: 'var(--p-card-bg)',
 };
 

@@ -42,7 +42,7 @@ export function CustomerOrderLogin({ onLoginSuccess }: CustomerOrderLoginProps) 
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: '#F5F5F4',
+        background: 'var(--p-bg)',
         padding: 20,
       }}
     >
@@ -55,8 +55,8 @@ export function CustomerOrderLogin({ onLoginSuccess }: CustomerOrderLoginProps) 
         style={{
           width: '100%',
           maxWidth: 400,
-          background: '#FFFFFF',
-          border: '1px solid #E7E5E4',
+          background: 'var(--p-card-bg)',
+          border: '1px solid var(--p-line)',
           borderRadius: 12,
           padding: '40px 32px',
           boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
@@ -75,14 +75,14 @@ export function CustomerOrderLogin({ onLoginSuccess }: CustomerOrderLoginProps) 
               width: 56,
               height: 56,
               borderRadius: 12,
-              background: '#EFF6FF',
+              background: 'var(--p-info-wash)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               marginBottom: 16,
             }}
           >
-            <FileText size={28} strokeWidth={1.75} color="#2563EB" />
+            <FileText size={28} strokeWidth={1.75} color="var(--p-info)" />
           </div>
           <h1
             style={{
@@ -90,12 +90,12 @@ export function CustomerOrderLogin({ onLoginSuccess }: CustomerOrderLoginProps) 
               fontWeight: 600,
               margin: 0,
               marginBottom: 6,
-              color: '#1C1917',
+              color: 'var(--p-ink)',
             }}
           >
             주문서 업로드
           </h1>
-          <p style={{ fontSize: 13, color: '#78716C', margin: 0 }}>
+          <p style={{ fontSize: 13, color: 'var(--p-ink-3)', margin: 0 }}>
             거래처 로그인
           </p>
         </div>
@@ -105,7 +105,7 @@ export function CustomerOrderLogin({ onLoginSuccess }: CustomerOrderLoginProps) 
           style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
         >
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 12, fontWeight: 500, color: '#44403C' }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--p-ink-2)' }}>
               아이디
             </span>
             <input
@@ -120,7 +120,7 @@ export function CustomerOrderLogin({ onLoginSuccess }: CustomerOrderLoginProps) 
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 12, fontWeight: 500, color: '#44403C' }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--p-ink-2)' }}>
               비밀번호
             </span>
             <input
@@ -140,9 +140,9 @@ export function CustomerOrderLogin({ onLoginSuccess }: CustomerOrderLoginProps) 
               style={{
                 fontSize: 12.5,
                 padding: '10px 12px',
-                background: '#FEF2F2',
-                color: '#B91C1C',
-                border: '1px solid #FECACA',
+                background: 'var(--p-danger-soft-bg)',
+                color: 'var(--p-danger)',
+                border: '1px solid var(--p-danger-soft-border)',
                 borderRadius: 6,
               }}
             >
@@ -157,7 +157,7 @@ export function CustomerOrderLogin({ onLoginSuccess }: CustomerOrderLoginProps) 
               marginTop: 6,
               height: 42,
               borderRadius: 6,
-              background: busy ? '#93C5FD' : '#2563EB',
+              background: busy ? 'var(--p-info-strong-border)' : 'var(--p-info)',
               color: '#FFFFFF',
               border: 'none',
               cursor: busy ? 'not-allowed' : 'pointer',
@@ -178,10 +178,10 @@ export function CustomerOrderLogin({ onLoginSuccess }: CustomerOrderLoginProps) 
           style={{
             marginTop: 28,
             paddingTop: 16,
-            borderTop: '1px solid #F5F5F4',
+            borderTop: '1px solid var(--p-bg)',
             textAlign: 'center',
             fontSize: 12,
-            color: '#A8A29E',
+            color: 'var(--p-ink-3)',
           }}
         >
           문의사항은 담당자에게 연락 바랍니다
@@ -195,9 +195,9 @@ const inputStyle: React.CSSProperties = {
   height: 40,
   padding: '0 12px',
   fontSize: 14,
-  border: '1px solid #D6D3D1',
+  border: '1px solid var(--p-line-strong)',
   borderRadius: 6,
   outline: 'none',
-  background: '#FFFFFF',
-  color: '#1C1917',
+  background: 'var(--p-card-bg)',
+  color: 'var(--p-ink)',
 };

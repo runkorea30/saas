@@ -40,7 +40,7 @@ export function FileUploadSection({
   const submitDisabled = !file || sending;
 
   return (
-    <section className="flex h-full flex-col rounded-lg border border-[#ece6e0] bg-white p-4 shadow-sm">
+    <section className="flex h-full flex-col rounded-lg border border-[var(--p-card-bg)] bg-[var(--p-card-bg)] p-4 shadow-sm">
       <div className="mb-3">
         <SectionHeading title="파일로 주문서 보내기" />
       </div>
@@ -53,17 +53,17 @@ export function FileUploadSection({
         onClick={() => document.getElementById('file-upload-input')?.click()}
         className={`flex flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-4 transition-colors ${
           dragOver
-            ? 'border-[#6B1F2A] bg-[#faf2f1]'
-            : 'border-[#d9cfc8] bg-[#fdfbfa] hover:bg-[#faf6f4]'
+            ? 'border-[var(--p-brand)] bg-[var(--p-card-bg)]'
+            : 'border-[var(--p-line)] bg-[var(--p-card-bg)] hover:bg-[var(--p-card-bg)]'
         }`}
       >
         <Upload
-          className="h-7 w-7 shrink-0 text-[#a98e87]"
+          className="h-7 w-7 shrink-0 text-[var(--p-ink-3)]"
           strokeWidth={1.4}
         />
         {file ? (
           <span
-            className="flex items-center gap-2 text-[13px] font-medium text-[#2b2521]"
+            className="flex items-center gap-2 text-[13px] font-medium text-[var(--p-ink)]"
             onClick={(e) => e.stopPropagation()}
           >
             <span className="max-w-[260px] truncate">{file.name}</span>
@@ -71,20 +71,20 @@ export function FileUploadSection({
               type="button"
               onClick={() => onFileChange(null)}
               title="파일 제거"
-              className="grid h-5 w-5 place-items-center rounded-full text-[#78716C] hover:bg-[#f1eae6]"
+              className="grid h-5 w-5 place-items-center rounded-full text-[var(--p-ink-3)] hover:bg-[var(--p-card-bg)]"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           </span>
         ) : (
-          <span className="text-[13px] font-medium text-[#6b6058]">
+          <span className="text-[13px] font-medium text-[var(--p-ink-2)]">
             파일을 드래그하거나{' '}
-            <span className="font-semibold text-[#6B1F2A]">
+            <span className="font-semibold text-[var(--p-brand)]">
               클릭하여 업로드
             </span>
           </span>
         )}
-        <span className="text-[11px] text-[#b9aea5]">
+        <span className="text-[11px] text-[var(--p-ink-3)]">
           .xlsx · .xls · .csv · .jpg · .png (최대 10MB)
         </span>
         <input
@@ -103,7 +103,7 @@ export function FileUploadSection({
           onClick={onDownload}
           disabled={downloading}
           title="현재 거래처 등급의 판매가·공급가가 반영된 빈 주문서를 받습니다"
-          className={`inline-flex items-center gap-2 rounded-md border border-[#ddd5cd] bg-white px-3 py-1.5 text-[13px] font-medium text-[#5f574f] transition-colors hover:bg-[#faf6f4] ${
+          className={`inline-flex items-center gap-2 rounded-md border border-[var(--p-line)] bg-[var(--p-card-bg)] px-3 py-1.5 text-[13px] font-medium text-[var(--p-ink-2)] transition-colors hover:bg-[var(--p-card-bg)] ${
             downloading ? 'cursor-not-allowed opacity-55' : ''
           }`}
         >
@@ -118,7 +118,7 @@ export function FileUploadSection({
           type="button"
           onClick={onSubmit}
           disabled={submitDisabled}
-          className={`inline-flex items-center gap-2 rounded-md bg-[#6B1F2A] px-4 py-1.5 text-[13px] font-semibold text-white shadow-[0_2px_8px_rgba(107,31,42,0.20)] transition-colors hover:bg-[#5c1a24] ${
+          className={`inline-flex items-center gap-2 rounded-md bg-[var(--p-brand)] px-4 py-1.5 text-[13px] font-semibold text-white shadow-[0_2px_8px_rgba(107,31,42,0.20)] transition-colors hover:bg-[var(--p-brand-deep)] ${
             submitDisabled ? 'cursor-not-allowed opacity-55' : ''
           }`}
         >

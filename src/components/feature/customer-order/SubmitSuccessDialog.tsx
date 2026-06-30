@@ -38,7 +38,7 @@ export function SubmitSuccessDialog({
       onClick={onClose}
     >
       <div
-        className="w-[360px] rounded-xl bg-white p-6 text-center shadow-2xl"
+        className="w-[360px] rounded-xl bg-[var(--p-card-bg)] p-6 text-center shadow-2xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -46,7 +46,7 @@ export function SubmitSuccessDialog({
         <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
           <Check className="h-7 w-7 text-green-600" strokeWidth={2.5} />
         </div>
-        <p className="text-[15px] font-semibold text-[#2b2521]">
+        <p className="text-[15px] font-semibold text-[var(--p-ink)]">
           주문서가 전송되었습니다.
         </p>
         {hasChanges && (
@@ -60,7 +60,7 @@ export function SubmitSuccessDialog({
           type="button"
           onClick={onClose}
           autoFocus
-          className="mt-5 w-full rounded-lg bg-[#6B1F2A] py-2.5 text-[13.5px] font-semibold text-white transition-colors hover:bg-[#5c1a24]"
+          className="mt-5 w-full rounded-lg bg-[var(--p-brand)] py-2.5 text-[13.5px] font-semibold text-white transition-colors hover:bg-[var(--p-brand-deep)]"
         >
           확인
         </button>

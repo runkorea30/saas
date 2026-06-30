@@ -354,34 +354,34 @@ export function CustomerOrderInput({
   const submitDisabled = busy || orderSummary.count === 0;
 
   return (
-    <div className="flex h-screen flex-col bg-[#f8f7f5] text-[#312b27]">
+    <div className="flex h-screen flex-col bg-[var(--p-card-bg)] text-[var(--p-ink)]">
       {/* ── 상단 고정 헤더 ── */}
-      <header className="flex h-[60px] shrink-0 items-center justify-between border-b border-[#ece7e2] bg-white px-[22px]">
+      <header className="flex h-[60px] shrink-0 items-center justify-between border-b border-[var(--p-card-bg)] bg-[var(--p-card-bg)] px-[22px]">
         <div className="flex items-center gap-4">
           <button
             type="button"
             onClick={onBack}
             disabled={busy}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[#e3dcd5] bg-white px-3 py-1.5 text-[13px] text-[#5f574f] hover:bg-[#faf6f4] disabled:opacity-55"
+            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--p-line)] bg-[var(--p-card-bg)] px-3 py-1.5 text-[13px] text-[var(--p-ink-2)] hover:bg-[var(--p-card-bg)] disabled:opacity-55"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             돌아가기
           </button>
-          <span className="text-base font-bold text-[#2b2521]">
+          <span className="text-base font-bold text-[var(--p-ink)]">
             주문서 직접 입력
           </span>
-          <span className="pl-1 text-[12.5px] text-[#9a8f86]">
+          <span className="pl-1 text-[12.5px] text-[var(--p-ink-3)]">
             {activeCategoryLabel} · {filteredProducts.length}개 품목
           </span>
         </div>
         <div className="flex items-center gap-3.5">
           {/* 주문 건수 + 금액 chip */}
-          <div className="flex items-center gap-2 rounded-full border border-[#ecdcd5] bg-[#f6efea] px-4 py-1.5">
-            <span className="text-[12.5px] text-[#8a7066]">
+          <div className="flex items-center gap-2 rounded-full border border-[var(--p-card-bg)] bg-[var(--p-card-bg)] px-4 py-1.5">
+            <span className="text-[12.5px] text-[var(--p-ink-2)]">
               {orderSummary.count}건
             </span>
-            <span className="h-[11px] w-px bg-[#dcc7be]" />
-            <span className="text-[13px] font-bold text-[#6B1F2A]">
+            <span className="h-[11px] w-px bg-[var(--p-line)]" />
+            <span className="text-[13px] font-bold text-[var(--p-brand)]">
               {krw(orderSummary.total)}
             </span>
           </div>
@@ -389,7 +389,7 @@ export function CustomerOrderInput({
             type="button"
             onClick={handleSubmit}
             disabled={submitDisabled}
-            className="inline-flex items-center gap-1.5 rounded-md bg-[#6B1F2A] px-4 py-1.5 text-[13.5px] font-semibold text-white shadow-[0_2px_8px_rgba(107,31,42,0.20)] hover:bg-[#5c1a24] disabled:cursor-not-allowed disabled:opacity-55"
+            className="inline-flex items-center gap-1.5 rounded-md bg-[var(--p-brand)] px-4 py-1.5 text-[13.5px] font-semibold text-white shadow-[0_2px_8px_rgba(107,31,42,0.20)] hover:bg-[var(--p-brand-deep)] disabled:cursor-not-allowed disabled:opacity-55"
           >
             {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             주문서 만들기
@@ -400,8 +400,8 @@ export function CustomerOrderInput({
       {/* ── 본문: 사이드바 + 제품 영역 ── */}
       <div className="flex min-h-0 flex-1">
         {/* 카테고리 사이드바 */}
-        <nav className="w-52 shrink-0 overflow-y-auto border-r border-[#ece7e2] bg-white py-3">
-          <div className="px-[18px] pb-2.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#b3a89f]">
+        <nav className="w-52 shrink-0 overflow-y-auto border-r border-[var(--p-card-bg)] bg-[var(--p-card-bg)] py-3">
+          <div className="px-[18px] pb-2.5 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--p-ink-3)]">
             카테고리
           </div>
           {categoryOptions.map((cat) => {
@@ -413,16 +413,16 @@ export function CustomerOrderInput({
                 onClick={() => setCategory(cat.id)}
                 className={`my-px flex w-full items-center justify-between border-l-[3px] px-[18px] py-2.5 text-left text-[12.5px] transition-colors ${
                   isActive
-                    ? 'border-[#6B1F2A] bg-[#f9f0f1] font-semibold text-[#6B1F2A]'
-                    : 'border-transparent font-medium text-[#6b6058] hover:bg-[#faf6f5]'
+                    ? 'border-[var(--p-brand)] bg-[var(--p-card-bg)] font-semibold text-[var(--p-brand)]'
+                    : 'border-transparent font-medium text-[var(--p-ink-2)] hover:bg-[var(--p-card-bg)]'
                 }`}
               >
                 <span className="truncate">{cat.label}</span>
                 <span
                   className={`shrink-0 rounded-full px-[7px] py-px text-[10.5px] ${
                     isActive
-                      ? 'bg-[#6B1F2A] text-white'
-                      : 'bg-[#f1ece7] text-[#a89e95]'
+                      ? 'bg-[var(--p-brand)] text-white'
+                      : 'bg-[var(--p-card-bg)] text-[var(--p-ink-3)]'
                   }`}
                 >
                   {cat.count}
@@ -435,29 +435,29 @@ export function CustomerOrderInput({
         {/* 제품 목록 영역 */}
         <main className="flex min-w-0 flex-1 flex-col">
           {/* 카테고리 타이틀 + 검색 */}
-          <div className="flex h-12 shrink-0 items-center justify-between border-b border-[#ece7e2] bg-[#faf8f6] px-[22px]">
+          <div className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--p-card-bg)] bg-[var(--p-card-bg)] px-[22px]">
             <div className="flex items-baseline gap-2.5">
-              <span className="text-[15px] font-bold text-[#2b2521]">
+              <span className="text-[15px] font-bold text-[var(--p-ink)]">
                 {activeCategoryLabel}
               </span>
-              <span className="text-xs text-[#9a8f86]">
+              <span className="text-xs text-[var(--p-ink-3)]">
                 {activeProducts.length}개 품목
               </span>
             </div>
-            <div className="flex items-center gap-2 rounded-lg border border-[#e3dcd5] bg-white px-3 py-1.5">
-              <Search className="h-[13px] w-[13px] text-[#a89e95]" />
+            <div className="flex items-center gap-2 rounded-lg border border-[var(--p-line)] bg-[var(--p-card-bg)] px-3 py-1.5">
+              <Search className="h-[13px] w-[13px] text-[var(--p-ink-3)]" />
               <input
                 type="text"
                 placeholder="제품명 또는 코드 검색"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-auto w-48 border-0 bg-transparent p-0 text-[12.5px] text-[#2b2521] placeholder:text-[#b9aea5] outline-none"
+                className="h-auto w-48 border-0 bg-transparent p-0 text-[12.5px] text-[var(--p-ink)] placeholder:text-[var(--p-ink-3)] outline-none"
               />
             </div>
           </div>
 
           {/* 테이블 헤더 — 컬럼: 제품명 / 수량 / 재고 / 공급가 / 판매가 */}
-          <div className="flex h-9 shrink-0 items-center border-b border-[#ece7e2] bg-white px-[22px] text-[11.5px] font-semibold uppercase tracking-wide text-[#a89e95]">
+          <div className="flex h-9 shrink-0 items-center border-b border-[var(--p-card-bg)] bg-[var(--p-card-bg)] px-[22px] text-[11.5px] font-semibold uppercase tracking-wide text-[var(--p-ink-3)]">
             <span className="min-w-0 flex-1 pr-3">제품명</span>
             <span className={`${COL_QTY} shrink-0 text-center`}>수량</span>
             <span className={`${COL_STOCK} shrink-0 text-center`}>재고</span>
@@ -466,14 +466,14 @@ export function CustomerOrderInput({
           </div>
 
           {/* 제품 행 목록 (스크롤) */}
-          <div className="min-h-0 flex-1 overflow-y-auto bg-white">
+          <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--p-card-bg)]">
             {productsQuery.isLoading && (
-              <div className="py-10 text-center text-[13px] text-[#78716C]">
+              <div className="py-10 text-center text-[13px] text-[var(--p-ink-3)]">
                 불러오는 중…
               </div>
             )}
             {!productsQuery.isLoading && filteredProducts.length === 0 && (
-              <div className="py-10 text-center text-[13px] text-[#78716C]">
+              <div className="py-10 text-center text-[13px] text-[var(--p-ink-3)]">
                 표시할 제품이 없습니다.
               </div>
             )}
@@ -490,24 +490,24 @@ export function CustomerOrderInput({
               const rowBgClass = isOut
                 ? 'opacity-60'
                 : qty > 0
-                  ? 'bg-[#edf7ef]'
-                  : 'hover:bg-[#f9f0f1]';
+                  ? 'bg-[var(--p-success-wash)]'
+                  : 'hover:bg-[var(--p-card-bg)]';
               return (
                 <div
                   key={p.id}
-                  className={`flex h-11 items-center border-b border-[#f3efea] px-[22px] text-[13px] transition-colors ${rowBgClass}`}
+                  className={`flex h-11 items-center border-b border-[var(--p-card-bg)] px-[22px] text-[13px] transition-colors ${rowBgClass}`}
                 >
                   {/* 제품명 + 코드 — flex-1 로 남은 공간 차지, 우측 컬럼은 항상 같은 위치 stick */}
                   <div className="flex min-w-0 flex-1 flex-col gap-px pr-3">
                     <span
                       className={`truncate text-[13px] font-medium ${
-                        isOut ? 'text-[#a89e95] line-through' : 'text-[#2b2521]'
+                        isOut ? 'text-[var(--p-ink-3)] line-through' : 'text-[var(--p-ink)]'
                       }`}
                       title={p.name}
                     >
                       {p.name}
                     </span>
-                    <span className="font-mono text-[10.5px] text-[#bdb3aa]">
+                    <span className="font-mono text-[10.5px] text-[var(--p-ink-3)]">
                       {p.code}
                     </span>
                   </div>
@@ -523,10 +523,10 @@ export function CustomerOrderInput({
                       onChange={(e) => updateQty(p.id, e.target.value)}
                       className={`h-7 w-[58px] rounded-md px-2 text-right text-[13px] outline-none transition-colors ${
                         isOut
-                          ? 'cursor-not-allowed border border-[#ece6e1] bg-[#f3efec] text-[#c3b9b0]'
+                          ? 'cursor-not-allowed border border-[var(--p-card-bg)] bg-[var(--p-card-bg)] text-[var(--p-ink-4)]'
                           : qty > 0
-                            ? 'border-[1.5px] border-[#16a34a] bg-white font-semibold text-[#15803d]'
-                            : 'border border-[#ddd5cf] bg-white focus:border-[#6B1F2A]'
+                            ? 'border-[1.5px] border-[var(--p-success)] bg-[var(--p-card-bg)] font-semibold text-[var(--p-success)]'
+                            : 'border border-[var(--p-line)] bg-[var(--p-card-bg)] focus:border-[var(--p-brand)]'
                       }`}
                     />
                   </div>
@@ -536,10 +536,10 @@ export function CustomerOrderInput({
                     <span
                       className={`inline-block rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${
                         isOut
-                          ? 'bg-[#fdeaea] text-[#c0392b]'
+                          ? 'bg-[var(--p-danger-wash)] text-[var(--p-danger)]'
                           : isLow
-                            ? 'bg-[#fef3e2] text-[#b45309]'
-                            : 'bg-[#e7f6ec] text-[#16803c]'
+                            ? 'bg-[var(--p-warning-wash)] text-[var(--p-warning-strong)]'
+                            : 'bg-[var(--p-success-wash)] text-[var(--p-success)]'
                       }`}
                       title={`현재 재고 ${stock}`}
                     >
@@ -549,14 +549,14 @@ export function CustomerOrderInput({
 
                   {/* 공급가 */}
                   <span
-                    className={`${COL_PRICE} shrink-0 text-right text-[12.5px] text-[#7a6f66]`}
+                    className={`${COL_PRICE} shrink-0 text-right text-[12.5px] text-[var(--p-ink-2)]`}
                   >
                     {supply > 0 ? krw(supply) : '—'}
                   </span>
 
                   {/* 판매가 */}
                   <span
-                    className={`${COL_PRICE} shrink-0 text-right text-[12.5px] font-semibold text-[#2b2521]`}
+                    className={`${COL_PRICE} shrink-0 text-right text-[12.5px] font-semibold text-[var(--p-ink)]`}
                   >
                     {krw(p.sell_price)}
                   </span>
@@ -566,19 +566,19 @@ export function CustomerOrderInput({
           </div>
 
           {/* 하단 고정 푸터 */}
-          <footer className="flex h-16 shrink-0 items-center justify-between border-t border-[#ece7e2] bg-white px-6 shadow-[0_-3px_12px_rgba(40,20,10,0.04)]">
+          <footer className="flex h-16 shrink-0 items-center justify-between border-t border-[var(--p-card-bg)] bg-[var(--p-card-bg)] px-6 shadow-[0_-3px_12px_rgba(40,20,10,0.04)]">
             <div className="flex items-center gap-[18px]">
               <div className="flex items-baseline gap-1.5">
-                <span className="text-[12.5px] text-[#9a8f86]">선택 품목</span>
-                <span className="text-base font-bold text-[#6B1F2A]">
+                <span className="text-[12.5px] text-[var(--p-ink-3)]">선택 품목</span>
+                <span className="text-base font-bold text-[var(--p-brand)]">
                   {orderSummary.count}
                 </span>
-                <span className="text-[12.5px] text-[#9a8f86]">개</span>
+                <span className="text-[12.5px] text-[var(--p-ink-3)]">개</span>
               </div>
-              <span className="h-[18px] w-px bg-[#e6ddd6]" />
+              <span className="h-[18px] w-px bg-[var(--p-card-bg)]" />
               <div className="flex items-baseline gap-1.5">
-                <span className="text-[12.5px] text-[#9a8f86]">합계</span>
-                <span className="text-xl font-bold text-[#2b2521]">
+                <span className="text-[12.5px] text-[var(--p-ink-3)]">합계</span>
+                <span className="text-xl font-bold text-[var(--p-ink)]">
                   {krw(orderSummary.total)}
                 </span>
               </div>
@@ -587,7 +587,7 @@ export function CustomerOrderInput({
               type="button"
               onClick={handleSubmit}
               disabled={submitDisabled}
-              className="inline-flex items-center gap-2 rounded-md bg-[#6B1F2A] px-7 py-3 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(107,31,42,0.20)] hover:bg-[#5c1a24] disabled:cursor-not-allowed disabled:opacity-55"
+              className="inline-flex items-center gap-2 rounded-md bg-[var(--p-brand)] px-7 py-3 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(107,31,42,0.20)] hover:bg-[var(--p-brand-deep)] disabled:cursor-not-allowed disabled:opacity-55"
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
               주문서 만들기

@@ -87,19 +87,45 @@
        라이트 값은 포털 기존 inline hex 그대로 매핑 (시각 결과 동일 유지).
        1단계: 헤더 영역 토큰만 우선 정의. 본문/모달/입력은 후속 단계에서 추가.
        ─────────────────────────────────────────────────────────────────── */
+    /* — 헤더 영역 (1단계) — */
     --p-bg-header: #FFFFFF;
     --p-line-header: #E7E5E4;
     --p-ink-strong: #1C1917;       /* 로고/주요 텍스트 */
     --p-ink: #1C1917;
     --p-ink-2: #44403C;            /* 본문/버튼 라벨 */
     --p-ink-3: #78716C;            /* 보조/inactive */
-    --p-surface: #FFFFFF;          /* 버튼 배경 */
-    --p-surface-2: #F5F5F4;        /* 토글 컨테이너 배경 */
+    --p-ink-4: #9CA3AF;            /* 가장 옅은 텍스트 */
+    --p-surface: #FFFFFF;          /* 헤더 토글 active / 입력 필드 배경 */
+    --p-surface-2: #F5F5F4;        /* 헤더 토글 컨테이너 / 옅은 배경 */
     --p-line-strong: #D6D3D1;      /* 버튼 보더 */
     --p-info-wash: #EFF6FF;        /* 거래처명 배지 배경 */
     --p-info: #1D4ED8;             /* 거래처명 배지 텍스트 */
     --p-brand: #6B1F2A;
+    --p-brand-deep: #541620;       /* hover/pressed */
     --p-shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.05);
+
+    /* — 본문 영역 (2단계) — */
+    --p-bg: #F5F5F4;               /* 페이지 배경 */
+    --p-card-bg: #FFFFFF;          /* 카드 배경 */
+    --p-line: #E5E7EB;             /* 일반 보더 (gray-200) */
+    --p-line-soft: #F3F4F6;        /* 옅은 구분선 (gray-100) */
+    --p-input-bg: #FFFFFF;
+    --p-input-border: #CBD5E1;     /* 입력 필드 보더 */
+    --p-success-wash: #DCFCE7;
+    --p-success: #15803D;
+    --p-warning-wash: #FEF3C7;
+    --p-warning: #A16207;
+    --p-warning-strong: #B45309;   /* 진한 경고/포인트 */
+    --p-warning-solid: #f59e0b;    /* 재고부족 강조 solid */
+    --p-danger-wash: #FEE2E2;
+    --p-danger: #B91C1C;
+    --p-danger-solid: #ef4444;     /* 품절 강조 solid */
+    --p-danger-strong: #991B1B;
+    --p-danger-soft-bg: #FEF2F2;
+    --p-danger-soft-border: #FECACA;
+    --p-info-soft-bg: #DBEAFE;
+    --p-info-strong-border: #BFDBFE;
+    --p-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);
 
     /* Fonts */
     --font-kr: 'Pretendard Variable', Pretendard, -apple-system, system-ui, sans-serif;
@@ -404,19 +430,46 @@
      1단계: 헤더 영역 토큰만 우선 오버라이드.
      ─────────────────────────────────────────────────────────────────── */
   html[data-portal-theme='dark-gray'] {
-    --p-bg-header: #3A3A38;        /* OPS dark-gray --surface */
-    --p-line-header: #4A4A47;      /* OPS dark-gray --line */
-    --p-ink-strong: #F1EFE8;       /* OPS dark-gray --ink */
+    /* — 헤더 — */
+    --p-bg-header: #3A3A38;
+    --p-line-header: #4A4A47;
+    --p-ink-strong: #F1EFE8;
     --p-ink: #F1EFE8;
-    --p-ink-2: #C8C5BB;            /* OPS dark-gray --ink-2 */
-    --p-ink-3: #95918A;            /* OPS dark-gray --ink-3 */
-    --p-surface: #2C2C2A;          /* OPS dark-gray --bg — 헤더 안 한 단계 어두움 */
+    --p-ink-2: #C8C5BB;
+    --p-ink-3: #95918A;
+    --p-ink-4: #67645E;
+    --p-surface: #2C2C2A;          /* 헤더 토글 active / 입력 배경 */
     --p-surface-2: #2C2C2A;
-    --p-line-strong: #5A5A57;      /* OPS dark-gray --line-strong */
-    --p-info-wash: #243140;        /* OPS dark-gray --info-wash */
-    --p-info: #95B7D1;             /* OPS dark-gray --info */
-    --p-brand: #9A4250;            /* OPS dark-gray --brand */
+    --p-line-strong: #5A5A57;
+    --p-info-wash: #243140;
+    --p-info: #95B7D1;
+    --p-brand: #9A4250;
+    --p-brand-deep: #7A3340;
     --p-shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.25);
+
+    /* — 본문 — */
+    --p-bg: #2C2C2A;               /* 페이지 배경 (OPS dark-gray --bg 동일) */
+    --p-card-bg: #3A3A38;          /* 카드 배경 (OPS dark-gray --surface 동일) */
+    --p-line: #4A4A47;             /* 일반 보더 */
+    --p-line-soft: #2C2C2A;        /* 옅은 구분선 — 카드 안 배경과 거의 동일 */
+    --p-input-bg: #2C2C2A;
+    --p-input-border: #4A4A47;
+    /* 의미색 — 다크 위 시인성 확보 + 의미 유지 (OPS dark-gray 의미색 동일) */
+    --p-success-wash: #2A3527;
+    --p-success: #95BB89;
+    --p-warning-wash: #3D311E;
+    --p-warning: #DDB874;
+    --p-warning-strong: #E6BC72;
+    --p-warning-solid: #E6A946;    /* 재고부족 — 다크에서도 주황 톤 시인 */
+    --p-danger-wash: #3D2521;
+    --p-danger: #DC8C81;
+    --p-danger-solid: #E89084;     /* 품절 — 다크에서도 빨강 톤 시인 */
+    --p-danger-strong: #E89084;
+    --p-danger-soft-bg: #3A2421;
+    --p-danger-soft-border: #5A352F;
+    --p-info-soft-bg: #243140;
+    --p-info-strong-border: #2F4358;
+    --p-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.25);
   }
 
   a {

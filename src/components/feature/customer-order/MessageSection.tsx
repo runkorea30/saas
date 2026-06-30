@@ -10,7 +10,7 @@ export interface MessageSectionProps {
 
 export function MessageSection({ value, onChange }: MessageSectionProps) {
   return (
-    <section className="flex h-full flex-col rounded-lg border border-[#ece6e0] bg-white p-4 shadow-sm">
+    <section className="flex h-full flex-col rounded-lg border border-[var(--p-card-bg)] bg-[var(--p-card-bg)] p-4 shadow-sm">
       <div className="mb-2.5">
         <SectionHeading title="전달 메시지" />
       </div>
@@ -19,7 +19,7 @@ export function MessageSection({ value, onChange }: MessageSectionProps) {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="담당자에게 전달할 메시지 (선택)"
-        className="mt-auto h-[38px] w-full rounded-md border border-[#e2dbd4] bg-white px-3 text-[13px] text-[#2b2521] placeholder:text-[#b9aea5] focus:border-[#6B1F2A] focus:outline-none focus:ring-2 focus:ring-[#6B1F2A]/15"
+        className="mt-auto h-[38px] w-full rounded-md border border-[var(--p-line)] bg-[var(--p-card-bg)] px-3 text-[13px] text-[var(--p-ink)] placeholder:text-[var(--p-ink-3)] focus:border-[var(--p-brand)] focus:outline-none focus:ring-2 focus:ring-[var(--p-brand)]/15"
       />
     </section>
   );
