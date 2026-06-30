@@ -1242,6 +1242,12 @@ function TrackingNumberSection({
     initialTrackingNumbers.length > 0 ? initialTrackingNumbers : [''],
   );
   const [saving, setSaving] = useState(false);
+  // 마지막 저장 시점의 값 — 변경 여부 판단(저장 버튼 활성/비활성)에 사용.
+  const [savedSnapshot, setSavedSnapshot] = useState<string[]>(
+    initialTrackingNumbers.length > 0 ? initialTrackingNumbers : [''],
+  );
+
+  const isDirty = JSON.stringify(numbers) !== JSON.stringify(savedSnapshot);
 
   const persist = async (next: string[]) => {
     const cleaned = next.map((n) => n.trim()).filter(Boolean);
@@ -1252,15 +1258,19 @@ function TrackingNumberSection({
       .eq('id', orderId);
     queryClient.invalidateQueries({ queryKey: ['orders'] });
     setSaving(false);
+    setSavedSnapshot(next);
   };
+
+  /** 입력값에서 하이픈(-)을 즉시 제거. 숫자/문자 운송장번호 모두 대비해 숫자만 강제하지 않음. */
+  const sanitize = (value: string): string => value.replace(/-/g, '');
 
   const handleChange = (idx: number, value: string) => {
     const next = [...numbers];
-    next[idx] = value;
+    next[idx] = sanitize(value);
     setNumbers(next);
   };
 
-  const handleBlurSave = () => {
+  const handleSaveClick = () => {
     void persist(numbers);
   };
 
@@ -1309,7 +1319,6 @@ function TrackingNumberSection({
             type="text"
             value={num}
             onChange={(e) => handleChange(idx, e.target.value)}
-            onBlur={handleBlurSave}
             placeholder="운송장 번호 입력"
             style={{
               flex: 1,
@@ -1342,21 +1351,41 @@ function TrackingNumberSection({
         </div>
       ))}
 
-      <button
-        type="button"
-        onClick={handleAddRow}
-        style={{
-          alignSelf: 'flex-start',
-          fontSize: 11,
-          color: '#2563EB',
-          background: 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          padding: '2px 0',
-        }}
-      >
-        + 송장번호 추가
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2 }}>
+        <button
+          type="button"
+          onClick={handleAddRow}
+          style={{
+            fontSize: 11,
+            color: '#2563EB',
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '2px 0',
+          }}
+        >
+          + 송장번호 추가
+        </button>
+        <div style={{ flex: 1 }} />
+        <button
+          type="button"
+          onClick={handleSaveClick}
+          disabled={!isDirty || saving}
+          style={{
+            height: 26,
+            padding: '0 12px',
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: '#fff',
+            background: !isDirty || saving ? '#94A3B8' : '#1C1917',
+            border: 'none',
+            borderRadius: 4,
+            cursor: !isDirty || saving ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {saving ? '저장중…' : '저장하기'}
+        </button>
+      </div>
     </div>
   );
 }
