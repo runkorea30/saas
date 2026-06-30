@@ -223,14 +223,16 @@ export function OrderDetailPane({
               product_code: p.code,
               product_name: p.name,
               sell_price: p.sell_price,
-              unit_price: p.sell_price,
+              // 🔴 unit_price 는 공급가 기준 — 화면 표시/저장 금액 모두 이 값을 사용.
+              //    판매가(sell_price)는 참고용 컬럼으로만 별도 유지.
+              unit_price: supplyPrice,
               supply_price: supplyPrice,
               grade_a: p.grade_a ?? 0,
               grade_b: p.grade_b ?? 0,
               grade_c: p.grade_c ?? 0,
               grade_d: p.grade_d ?? 0,
               grade_e: p.grade_e ?? 0,
-              amount: item.quantity * p.sell_price,
+              amount: item.quantity * supplyPrice,
               _dirty: true,
             }
           : item,

@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Calendar, Download, FileText, Flag, Plus, Users } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useResizableSplit } from '@/hooks/useResizableSplit';
@@ -67,6 +67,7 @@ function toIso(d: Date): string {
 export function OrdersPage() {
   const { companyId, isLoading: companyLoading } = useCompany();
   const location = useLocation();
+  const navigate = useNavigate();
   const incomingOrderId = (location.state as { selectedOrderId?: string } | null)
     ?.selectedOrderId;
 
@@ -499,7 +500,20 @@ export function OrdersPage() {
           <OrderListTable
             orders={pageRows}
             selectedId={selectedId}
-            onSelect={setSelectedId}
+            onSelect={(id: string) => {
+              const target = pageRows.find((o) => o.id === id);
+              const isImagePending =
+                !!target?.attachment_url && (target?.items?.length ?? 0) === 0;
+              if (isImagePending && target?.customer?.id) {
+                navigate(
+                  `/sales/order-entry?customerId=${target.customer.id}` +
+                    `&attachmentUrl=${encodeURIComponent(target.attachment_url!)}` +
+                    `&sourceOrderId=${target.id}`,
+                );
+                return;
+              }
+              setSelectedId(id);
+            }}
             checked={checked}
             onToggleChecked={toggleOne}
             onTogglePageChecked={togglePage}

@@ -124,6 +124,8 @@ export function OrderEntryPage() {
   const [customerId, setCustomerId] = useState(
     () => searchParams.get('customerId') ?? '',
   );
+  const attachmentUrlFromQuery = searchParams.get('attachmentUrl');
+  const sourceOrderId = searchParams.get('sourceOrderId');
   const [orderDate, setOrderDate] = useState<string>(todayKstDateString());
   const [memo, setMemo] = useState('');
   const [recentCustomerIds, setRecentCustomerIds] = useState<string[]>(() =>
@@ -143,7 +145,9 @@ export function OrderEntryPage() {
 
   // ───── 파일 업로드 ─────
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(
+    () => attachmentUrlFromQuery,
+  );
 
   // ───── 저장 ─────
   const [isSaving, setIsSaving] = useState(false);
@@ -166,7 +170,9 @@ export function OrderEntryPage() {
 
   // ───── 미리보기 cleanup ─────
   useEffect(() => {
-    if (!uploadedFile || !uploadedFile.type.startsWith('image/')) {
+    // 거래처가 보낸 첨부 이미지(URL 쿼리)는 별도 로직 — 로컬 파일 업로드 시에만 동작.
+    if (!uploadedFile) return;
+    if (!uploadedFile.type.startsWith('image/')) {
       setPreviewUrl(null);
       return;
     }
@@ -582,6 +588,12 @@ export function OrderEntryPage() {
       });
       if (error) throw error;
 
+      // 🔴 이미지 대기 주문에서 진입한 경우 — 원본 빈 주문(품목 0건)을 삭제해 중복 방지.
+      //    새로 저장된 주문(data)이 실제 내용을 담고 있으므로 빈 주문은 더 이상 필요 없음.
+      if (sourceOrderId) {
+        await supabase.from('orders').delete().eq('id', sourceOrderId);
+      }
+
       setRecentCustomerIds(writeRecent(customerId));
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['orders'] }),
@@ -611,6 +623,7 @@ export function OrderEntryPage() {
     stockSummary,
     products,
     selectedCustomer,
+    sourceOrderId,
   ]);
 
   // ───── Ctrl+S 전역 단축키 ─────
@@ -1076,16 +1089,35 @@ export function OrderEntryPage() {
               alt="주문서 미리보기"
               className="absolute inset-0 w-full h-full object-contain p-2"
             />
-            <button
-              type="button"
-              onClick={() => {
-                setUploadedFile(null);
-                fileInputRef.current?.click();
-              }}
-              className="absolute top-3 right-3 px-2 py-1 text-xs bg-black/50 text-white rounded hover:bg-black/70 transition-colors"
-            >
-              파일 교체
-            </button>
+            <div className="absolute top-3 right-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  // 🔴 완전히 분리된 새 창으로 오픈 — 탭이 아닌 별도 윈도우.
+                  //    width/height 지정 시 브라우저가 새 창으로 띄움(탭 강제 X 가능).
+                  window.open(
+                    previewUrl,
+                    '_blank',
+                    'noopener,noreferrer,width=720,height=900,resizable=yes,scrollbars=yes',
+                  );
+                }}
+                className="px-2 py-1 text-xs bg-black/50 text-white rounded hover:bg-black/70 transition-colors"
+              >
+                새 창에서 보기
+              </button>
+              {!attachmentUrlFromQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUploadedFile(null);
+                    fileInputRef.current?.click();
+                  }}
+                  className="px-2 py-1 text-xs bg-black/50 text-white rounded hover:bg-black/70 transition-colors"
+                >
+                  파일 교체
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <div
