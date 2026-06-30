@@ -628,6 +628,7 @@ export function OrderDetailPane({
           </div>
         )}
         <TrackingNumberSection
+          key={order.id}
           orderId={order.id}
           initialTrackingNumbers={order.tracking_numbers ?? []}
         />
