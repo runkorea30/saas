@@ -20,6 +20,7 @@ import { OpsLoginPage } from '@/pages/OpsLoginPage';
 import { HomePage } from '@/pages/HomePage';
 import { OrdersPage } from '@/pages/sales/OrdersPage';
 import { OrderEntryPage } from '@/pages/sales/OrderEntryPage';
+import { CustomerUploadsPage } from '@/pages/sales/CustomerUploadsPage';
 import { SalesAnalysisPage } from '@/pages/sales/SalesAnalysisPage';
 import { CustomersPage } from '@/pages/settings/CustomersPage';
 import { CustomerGroupsPage } from '@/pages/settings/CustomerGroupsPage';
@@ -86,6 +87,7 @@ function App() {
             <Route index element={<Navigate to="/sales/orders" replace />} />
             <Route path="orders" element={<OrdersPage />} />
             <Route path="order-entry" element={<OrderEntryPage />} />
+            <Route path="customer-uploads" element={<CustomerUploadsPage />} />
             <Route path="analysis" element={<SalesAnalysisPage />} />
             <Route path="invoices" element={<PlaceholderPage />} />
             <Route path="billing" element={<BillingPage />} />

@@ -63,6 +63,30 @@ interface ParsedExcelItem {
  *    · 코드(B열, idx=1) 비어 있거나 수량(C열, idx=2) <=0 → skip
  *  - 컬럼 인덱스 (0 base): 0=제품명, 1=코드, 2=수량, 3=판매가, 4=공급가, 5=합계
  */
+/**
+ * 거래처가 올린 원본 파일(이미지/PDF/엑셀)을 Storage에 업로드하고 public URL을 반환.
+ * 버킷: order-photos (이미 존재, public, anon 권한 부여됨).
+ * 경로: customer-uploads/{companyId}/{customerId}/{timestamp}_{원본파일명}
+ */
+async function uploadOrderFile(
+  file: File,
+  companyId: string,
+  customerId: string,
+): Promise<string | null> {
+  const safeName = file.name.replace(/[^\w.\-가-힣]/g, '_');
+  const path = `customer-uploads/${companyId}/${customerId}/${Date.now()}_${safeName}`;
+  const { error } = await supabase.storage
+    .from('order-photos')
+    .upload(path, file, { contentType: file.type || undefined });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error('[customer-file.storageUpload]', error);
+    return null;
+  }
+  const { data } = supabase.storage.from('order-photos').getPublicUrl(path);
+  return data.publicUrl;
+}
+
 async function parseOrderExcel(file: File): Promise<ParsedExcelItem[]> {
   const buffer = await file.arrayBuffer();
   const wb = XLSX.read(buffer, { type: 'array' });
@@ -1061,7 +1085,14 @@ function LeftPanel({
         });
       }
 
-      // 4) customer_order_uploads — 모든 경우(엑셀/이미지/PDF) 기록
+      // 4) 원본 파일을 Storage에 업로드 (이미지/PDF/엑셀 공통 — 분쟁 대비 원본 보관).
+      const uploadedFileUrl = await uploadOrderFile(
+        file,
+        customer.companyId,
+        customer.customerId,
+      );
+
+      // 5) customer_order_uploads — 모든 경우(엑셀/이미지/PDF) 기록
       const { error: uploadErr } = await supabase
         .from('customer_order_uploads')
         .insert({
@@ -1069,14 +1100,16 @@ function LeftPanel({
           customer_id: customer.customerId,
           upload_type: 'file',
           file_name: file.name,
-          file_url: null,
+          file_url: uploadedFileUrl,
           message: message || null,
           shipping_info:
             filledShipping.length > 0
               ? (filledShipping as unknown as Json)
               : null,
           items: parsed.length > 0 ? (parsed as unknown as Json) : null,
-          status: 'pending',
+          // 엑셀 파싱 성공(주문 자동생성)이면 OPS가 별도 확인 불필요 → done.
+          // 이미지/PDF(미파싱)면 OPS가 직접 보고 수동 입력해야 함 → pending.
+          status: matched.length > 0 ? 'done' : 'pending',
         });
       // eslint-disable-next-line no-console
       console.log('[customer-file.uploads]', { uploadErr });

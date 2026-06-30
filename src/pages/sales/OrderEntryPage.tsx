@@ -14,7 +14,7 @@
  * - Ctrl+S 전역 저장
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
@@ -120,7 +120,10 @@ export function OrderEntryPage() {
 
   // ───── 헤더 ─────
   const [orderType, setOrderType] = useState<OrderType>('일반주문');
-  const [customerId, setCustomerId] = useState('');
+  const [searchParams] = useSearchParams();
+  const [customerId, setCustomerId] = useState(
+    () => searchParams.get('customerId') ?? '',
+  );
   const [orderDate, setOrderDate] = useState<string>(todayKstDateString());
   const [memo, setMemo] = useState('');
   const [recentCustomerIds, setRecentCustomerIds] = useState<string[]>(() =>
