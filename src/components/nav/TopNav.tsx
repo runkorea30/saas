@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Filter, LogOut } from 'lucide-react';
 import { isSectionActive, navSections } from './navConfig';
+import { ThemeToggle } from './ThemeToggle';
 import { useCompany } from '@/hooks/useCompany';
 import {
   useOrderNeedEstimate,
@@ -100,7 +101,7 @@ export function TopNav({ onLogout }: { onLogout: () => Promise<void> }) {
                   className={
                     basis === b
                       ? 'px-2 py-1 bg-brand text-white transition-colors'
-                      : 'px-2 py-1 text-ink-3 hover:bg-stone-50 transition-colors'
+                      : 'px-2 py-1 text-ink-3 hover:bg-surface-2 hover:text-ink transition-colors'
                   }
                 >
                   {b === '1m' ? '1개월' : '3개월'}
@@ -130,8 +131,11 @@ export function TopNav({ onLogout }: { onLogout: () => Promise<void> }) {
 
             {filterOpen && (
               <div
-                className="absolute top-full right-0 mt-1 bg-white border border-line rounded-lg shadow-lg p-3 z-50 min-w-[200px] max-h-[400px] overflow-auto"
-                style={{ background: 'var(--surface)' }}
+                className="absolute top-full right-0 mt-1 border border-line rounded-lg p-3 z-50 min-w-[200px] max-h-[400px] overflow-auto"
+                style={{
+                  background: 'var(--surface)',
+                  boxShadow: 'var(--shadow-lg)',
+                }}
               >
                 <p className="text-xs font-medium text-ink-2 mb-2">
                   발주 예상 포함 카테고리
@@ -176,17 +180,20 @@ export function TopNav({ onLogout }: { onLogout: () => Promise<void> }) {
           </div>
         </nav>
 
-        <button
-          type="button"
-          onClick={() => {
-            void onLogout();
-          }}
-          className="ml-auto inline-flex items-center gap-1.5 h-7 px-3 rounded-md border border-line text-xs text-ink-3 hover:text-ink hover:bg-stone-50 transition-colors"
-          title="로그아웃"
-        >
-          <LogOut size={12} />
-          로그아웃
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <ThemeToggle />
+          <button
+            type="button"
+            onClick={() => {
+              void onLogout();
+            }}
+            className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md border border-line text-xs text-ink-3 hover:text-ink hover:bg-surface-2 transition-colors"
+            title="로그아웃"
+          >
+            <LogOut size={12} />
+            로그아웃
+          </button>
+        </div>
       </div>
     </header>
   );

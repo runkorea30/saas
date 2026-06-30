@@ -176,7 +176,7 @@ function ReconRow({ r }: { r: MonthlyReconciliation }) {
       <td className="px-3 py-2 num text-right text-[var(--ink)]">
         <div>₩{fmtWon(r.deposit_total)}</div>
         {r.deposit_dates.length > 0 && (
-          <div className="text-xs text-gray-500">
+          <div className="text-xs text-ink-3">
             입금일: {r.deposit_dates.map((d) => d.slice(5)).join(', ')}
           </div>
         )}

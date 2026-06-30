@@ -5,8 +5,13 @@
 import { useState, type FormEvent } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { UseOpsAuthResult } from '@/hooks/useOpsAuth';
+import { useForceLightTheme } from '@/hooks/useForceLightTheme';
 
 export function OpsLoginPage({ onLogin }: { onLogin: UseOpsAuthResult['login'] }) {
+  // 🟠 로그인 페이지는 inline hex 톤이 다수 — 4종 테마 토큰화 비용 크고
+  //    첫 진입 화면이라 라이트 고정이 UX 표준. 로그인 성공 후 OPS Shell 에서
+  //    저장된 테마가 즉시 적용됨.
+  useForceLightTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);

@@ -1634,11 +1634,11 @@ function OrdersTab({
 
 function StatusTag({ status }: { status: string }) {
   const map: Record<string, { label: string; bg: string; color: string }> = {
-    confirmed: { label: '확정', bg: '#dbeafe', color: '#1d4ed8' },
-    shipped: { label: '배송', bg: '#fef3c7', color: '#a16207' },
-    done: { label: '완료', bg: '#dcfce7', color: '#166534' },
+    confirmed: { label: '확정', bg: 'var(--info-wash)', color: 'var(--info)' },
+    shipped:   { label: '배송', bg: 'var(--warning-wash)', color: 'var(--warning)' },
+    done:      { label: '완료', bg: 'var(--success-wash)', color: 'var(--success)' },
   };
-  const m = map[status] ?? { label: status, bg: '#f3f4f6', color: '#4b5563' };
+  const m = map[status] ?? { label: status, bg: 'var(--surface-2)', color: 'var(--ink-3)' };
   return (
     <span
       style={{
@@ -2013,14 +2013,14 @@ function ReconciliationRow({
 }) {
   const statusMap: Record<string, { label: string; bg: string; color: string }> =
     {
-      연체: { label: '연체', bg: '#fee2e2', color: '#b91c1c' },
-      정산대기: { label: '정산대기', bg: '#dbeafe', color: '#1d4ed8' },
-      정산완료: { label: '입금완료', bg: '#dcfce7', color: '#166534' },
+      연체: { label: '연체', bg: 'var(--danger-wash)', color: 'var(--danger)' },
+      정산대기: { label: '정산대기', bg: 'var(--info-wash)', color: 'var(--info)' },
+      정산완료: { label: '입금완료', bg: 'var(--success-wash)', color: 'var(--success)' },
     };
   const s = statusMap[r.status] ?? {
     label: r.status,
-    bg: '#f3f4f6',
-    color: '#4b5563',
+    bg: 'var(--surface-2)',
+    color: 'var(--ink-3)',
   };
   const diffColor =
     r.difference > 0

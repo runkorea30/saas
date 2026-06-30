@@ -570,7 +570,7 @@ function StatusChip({ status }: { status: 'matched' | 'unmatched' | 'excluded' }
     );
   }
   return (
-    <span className="inline-block rounded-md bg-gray-100 text-gray-500 text-[11px] px-2 py-0.5">
+    <span className="inline-block rounded-md bg-surface-2 text-ink-3 text-[11px] px-2 py-0.5">
       제외
     </span>
   );
@@ -625,9 +625,9 @@ function UploadPreviewModal({ rows, saving, onClose, onSave }: PreviewProps) {
       {stats && (
         <div className="text-[12.5px] text-[var(--ink-2)] mb-3">
           총 <span className="font-medium">{stats.total}건</span> · 자동매칭{' '}
-          <span className="text-green-700 font-medium">{stats.auto}건</span> · 제외{' '}
-          <span className="text-gray-500 font-medium">{stats.excl}건</span> · 미매칭{' '}
-          <span className="text-amber-700 font-medium">{stats.unmatched}건</span>
+          <span className="text-[var(--success)] font-medium">{stats.auto}건</span> · 제외{' '}
+          <span className="text-ink-3 font-medium">{stats.excl}건</span> · 미매칭{' '}
+          <span className="text-[var(--warning)] font-medium">{stats.unmatched}건</span>
         </div>
       )}
       <div
@@ -647,10 +647,10 @@ function UploadPreviewModal({ rows, saving, onClose, onSave }: PreviewProps) {
           <tbody>
             {rows?.map((r, i) => {
               const cls = r.auto_excluded
-                ? 'bg-gray-50 text-gray-400 line-through'
+                ? 'bg-surface-sunken text-ink-4 line-through'
                 : r.matched_customer_id
-                  ? 'bg-green-50'
-                  : 'bg-amber-50';
+                  ? 'bg-success-wash'
+                  : 'bg-warning-wash';
               return (
                 <tr key={i} className={`border-t border-[var(--line)] ${cls}`}>
                   <td className="px-3 py-1.5 num">{r.transaction_date}</td>

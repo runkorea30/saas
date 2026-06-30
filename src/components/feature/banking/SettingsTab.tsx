@@ -276,14 +276,14 @@ function KeywordSection({ keywords }: { keywords: BankExcludeKeyword[] }) {
           keywords.map((k) => (
             <span
               key={k.id}
-              className="inline-flex items-center gap-1 rounded-md bg-gray-100 text-[var(--ink-2)] text-[12px] px-2 py-1"
+              className="inline-flex items-center gap-1 rounded-md bg-surface-2 text-ink-2 text-[12px] px-2 py-1"
             >
               {k.keyword}
               <button
                 type="button"
                 onClick={() => onDelete(k.id)}
                 title="삭제"
-                className="text-gray-400 hover:text-[var(--danger)]"
+                className="text-ink-4 hover:text-[var(--danger)]"
                 disabled={del.isPending}
               >
                 <X size={11} />

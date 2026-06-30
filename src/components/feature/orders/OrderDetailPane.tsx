@@ -695,53 +695,53 @@ export function OrderDetailPane({
             return (
               <div className="mt-2">
                 <div className="mb-1.5 flex items-center gap-1.5">
-                  <span className="inline-flex items-center rounded-full bg-[#dcfce7] px-2 py-0.5 text-[10px] font-semibold text-[#15803d]">
+                  <span className="inline-flex items-center rounded-full bg-success-wash px-2 py-0.5 text-[10px] font-semibold text-[var(--success)]">
                     직송
                   </span>
-                  <span className="text-[11.5px] font-semibold text-[#2b2521]">
+                  <span className="text-[11.5px] font-semibold text-ink">
                     직송 정보 ({rows.length}건)
                   </span>
                 </div>
-                <div className="overflow-x-auto rounded border border-[#e2dcd5]">
+                <div className="overflow-x-auto rounded border border-line">
                   <table className="w-full text-[11px]">
                     <thead>
-                      <tr className="bg-[#f5f1ec] text-[#6b6058]">
-                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">받는사람</th>
-                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">우편번호</th>
-                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">주소</th>
-                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">연락처1</th>
-                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">연락처2</th>
-                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold"></th>
-                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">제품</th>
-                        <th className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5 text-left font-semibold">거래처</th>
+                      <tr className="bg-surface-2 text-ink-3">
+                        <th className="whitespace-nowrap border-r border-line px-2 py-1.5 text-left font-semibold">받는사람</th>
+                        <th className="whitespace-nowrap border-r border-line px-2 py-1.5 text-left font-semibold">우편번호</th>
+                        <th className="whitespace-nowrap border-r border-line px-2 py-1.5 text-left font-semibold">주소</th>
+                        <th className="whitespace-nowrap border-r border-line px-2 py-1.5 text-left font-semibold">연락처1</th>
+                        <th className="whitespace-nowrap border-r border-line px-2 py-1.5 text-left font-semibold">연락처2</th>
+                        <th className="whitespace-nowrap border-r border-line px-2 py-1.5 text-left font-semibold"></th>
+                        <th className="whitespace-nowrap border-r border-line px-2 py-1.5 text-left font-semibold">제품</th>
+                        <th className="whitespace-nowrap border-r border-line px-2 py-1.5 text-left font-semibold">거래처</th>
                         <th className="whitespace-nowrap px-2 py-1.5 text-left font-semibold">신용</th>
                       </tr>
                     </thead>
                     <tbody>
                       {rows.map((row, i) => (
-                        <tr key={i} className="border-t border-[#e2dcd5] bg-white">
-                          <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
+                        <tr key={i} className="border-t border-line bg-surface">
+                          <td className="whitespace-nowrap border-r border-line px-2 py-1.5">
                             {cell(row.name ?? (row as Record<string, unknown>)['받는사람'] ?? row.recipient)}
                           </td>
-                          <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
+                          <td className="whitespace-nowrap border-r border-line px-2 py-1.5">
                             {cell(row.zipcode ?? (row as Record<string, unknown>)['우편번호'] ?? row.zipCode)}
                           </td>
-                          <td className="max-w-[220px] border-r border-[#e2dcd5] px-2 py-1.5">
+                          <td className="max-w-[220px] border-r border-line px-2 py-1.5">
                             {cell(row.address ?? (row as Record<string, unknown>)['주소'])}
                           </td>
-                          <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
+                          <td className="whitespace-nowrap border-r border-line px-2 py-1.5">
                             {cell(row.phone1 ?? (row as Record<string, unknown>)['연락처1'])}
                           </td>
-                          <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
+                          <td className="whitespace-nowrap border-r border-line px-2 py-1.5">
                             {cell(row.phone2 ?? (row as Record<string, unknown>)['연락처2'])}
                           </td>
-                          <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
+                          <td className="whitespace-nowrap border-r border-line px-2 py-1.5">
                             {cell(row.blank ?? (row as Record<string, unknown>)['메모'])}
                           </td>
-                          <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
+                          <td className="whitespace-nowrap border-r border-line px-2 py-1.5">
                             {cell(row.product ?? (row as Record<string, unknown>)['제품'])}
                           </td>
-                          <td className="whitespace-nowrap border-r border-[#e2dcd5] px-2 py-1.5">
+                          <td className="whitespace-nowrap border-r border-line px-2 py-1.5">
                             {cell(row.customer ?? (row as Record<string, unknown>)['거래처'])}
                           </td>
                           <td className="whitespace-nowrap px-2 py-1.5">

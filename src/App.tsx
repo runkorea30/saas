@@ -64,12 +64,12 @@ function App() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: '#F5F5F4',
+          background: 'var(--bg)',
         }}
       >
         <Loader2
           size={28}
-          style={{ animation: 'spin 1s linear infinite', color: '#78716C' }}
+          style={{ animation: 'spin 1s linear infinite', color: 'var(--ink-3)' }}
         />
       </div>
     );

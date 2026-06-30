@@ -70,15 +70,17 @@ export function OrderPhotoSection({
   }, []);
 
   const dark = theme === 'dark';
-  const labelText = dark ? 'text-white/80' : 'text-stone-600';
-  const subText = dark ? 'text-white/40' : 'text-stone-400';
-  const iconColor = dark ? 'text-white/60' : 'text-stone-400';
-  const emptyText = dark ? 'text-white/40' : 'text-stone-400';
-  const tileBg = dark ? 'bg-white/5' : 'bg-stone-100';
-  const dashedBorder = dark ? 'border-white/30' : 'border-stone-300';
+  // 🟠 dark 분기는 모바일 바텀시트(어두운 배경) 전용 — 그대로 유지.
+  //    light 분기는 OPS 본체 사용 — 4종 테마 모두 자동 적용되도록 토큰 사용.
+  const labelText = dark ? 'text-white/80' : 'text-ink-2';
+  const subText = dark ? 'text-white/40' : 'text-ink-4';
+  const iconColor = dark ? 'text-white/60' : 'text-ink-4';
+  const emptyText = dark ? 'text-white/40' : 'text-ink-4';
+  const tileBg = dark ? 'bg-white/5' : 'bg-surface-2';
+  const dashedBorder = dark ? 'border-white/30' : 'border-line-strong';
   const dashedBg = dark
     ? 'bg-white/5 hover:bg-white/10'
-    : 'bg-stone-50 hover:bg-stone-100';
+    : 'bg-surface-2 hover:bg-surface-sunken';
 
   const totalCount = photos.length + pendingFiles.length;
   const canAddMore = !readOnly && totalCount < MAX_PHOTOS;
@@ -178,11 +180,11 @@ export function OrderPhotoSection({
     return (
       <div className="space-y-2">
         <div className="flex items-center gap-1.5">
-          <Camera size={14} className={dark ? 'text-white/60' : 'text-stone-400'} />
-          <span className={`text-xs font-medium ${dark ? 'text-white/80' : 'text-stone-600'}`}>
+          <Camera size={14} className={dark ? 'text-white/60' : 'text-ink-4'} />
+          <span className={`text-xs font-medium ${dark ? 'text-white/80' : 'text-ink-2'}`}>
             출고 사진
           </span>
-          <span className={`text-[10px] ${dark ? 'text-white/40' : 'text-stone-400'}`}>
+          <span className={`text-[10px] ${dark ? 'text-white/40' : 'text-ink-4'}`}>
             불러오는 중…
           </span>
         </div>
@@ -318,7 +320,7 @@ export function OrderPhotoSection({
           type="button"
           onClick={handleBulkUpload}
           disabled={isUploading}
-          className="w-full mt-1 py-2.5 rounded-xl bg-[#6B1F2A] text-white text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-60"
+          className="w-full mt-1 py-2.5 rounded-xl bg-brand text-white text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-60"
         >
           {isUploading ? (
             <>
