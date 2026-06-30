@@ -30,6 +30,26 @@
     />
 
     <title>MochiCraft OPS</title>
+
+    <!--
+      OPS 테마 FOUC 방지 — React 마운트 이전에 localStorage 캐시 값을
+      <html> 의 data-theme 속성으로 즉시 반영. useTheme 훅이 마운트되면
+      Supabase 값으로 한 번 더 동기화한다. 라이트는 속성 미설정 = 기본값.
+      거래처 포털(/customer-order)·모바일(/mobile/*)에서는 해당 라우트가
+      마운트 시 속성을 명시적으로 제거해 라이트 고정으로 복원.
+    -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('mc.theme');
+          if (t === 'dark-true' || t === 'dark-gray' || t === 'dark-sepia') {
+            document.documentElement.setAttribute('data-theme', t);
+          }
+        } catch (e) {
+          /* localStorage 차단 환경 — 라이트로 폴백 */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

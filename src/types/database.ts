@@ -2137,6 +2137,33 @@ export type Database = {
         }
         Relationships: []
       }
+      user_preferences: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          theme: "light" | "dark-true" | "dark-gray" | "dark-sepia"
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          theme?: "light" | "dark-true" | "dark-gray" | "dark-sepia"
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          theme?: "light" | "dark-true" | "dark-gray" | "dark-sepia"
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       receivables_summary: {

@@ -14,6 +14,7 @@ import * as XLSX from 'xlsx-js-style';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/Toast';
 import { useCustomerAuth, type CustomerSession } from '@/hooks/useCustomerAuth';
+import { useForceLightTheme } from '@/hooks/useForceLightTheme';
 import { CustomerOrderLogin } from './CustomerOrderLogin';
 import { CustomerOrderInput } from './CustomerOrderInput';
 import {
@@ -309,6 +310,10 @@ function kstMonthRange(
 }
 
 export function CustomerOrderPage() {
+  // 🔴 거래처 포털은 외부인이 보는 화면 — OPS 운영자의 다크 캐시가 새지 않도록
+  //    페이지 마운트 시 data-theme 을 강제로 라이트로 복원. 언마운트 시 직전 값
+  //    복원해 OPS 로 복귀하면 다크가 다시 들어옴.
+  useForceLightTheme();
   const { customer, isLoading, logout } = useCustomerAuth();
 
   if (isLoading) {

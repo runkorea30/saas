@@ -15,7 +15,9 @@ import { Loader2 } from 'lucide-react';
 import { Shell } from '@/components/Shell';
 import { PlaceholderPage } from '@/components/common/PlaceholderPage';
 import { cleanupExpiredPhotos } from '@/hooks/queries/useOrderPhotos';
+import { useCompany } from '@/hooks/useCompany';
 import { useOpsAuth } from '@/hooks/useOpsAuth';
+import { useTheme } from '@/hooks/useTheme';
 import { OpsLoginPage } from '@/pages/OpsLoginPage';
 import { HomePage } from '@/pages/HomePage';
 import { OrdersPage } from '@/pages/sales/OrdersPage';
@@ -40,6 +42,12 @@ import { MobileApp } from '@/mobile/MobileApp';
 
 function App() {
   const { session, isLoading, login, logout } = useOpsAuth();
+  const { companyId } = useCompany();
+
+  // 🟠 테마 활성화 — Supabase user_preferences 동기화 + DOM data-theme 반영.
+  //    index.html 의 inline script 가 1차 FOUC 방지 후 이 훅이 서버값으로 동기화.
+  //    거래처 포털(/customer-order)·모바일(/mobile/*) 라이트 고정은 3단계에서 처리.
+  useTheme({ userId: session?.user?.id ?? null, companyId });
 
   // 🟠 앱 시작 시 만료된 출고사진 일괄 정리 (DB + RPC 폴백).
   useEffect(() => {

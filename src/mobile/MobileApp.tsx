@@ -20,8 +20,13 @@ import { AuditPage } from './pages/AuditPage';
 import { FinancePage } from './pages/FinancePage';
 import { MobileLoginPage } from './pages/MobileLoginPage';
 import { useOpsAuth } from '@/hooks/useOpsAuth';
+import { useForceLightTheme } from '@/hooks/useForceLightTheme';
 
 export function MobileApp() {
+  // 🔴 모바일은 자체 토큰(--m-*) + 자체 light/dark 토글(useMobileTheme) 사용.
+  //    OPS 의 4종 테마 시스템과 격리하기 위해 진입 시 html data-theme 제거.
+  //    OPS 로 돌아가면 직전 값 복원.
+  useForceLightTheme();
   const { session, isLoading, login } = useOpsAuth();
 
   if (isLoading) {
