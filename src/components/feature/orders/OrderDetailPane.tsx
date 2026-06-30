@@ -8,7 +8,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { FileText, MoreHorizontal, Tag } from 'lucide-react';
+import { FileText, MoreHorizontal, Tag, Trash2 } from 'lucide-react';
 import {
   GradeBadge,
   SourceIcon,
@@ -326,6 +326,36 @@ export function OrderDetailPane({
       ...prev,
       createNewDraft({ orderId: order.id, companyId, isReturn: false }),
     ]);
+  };
+
+  /**
+   * 품목 행 삭제 — 신규(저장 전) 행은 draftItems 에서 제거,
+   * 기존(저장된) 행은 DB hard delete 후 orders.total_amount 재동기화.
+   */
+  const handleDeleteItem = async (itemId: string, isNewRow: boolean) => {
+    if (isNewRow) {
+      setDraftItems((prev) => prev.filter((item) => item.id !== itemId));
+      return;
+    }
+    if (!order || !companyId) return;
+    if (!window.confirm('이 품목을 삭제하시겠습니까?')) return;
+    try {
+      const { error } = await supabase
+        .from('order_items')
+        .delete()
+        .eq('id', itemId)
+        .eq('company_id', companyId);
+      if (error) throw error;
+      await syncOrderTotal({ companyId, orderId: order.id });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['order-items', order.id] }),
+        queryClient.invalidateQueries({ queryKey: ['orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory-stock', companyId] }),
+      ]);
+    } catch (err) {
+      console.error('품목 삭제 실패:', err);
+      alert('품목 삭제 중 오류가 발생했습니다.');
+    }
   };
 
   const handleSave = async () => {
@@ -770,6 +800,7 @@ export function OrderDetailPane({
                   <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">판매가</th>
                   <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">공급가</th>
                   <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">합계</th>
+                  <th className="w-8" />
                 </tr>
               </thead>
               <tbody>
@@ -997,6 +1028,16 @@ export function OrderDetailPane({
                       <td className="py-1.5 px-2 text-right font-num font-medium">
                         {rowAmount.toLocaleString()}
                       </td>
+                      <td className="py-1.5 px-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteItem(item.id, isNewRow)}
+                          title="이 품목 삭제"
+                          className="text-[var(--ink-4)] hover:text-[var(--danger)] transition-colors"
+                        >
+                          <Trash2 size={12} strokeWidth={1.8} />
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -1012,6 +1053,7 @@ export function OrderDetailPane({
                   <td className="py-2 px-2 text-right text-xs font-medium font-num">
                     {tableTotal.toLocaleString()}
                   </td>
+                  <td />
                 </tr>
               </tfoot>
             </table>

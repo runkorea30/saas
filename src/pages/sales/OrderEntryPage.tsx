@@ -22,6 +22,12 @@ import { useCustomers, type Customer } from '@/hooks/queries/useCustomers';
 import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 import { useProducts, type Product } from '@/hooks/queries/useProducts';
 import { calcSupplyPriceByCustomerGrade } from '@/utils/calculations';
+import {
+  calcDeliveryFee,
+  removeDeliveryFeeFromOrder,
+  DELIVERY_FEE_PRODUCT_ID,
+  DELIVERY_FEE_AMOUNT,
+} from '@/utils/deliveryFee';
 
 /** 거래처 grade 미설정 시 공급가 계산용 기본 등급. */
 const DEFAULT_CUSTOMER_GRADE = 'a';
@@ -72,6 +78,24 @@ function todayKstDateString(): string {
   const d = new Date();
   const kst = new Date(d.getTime() + 9 * 3600_000);
   return kst.toISOString().slice(0, 10);
+}
+
+/**
+ * 날짜 입력값(YYYY-MM-DD)에 "지금 이 순간의 시:분:초"를 합성해 ISO 문자열로 변환.
+ * 오늘 날짜로 저장할 때 실제 입력 시각이 보존되도록 함 (09:00 고정 버그 방지).
+ */
+function composeOrderTimestamp(dateStr: string): string {
+  const now = new Date();
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const composed = new Date(
+    y,
+    (m ?? 1) - 1,
+    d ?? 1,
+    now.getHours(),
+    now.getMinutes(),
+    now.getSeconds(),
+  );
+  return composed.toISOString();
 }
 
 function readRecent(): string[] {
@@ -567,24 +591,64 @@ export function OrderEntryPage() {
       return { ...a, row: { ...a.row, unit_price: effective } };
     });
 
+    // 🔴 택배비 자동추가 — 거래처 포털과 동일한 4규칙 적용.
+    //    이 주문에 이미 택배비 코드가 포함되어 있으면(직접 입력) 자동판단 생략.
+    const hasDeliveryAlready = finalItems.some(
+      (a) => a.row.product_id === DELIVERY_FEE_PRODUCT_ID,
+    );
+    const subtotal = finalItems.reduce(
+      (s, a) =>
+        s +
+        (a.row.is_return ? -1 : 1) * Math.abs(a.finalQty) * a.row.unit_price,
+      0,
+    );
+    const deliveryDecision = hasDeliveryAlready
+      ? { addDeliveryFee: false, removeDeliveryFeeFromOrderId: null }
+      : await calcDeliveryFee({
+          companyId,
+          customerId,
+          newOrderAmount: subtotal,
+          isDirectShipping: false,
+        });
+    if (deliveryDecision.removeDeliveryFeeFromOrderId) {
+      await removeDeliveryFeeFromOrder({
+        companyId,
+        orderId: deliveryDecision.removeDeliveryFeeFromOrderId,
+      });
+    }
+
+    const itemsPayload = finalItems.map((a) => ({
+      product_id: a.row.product_id,
+      quantity: a.row.is_return ? -Math.abs(a.finalQty) : a.finalQty,
+      original_quantity: a.originalQty,
+      unit_price: a.row.unit_price,
+      amount:
+        (a.row.is_return ? -1 : 1) * Math.abs(a.finalQty) * a.row.unit_price,
+      is_return: a.row.is_return,
+    }));
+    if (deliveryDecision.addDeliveryFee) {
+      itemsPayload.push({
+        product_id: DELIVERY_FEE_PRODUCT_ID,
+        quantity: 1,
+        original_quantity: null,
+        unit_price: DELIVERY_FEE_AMOUNT,
+        amount: DELIVERY_FEE_AMOUNT,
+        is_return: false,
+      });
+    }
+
     setIsSaving(true);
     try {
       const { data, error } = await supabase.rpc('insert_order', {
         p_company_id: companyId,
         p_customer_id: customerId,
-        p_order_date: orderDate,
+        // 🔴 RPC 가 timestamptz 를 받으므로 "선택한 날짜 + 현재 시각"을 합성.
+        //    날짜만 입력칸에서 고르고, 시간은 실제 입력(저장) 시각을 그대로 기록.
+        p_order_date: composeOrderTimestamp(orderDate),
         p_source: 'manual',
         p_status: 'confirmed',
         p_memo: memo || null,
-        p_items: finalItems.map((a) => ({
-          product_id: a.row.product_id,
-          quantity: a.row.is_return ? -Math.abs(a.finalQty) : a.finalQty,
-          original_quantity: a.originalQty,
-          unit_price: a.row.unit_price,
-          amount:
-            (a.row.is_return ? -1 : 1) * Math.abs(a.finalQty) * a.row.unit_price,
-          is_return: a.row.is_return,
-        })),
+        p_items: itemsPayload,
       });
       if (error) throw error;
 
