@@ -14,7 +14,8 @@ import * as XLSX from 'xlsx-js-style';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/Toast';
 import { useCustomerAuth, type CustomerSession } from '@/hooks/useCustomerAuth';
-import { useForceLightTheme } from '@/hooks/useForceLightTheme';
+import { usePortalTheme } from '@/hooks/usePortalTheme';
+import { PortalThemeToggle } from '@/components/feature/customer-order/PortalThemeToggle';
 import { CustomerOrderLogin } from './CustomerOrderLogin';
 import { CustomerOrderInput } from './CustomerOrderInput';
 import {
@@ -310,11 +311,14 @@ function kstMonthRange(
 }
 
 export function CustomerOrderPage() {
-  // 🔴 거래처 포털은 외부인이 보는 화면 — OPS 운영자의 다크 캐시가 새지 않도록
-  //    페이지 마운트 시 data-theme 을 강제로 라이트로 복원. 언마운트 시 직전 값
-  //    복원해 OPS 로 복귀하면 다크가 다시 들어옴.
-  useForceLightTheme();
   const { customer, isLoading, logout } = useCustomerAuth();
+  // 🟠 거래처 포털 테마 — 라이트/다크그레이 2종. 마운트 시 OPS data-theme 을
+  //    제거하고 data-portal-theme 를 설정 (OPS 테마와 격리). 로그인 전엔
+  //    localStorage 캐시만 사용, 로그인 후 portal_preferences 와 동기화.
+  usePortalTheme({
+    customerId: customer?.customerId ?? null,
+    companyId: customer?.companyId ?? null,
+  });
 
   if (isLoading) {
     return (
@@ -415,8 +419,8 @@ function Header({
   return (
     <div
       style={{
-        background: '#FFFFFF',
-        borderBottom: '1px solid #E7E5E4',
+        background: 'var(--p-bg-header)',
+        borderBottom: '1px solid var(--p-line-header)',
         padding: '12px 20px',
       }}
     >
@@ -433,7 +437,7 @@ function Header({
           style={{
             fontSize: 15,
             fontWeight: 700,
-            color: '#1C1917',
+            color: 'var(--p-ink-strong)',
             letterSpacing: '-0.01em',
             whiteSpace: 'nowrap',
           }}
@@ -446,8 +450,8 @@ function Header({
             alignItems: 'center',
             gap: 8,
             padding: '6px 12px',
-            background: '#EFF6FF',
-            color: '#1D4ED8',
+            background: 'var(--p-info-wash)',
+            color: 'var(--p-info)',
             borderRadius: 999,
             fontSize: 13,
             fontWeight: 600,
@@ -461,7 +465,7 @@ function Header({
             display: 'inline-flex',
             alignItems: 'center',
             gap: 1,
-            background: '#F5F5F4',
+            background: 'var(--p-surface-2)',
             padding: 3,
             borderRadius: 6,
           }}
@@ -484,15 +488,15 @@ function Header({
                   height: 28,
                   borderRadius: 4,
                   border: 'none',
-                  background: active ? '#FFFFFF' : 'transparent',
-                  color: active ? '#1C1917' : '#78716C',
+                  background: active ? 'var(--p-surface)' : 'transparent',
+                  color: active ? 'var(--p-ink)' : 'var(--p-ink-3)',
                   cursor: 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontWeight: 600,
                   fontSize: size,
-                  boxShadow: active ? '0 1px 2px rgba(0,0,0,0.05)' : 'none',
+                  boxShadow: active ? 'var(--p-shadow-soft)' : 'none',
                 }}
               >
                 가
@@ -500,6 +504,7 @@ function Header({
             );
           })}
         </div>
+        <PortalThemeToggle />
         <button
           type="button"
           onClick={onLogout}
@@ -509,12 +514,12 @@ function Header({
             gap: 6,
             height: 32,
             padding: '0 12px',
-            background: '#FFFFFF',
-            border: '1px solid #D6D3D1',
+            background: 'var(--p-surface)',
+            border: '1px solid var(--p-line-strong)',
             borderRadius: 6,
             fontSize: 13,
             cursor: 'pointer',
-            color: '#44403C',
+            color: 'var(--p-ink-2)',
           }}
         >
           <LogOut size={13} /> 로그아웃

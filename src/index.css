@@ -80,6 +80,27 @@
     --tracking-input-color: #1C1917;
     --tracking-label-color: #475569;    /* slate-600 — 송장번호 라벨 */
 
+    /* ═══════════════════════════════════════════════════════════════════
+       거래처 포털 전용 토큰 (--p-* prefix) — OPS 토큰과 완전 분리.
+       포털은 html[data-portal-theme='light' | 'dark-gray'] 두 상태만 가지며
+       light 는 :root 기본값 사용. 다크그레이 오버라이드는 별도 셀렉터.
+       라이트 값은 포털 기존 inline hex 그대로 매핑 (시각 결과 동일 유지).
+       1단계: 헤더 영역 토큰만 우선 정의. 본문/모달/입력은 후속 단계에서 추가.
+       ─────────────────────────────────────────────────────────────────── */
+    --p-bg-header: #FFFFFF;
+    --p-line-header: #E7E5E4;
+    --p-ink-strong: #1C1917;       /* 로고/주요 텍스트 */
+    --p-ink: #1C1917;
+    --p-ink-2: #44403C;            /* 본문/버튼 라벨 */
+    --p-ink-3: #78716C;            /* 보조/inactive */
+    --p-surface: #FFFFFF;          /* 버튼 배경 */
+    --p-surface-2: #F5F5F4;        /* 토글 컨테이너 배경 */
+    --p-line-strong: #D6D3D1;      /* 버튼 보더 */
+    --p-info-wash: #EFF6FF;        /* 거래처명 배지 배경 */
+    --p-info: #1D4ED8;             /* 거래처명 배지 텍스트 */
+    --p-brand: #6B1F2A;
+    --p-shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.05);
+
     /* Fonts */
     --font-kr: 'Pretendard Variable', Pretendard, -apple-system, system-ui, sans-serif;
     --font-num: 'Inter Tight', 'Pretendard Variable', ui-sans-serif, sans-serif;
@@ -375,6 +396,27 @@
     background-image:
       radial-gradient(rgba(255, 220, 170, 0.022) 1px, transparent 1px),
       radial-gradient(rgba(255, 220, 170, 0.015) 1px, transparent 1px);
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     포털 다크그레이 — 값은 OPS 다크그레이(--bg #2C2C2A 계열)와 동일.
+     포털 전용 --p-* prefix 만 오버라이드. light 는 :root 기본값 사용.
+     1단계: 헤더 영역 토큰만 우선 오버라이드.
+     ─────────────────────────────────────────────────────────────────── */
+  html[data-portal-theme='dark-gray'] {
+    --p-bg-header: #3A3A38;        /* OPS dark-gray --surface */
+    --p-line-header: #4A4A47;      /* OPS dark-gray --line */
+    --p-ink-strong: #F1EFE8;       /* OPS dark-gray --ink */
+    --p-ink: #F1EFE8;
+    --p-ink-2: #C8C5BB;            /* OPS dark-gray --ink-2 */
+    --p-ink-3: #95918A;            /* OPS dark-gray --ink-3 */
+    --p-surface: #2C2C2A;          /* OPS dark-gray --bg — 헤더 안 한 단계 어두움 */
+    --p-surface-2: #2C2C2A;
+    --p-line-strong: #5A5A57;      /* OPS dark-gray --line-strong */
+    --p-info-wash: #243140;        /* OPS dark-gray --info-wash */
+    --p-info: #95B7D1;             /* OPS dark-gray --info */
+    --p-brand: #9A4250;            /* OPS dark-gray --brand */
+    --p-shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.25);
   }
 
   a {

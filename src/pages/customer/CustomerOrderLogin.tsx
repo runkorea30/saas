@@ -7,6 +7,7 @@
 import { useState, type FormEvent } from 'react';
 import { FileText, Loader2 } from 'lucide-react';
 import { useCustomerAuth } from '@/hooks/useCustomerAuth';
+import { PortalThemeToggle } from '@/components/feature/customer-order/PortalThemeToggle';
 
 interface CustomerOrderLoginProps {
   onLoginSuccess?: () => void;
@@ -36,6 +37,7 @@ export function CustomerOrderLogin({ onLoginSuccess }: CustomerOrderLoginProps) 
   return (
     <div
       style={{
+        position: 'relative',
         minHeight: '100vh',
         display: 'flex',
         alignItems: 'center',
@@ -44,6 +46,11 @@ export function CustomerOrderLogin({ onLoginSuccess }: CustomerOrderLoginProps) 
         padding: 20,
       }}
     >
+      {/* 🟠 후속 단계: 페이지 본문 토큰화 전까지는 카드만 라이트로 보임.
+          토글은 로그인 전부터 localStorage 캐시 + DOM 적용은 동작. */}
+      <div style={{ position: 'absolute', top: 16, right: 16 }}>
+        <PortalThemeToggle />
+      </div>
       <div
         style={{
           width: '100%',

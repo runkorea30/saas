@@ -32,21 +32,31 @@
     <title>MochiCraft OPS</title>
 
     <!--
-      OPS 테마 FOUC 방지 — React 마운트 이전에 localStorage 캐시 값을
-      <html> 의 data-theme 속성으로 즉시 반영. useTheme 훅이 마운트되면
-      Supabase 값으로 한 번 더 동기화한다. 라이트는 속성 미설정 = 기본값.
-      거래처 포털(/customer-order)·모바일(/mobile/*)에서는 해당 라우트가
-      마운트 시 속성을 명시적으로 제거해 라이트 고정으로 복원.
+      테마 FOUC 방지 — React 마운트 이전에 localStorage 캐시 값을 즉시
+      <html> 의 attribute 로 반영. 라우트별 분기:
+        /customer-order   → data-portal-theme (라이트 / 다크그레이 2종, 기본 다크그레이)
+        그 외 OPS         → data-theme        (라이트 / dark-true/gray/sepia, 기본 라이트)
+        /mobile/*         → 둘 다 설정 안 함 (모바일은 자체 토큰 + 라이트 강제)
+      훅(useTheme / usePortalTheme) 마운트 후 서버 값으로 한 번 더 동기화.
     -->
     <script>
       (function () {
         try {
-          var t = localStorage.getItem('mc.theme');
-          if (t === 'dark-true' || t === 'dark-gray' || t === 'dark-sepia') {
-            document.documentElement.setAttribute('data-theme', t);
+          var path = window.location.pathname;
+          var isPortal = path === '/customer-order';
+          var isMobile = path.indexOf('/mobile') === 0;
+          if (isPortal) {
+            var pt = localStorage.getItem('mc.portal.theme');
+            var portalTheme = pt === 'light' ? 'light' : 'dark-gray';
+            document.documentElement.setAttribute('data-portal-theme', portalTheme);
+          } else if (!isMobile) {
+            var t = localStorage.getItem('mc.theme');
+            if (t === 'dark-true' || t === 'dark-gray' || t === 'dark-sepia') {
+              document.documentElement.setAttribute('data-theme', t);
+            }
           }
         } catch (e) {
-          /* localStorage 차단 환경 — 라이트로 폴백 */
+          /* localStorage 차단 환경 — 기본 라이트로 폴백 */
         }
       })();
     </script>

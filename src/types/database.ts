@@ -2164,6 +2164,41 @@ export type Database = {
         }
         Relationships: []
       }
+      portal_preferences: {
+        Row: {
+          company_id: string
+          created_at: string
+          customer_id: string
+          id: string
+          theme: "light" | "dark-gray"
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          customer_id: string
+          id?: string
+          theme?: "light" | "dark-gray"
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          customer_id?: string
+          id?: string
+          theme?: "light" | "dark-gray"
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "portal_preferences_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: true
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       receivables_summary: {
