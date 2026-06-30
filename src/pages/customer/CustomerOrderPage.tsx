@@ -6,7 +6,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, LogOut, Trash2, X } from 'lucide-react';
+import { Loader2, LogOut, X } from 'lucide-react';
 import { useOrderPhotosByOrders, type OrderPhoto } from '@/hooks/queries/useOrderPhotos';
 // xlsx-js-style 은 SheetJS xlsx 의 fork — 동일 API + 셀 스타일(s) 지원.
 // parseOrderExcel(read) 과 handleDownloadOrderForm(write+style) 모두 한 import 로 처리.
@@ -28,6 +28,12 @@ import { FileUploadSection } from '@/components/feature/customer-order/FileUploa
 import { MessageSection } from '@/components/feature/customer-order/MessageSection';
 import { DirectOrderEntryCard } from '@/components/feature/customer-order/DirectOrderEntryCard';
 import { DirectShippingSection } from '@/components/feature/customer-order/DirectShippingSection';
+import {
+  DirectShippingTable,
+  emptyShipping,
+  filledShippingForInsert,
+  type ShippingRow,
+} from '@/components/feature/customer-order/DirectShippingTable';
 import { SubmitSuccessDialog } from '@/components/feature/customer-order/SubmitSuccessDialog';
 import {
   getCarrierLabel,
@@ -153,38 +159,8 @@ function isParsableExcel(fileName: string): boolean {
  *   · 거래처 → 로그인 거래처명 (customer.customerName)
  *   · 신용 → 항상 '신용'
  */
-interface ShippingRow {
-  name: string;      // 받는사람
-  zipcode: string;   // 우편번호
-  address: string;   // 주소
-  phone1: string;    // 연락처1
-  phone2: string;    // 연락처2
-  blank: string;     // 빈칸 (헤더 무라벨, 사용자 자유 입력)
-  product: string;   // 제품
-}
-
-/** 엑셀 붙여넣기 매핑용 컬럼 키 순서. 거래처/신용 은 자동값이라 제외. */
-const SHIPPING_COLS: ReadonlyArray<keyof ShippingRow> = [
-  'name',
-  'zipcode',
-  'address',
-  'phone1',
-  'phone2',
-  'blank',
-  'product',
-];
-
-const emptyShipping = (): ShippingRow => ({
-  name: '',
-  zipcode: '',
-  address: '',
-  phone1: '',
-  phone2: '',
-  blank: '',
-  product: '',
-});
-
-const CREDIT_LABEL = '신용';
+// ShippingRow / SHIPPING_COLS / emptyShipping / CREDIT_LABEL 은
+// DirectShippingTable 로 이전(export). 위 import 에서 가져옴.
 
 // ───────────────────────────────────────────────────────────
 // 주문 내역 데이터 모델
@@ -576,64 +552,11 @@ function LeftPanel({
     if (f) handleFile(f);
   };
 
-  const updateShipping = (
-    index: number,
-    field: keyof ShippingRow,
-    value: string,
-  ) => {
-    setShipping((prev) => {
-      const next = [...prev];
-      next[index] = { ...next[index], [field]: value };
-      return next;
-    });
-  };
-
+  // updateShipping / removeShippingRow / handleShippingPaste 는
+  // DirectShippingTable 내부로 이전. addShippingRow 만 유지
+  // (DirectShippingSection 의 onAdd 헤더 버튼 콜백).
   const addShippingRow = () =>
     setShipping((prev) => [...prev, emptyShipping()]);
-
-  const removeShippingRow = (idx: number) =>
-    setShipping((prev) =>
-      prev.length === 1 ? [emptyShipping()] : prev.filter((_, i) => i !== idx),
-    );
-
-  /**
-   * 직송 셀에 엑셀 다중 셀(또는 행) 붙여넣기를 자동 분배.
-   * - 단일 셀(텍스트에 탭/줄바꿈 없음) 이면 기본 paste 허용 → preventDefault 하지 않음.
-   * - 다중 셀이면 \n 으로 행, \t 으로 컬럼 분리해 (rowIndex+ri, colIndex+ci) 위치에 채움.
-   * - 부족한 행은 emptyShipping 으로 자동 확장.
-   * - 거래처/신용 컬럼(SHIPPING_COLS 길이 초과 인덱스) 은 자동값이라 덮어쓰지 않음.
-   */
-  const handleShippingPaste =
-    (rowIndex: number, colIndex: number) =>
-    (e: React.ClipboardEvent<HTMLInputElement>) => {
-      const text = e.clipboardData.getData('text');
-      if (!text) return;
-      if (!text.includes('\t') && !text.includes('\n')) return; // 단일 셀: 기본 동작 유지
-      e.preventDefault();
-      const matrix = text
-        .replace(/\r\n/g, '\n')
-        .replace(/\r/g, '\n')
-        .replace(/\n+$/, '')
-        .split('\n')
-        .map((line) => line.split('\t'));
-
-      setShipping((prev) => {
-        const next = [...prev];
-        matrix.forEach((cols, ri) => {
-          const ti = rowIndex + ri;
-          while (next.length <= ti) next.push(emptyShipping());
-          const target = { ...next[ti] };
-          cols.forEach((val, ci) => {
-            const keyIdx = colIndex + ci;
-            if (keyIdx < SHIPPING_COLS.length) {
-              target[SHIPPING_COLS[keyIdx]] = val.trim();
-            }
-          });
-          next[ti] = target;
-        });
-        return next;
-      });
-    };
 
   /**
    * 현재 거래처 grade 가 반영된 주문서 양식 xlsx 다운로드.
@@ -954,13 +877,10 @@ function LeftPanel({
           };
         });
       // 직송 행 — 사용자가 입력한 행만 추출. 1개 이상이면 직송 주문 으로 간주.
-      const filledShipping = shipping
-        .filter((s) => s.name || s.address || s.phone1 || s.product)
-        .map((s) => ({
-          ...s,
-          customer: customer.customerName,
-          credit: CREDIT_LABEL,
-        }));
+      const filledShipping = filledShippingForInsert(
+        shipping,
+        customer.customerName,
+      );
       const isDirect = filledShipping.length > 0;
 
       let createdOrderId: string | null = null;
@@ -1240,98 +1160,12 @@ function LeftPanel({
       {/* 2행 2~3열 span — 직송 정보 */}
       <div className="col-span-2 col-start-2 row-start-2">
         <DirectShippingSection onAdd={addShippingRow}>
-          <div className="mb-2 rounded-md border border-[var(--p-danger-soft-border)] bg-[var(--p-danger-soft-bg)] px-3 py-2 text-[12px] font-medium text-[var(--p-danger-strong)]">
-            ⚠ 절대주의: 직송은 직송정보부터 입력하세요. 일반주문시와 구분해주세요
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-[12px]">
-              <thead>
-                <tr className="bg-[var(--p-bg)]">
-                  <ShipTh>받는사람</ShipTh>
-                  <ShipTh>우편번호</ShipTh>
-                  <ShipTh>주소</ShipTh>
-                  <ShipTh>연락처1</ShipTh>
-                  <ShipTh>연락처2</ShipTh>
-                  <ShipTh />
-                  <ShipTh>제품</ShipTh>
-                  <ShipTh>거래처</ShipTh>
-                  <ShipTh>신용</ShipTh>
-                  <ShipTh width={36} />
-                </tr>
-              </thead>
-              <tbody>
-                {shipping.map((row, i) => (
-                  <tr key={i} className="border-t border-[var(--p-bg)]">
-                    <ShipTd>
-                      <CellInput
-                        value={row.name}
-                        onChange={(v) => updateShipping(i, 'name', v)}
-                        onPaste={handleShippingPaste(i, 0)}
-                      />
-                    </ShipTd>
-                    <ShipTd>
-                      <CellInput
-                        value={row.zipcode}
-                        onChange={(v) => updateShipping(i, 'zipcode', v)}
-                        onPaste={handleShippingPaste(i, 1)}
-                      />
-                    </ShipTd>
-                    <ShipTd>
-                      <CellInput
-                        value={row.address}
-                        onChange={(v) => updateShipping(i, 'address', v)}
-                        onPaste={handleShippingPaste(i, 2)}
-                      />
-                    </ShipTd>
-                    <ShipTd>
-                      <CellInput
-                        value={row.phone1}
-                        onChange={(v) => updateShipping(i, 'phone1', v)}
-                        onPaste={handleShippingPaste(i, 3)}
-                      />
-                    </ShipTd>
-                    <ShipTd>
-                      <CellInput
-                        value={row.phone2}
-                        onChange={(v) => updateShipping(i, 'phone2', v)}
-                        onPaste={handleShippingPaste(i, 4)}
-                      />
-                    </ShipTd>
-                    <ShipTd>
-                      <CellInput
-                        value={row.blank}
-                        onChange={(v) => updateShipping(i, 'blank', v)}
-                        onPaste={handleShippingPaste(i, 5)}
-                      />
-                    </ShipTd>
-                    <ShipTd>
-                      <CellInput
-                        value={row.product}
-                        onChange={(v) => updateShipping(i, 'product', v)}
-                        onPaste={handleShippingPaste(i, 6)}
-                      />
-                    </ShipTd>
-                    <ShipTd>
-                      <ReadOnlyCell value={customer.customerName} />
-                    </ShipTd>
-                    <ShipTd>
-                      <ReadOnlyCell value={CREDIT_LABEL} />
-                    </ShipTd>
-                    <ShipTd width={36}>
-                      <button
-                        type="button"
-                        onClick={() => removeShippingRow(i)}
-                        title="행 삭제"
-                        className="cursor-pointer border-none bg-transparent p-1 text-[var(--p-ink-3)] hover:text-[var(--p-danger-strong)]"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </ShipTd>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DirectShippingTable
+            rows={shipping}
+            onChange={setShipping}
+            customerName={customer.customerName}
+            showWarning
+          />
         </DirectShippingSection>
       </div>
 
@@ -2777,98 +2611,7 @@ function Card({
   );
 }
 
-function ShipTh({
-  children,
-  width,
-}: {
-  children?: React.ReactNode;
-  width?: number;
-}) {
-  return (
-    <th
-      style={{
-        padding: '8px 6px',
-        fontSize: 11,
-        fontWeight: 600,
-        color: 'var(--p-ink-2)',
-        textAlign: 'left',
-        whiteSpace: 'nowrap',
-        width,
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-
-function ShipTd({
-  children,
-  width,
-}: {
-  children?: React.ReactNode;
-  width?: number;
-}) {
-  return (
-    <td style={{ padding: '4px 4px', width, verticalAlign: 'middle' }}>
-      {children}
-    </td>
-  );
-}
-
-function CellInput({
-  value,
-  onChange,
-  onPaste,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onPaste?: (e: React.ClipboardEvent<HTMLInputElement>) => void;
-}) {
-  return (
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      onPaste={onPaste}
-      style={{
-        width: '100%',
-        height: 28,
-        padding: '0 6px',
-        fontSize: 12,
-        border: '1px solid var(--p-line)',
-        borderRadius: 4,
-        outline: 'none',
-        background: 'var(--p-card-bg)',
-      }}
-    />
-  );
-}
-
-/** 직송 테이블의 자동값 셀 (거래처 / 신용). 편집 불가, 회색 배경. */
-function ReadOnlyCell({ value }: { value: string }) {
-  return (
-    <div
-      title={value}
-      style={{
-        width: '100%',
-        height: 28,
-        padding: '0 6px',
-        fontSize: 12,
-        border: '1px solid var(--p-line)',
-        borderRadius: 4,
-        background: 'var(--p-bg)',
-        color: 'var(--p-ink-3)',
-        display: 'flex',
-        alignItems: 'center',
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-      }}
-    >
-      {value}
-    </div>
-  );
-}
+// ShipTh / ShipTd / CellInput / ReadOnlyCell 은 DirectShippingTable 로 이전.
 
 const smallSelect: React.CSSProperties = {
   flex: 1,
