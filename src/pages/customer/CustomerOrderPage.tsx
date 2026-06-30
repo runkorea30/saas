@@ -2292,38 +2292,6 @@ function MonthlyDateCard({
         >
           {fmtWon(totalAmount)}
         </span>
-        {(() => {
-          const allTracking = orders.flatMap((o) => o.tracking_numbers ?? []);
-          const trackingNumber = allTracking[0] ?? null;
-          return (
-            <span
-              role="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (trackingNumber) {
-                  openLogenTracking(trackingNumber);
-                }
-              }}
-              style={{
-                ...secondaryBtn,
-                height: 26,
-                padding: '0 10px',
-                fontSize: 11,
-                cursor: trackingNumber ? 'pointer' : 'not-allowed',
-                opacity: trackingNumber ? 1 : 0.45,
-                display: 'inline-flex',
-                alignItems: 'center',
-              }}
-              title={
-                trackingNumber
-                  ? `로젠택배 조회: ${trackingNumber}`
-                  : '송장번호가 등록되지 않았습니다'
-              }
-            >
-              배송조회
-            </span>
-          );
-        })()}
       </button>
       {expanded && (
         <div
@@ -2460,6 +2428,38 @@ function OrderCard({
         )}
         <span style={{ color: '#6B7280' }}>{order.items.length}건</span>
         <span style={{ flex: 1 }} />
+        {/* 🔴 주문 단위 송장번호 — 여러 건이어도 각 카드마다 자기 것만 정확히 표시.
+            직송 주문(direct=true)은 "직송" 뱃지와 나란히 보여 거래처가 곧바로
+            고객에게 송장번호를 전달할 수 있게 함. */}
+        {(order.tracking_numbers ?? []).length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+            {(order.tracking_numbers ?? []).map((tn) => (
+              <span
+                key={tn}
+                role="button"
+                onClick={() => openLogenTracking(tn)}
+                title={`로젠택배 조회: ${tn}`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  height: 22,
+                  padding: '0 8px',
+                  fontSize: 10.5,
+                  fontWeight: 600,
+                  color: '#1D4ED8',
+                  background: '#EFF6FF',
+                  border: '1px solid #BFDBFE',
+                  borderRadius: 999,
+                  cursor: 'pointer',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {tn}
+              </span>
+            ))}
+          </div>
+        )}
         <span
           style={{
             fontWeight: 600,
@@ -2834,17 +2834,6 @@ function ReadOnlyCell({ value }: { value: string }) {
     </div>
   );
 }
-
-const secondaryBtn: React.CSSProperties = {
-  height: 32,
-  padding: '0 12px',
-  background: '#FFFFFF',
-  color: '#1C1917',
-  border: '1px solid #D6D3D1',
-  borderRadius: 6,
-  fontSize: 12,
-  cursor: 'pointer',
-};
 
 const smallSelect: React.CSSProperties = {
   flex: 1,
