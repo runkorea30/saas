@@ -555,38 +555,10 @@ export function OrderDetailPane({
             주문추가
           </button>
         </div>
-        {order.memo && (
-          <div
-            style={{
-              marginTop: 8,
-              padding: '6px 10px',
-              background: '#fffbeb',
-              border: '1px solid #fde68a',
-              borderRadius: 6,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                fontSize: 10,
-                fontWeight: 600,
-                color: '#b45309',
-                letterSpacing: '0.04em',
-              }}
-            >
-              <Tag size={10} strokeWidth={1.8} />
-              전달메시지
-            </div>
-            <div style={{ fontSize: 12, color: '#78350f', lineHeight: 1.45 }}>
-              {order.memo}
-            </div>
-          </div>
-        )}
+        <TrackingNumberSection
+          orderId={order.id}
+          initialTrackingNumbers={order.tracking_numbers ?? []}
+        />
         {order.is_direct_shipping &&
           (() => {
             // shipping_info 가 string(JSON) 또는 object 배열로 올 수 있어 양쪽 처리.
@@ -1132,6 +1104,142 @@ function DetailEmpty() {
       <div style={{ fontSize: 11.5, color: 'var(--ink-3)', textAlign: 'center' }}>
         왼쪽 목록에서 주문을 클릭하면 상세 내용이 여기에 표시됩니다.
       </div>
+    </div>
+  );
+}
+
+/**
+ * 송장번호 입력 — 거의 1건이지만 복수 등록 가능.
+ * 로젠택배 운송장 번호 기준 (기본 택배사 = 로젠택배).
+ * 저장 즉시 orders.tracking_numbers (jsonb 배열) 업데이트.
+ */
+function TrackingNumberSection({
+  orderId,
+  initialTrackingNumbers,
+}: {
+  orderId: string;
+  initialTrackingNumbers: string[];
+}) {
+  const queryClient = useQueryClient();
+  const [numbers, setNumbers] = useState<string[]>(
+    initialTrackingNumbers.length > 0 ? initialTrackingNumbers : [''],
+  );
+  const [saving, setSaving] = useState(false);
+
+  const persist = async (next: string[]) => {
+    const cleaned = next.map((n) => n.trim()).filter(Boolean);
+    setSaving(true);
+    await supabase
+      .from('orders')
+      .update({ tracking_numbers: cleaned })
+      .eq('id', orderId);
+    queryClient.invalidateQueries({ queryKey: ['orders'] });
+    setSaving(false);
+  };
+
+  const handleChange = (idx: number, value: string) => {
+    const next = [...numbers];
+    next[idx] = value;
+    setNumbers(next);
+  };
+
+  const handleBlurSave = () => {
+    void persist(numbers);
+  };
+
+  const handleAddRow = () => {
+    setNumbers((prev) => [...prev, '']);
+  };
+
+  const handleRemoveRow = (idx: number) => {
+    const next = numbers.filter((_, i) => i !== idx);
+    const finalRows = next.length > 0 ? next : [''];
+    setNumbers(finalRows);
+    void persist(finalRows);
+  };
+
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        padding: '8px 10px',
+        background: '#F8FAFC',
+        border: '1px solid #E2E8F0',
+        borderRadius: 6,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 5,
+          fontSize: 10,
+          fontWeight: 600,
+          color: '#475569',
+          letterSpacing: '0.04em',
+        }}
+      >
+        <Tag size={10} strokeWidth={1.8} />
+        송장번호 (로젠택배){saving && ' · 저장중…'}
+      </div>
+
+      {numbers.map((num, idx) => (
+        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input
+            type="text"
+            value={num}
+            onChange={(e) => handleChange(idx, e.target.value)}
+            onBlur={handleBlurSave}
+            placeholder="운송장 번호 입력"
+            style={{
+              flex: 1,
+              height: 28,
+              padding: '0 8px',
+              fontSize: 12,
+              border: '1px solid #CBD5E1',
+              borderRadius: 4,
+              outline: 'none',
+            }}
+          />
+          {numbers.length > 1 && (
+            <button
+              type="button"
+              onClick={() => handleRemoveRow(idx)}
+              style={{
+                width: 22,
+                height: 22,
+                border: 'none',
+                background: 'transparent',
+                color: '#94A3B8',
+                cursor: 'pointer',
+                fontSize: 13,
+              }}
+              title="삭제"
+            >
+              ×
+            </button>
+          )}
+        </div>
+      ))}
+
+      <button
+        type="button"
+        onClick={handleAddRow}
+        style={{
+          alignSelf: 'flex-start',
+          fontSize: 11,
+          color: '#2563EB',
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          padding: '2px 0',
+        }}
+      >
+        + 송장번호 추가
+      </button>
     </div>
   );
 }

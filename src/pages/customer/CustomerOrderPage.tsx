@@ -208,6 +208,7 @@ interface OrderDetail {
   total_amount: number;
   memo: string | null;
   status: string;
+  tracking_numbers: string[] | null;
   items: OrderItemDetail[];
 }
 
@@ -240,7 +241,7 @@ async function fetchOrdersWithItems(
   const { data, error } = await supabase
     .from('orders')
     .select(
-      `id, order_date, total_amount, memo, status,
+      `id, order_date, total_amount, memo, status, tracking_numbers,
        items:order_items (
          id, quantity, unit_price, amount, is_return,
          product:products ( code, name, sell_price, grade_a, grade_b, grade_c, grade_d, grade_e )
@@ -2052,168 +2053,10 @@ function TodayOrders({
 
 // ───────────────────────────────────────────────────────────
 
-/**
- * 날짜별 거래명세서를 새 창(탭)에 HTML로 렌더.
- * 거래처 포털 전용 — 브라우저 인쇄 기능으로 PDF 저장도 가능.
- */
-function openStatementInNewWindow(
-  date: string,
-  orders: OrderDetail[],
-  customer: CustomerSession,
-): void {
-  let rowNo = 1;
-  let grandTotal = 0;
-  let grandQty = 0;
-
-  const rowsHtml = orders
-    .flatMap((order) =>
-      order.items
-        .filter((item) => item.product)
-        .map((item) => {
-          const supplyPrice = calcSupplyPriceByCustomerGrade(
-            item.product!.sell_price,
-            customer.grade,
-            item.product!,
-          );
-          const amount = item.quantity * supplyPrice;
-          grandTotal += amount;
-          grandQty += item.quantity;
-          return `
-            <tr>
-              <td class="num">${rowNo++}</td>
-              <td class="center">${escapeHtml(item.product!.code)}</td>
-              <td>${escapeHtml(item.product!.name)}</td>
-              <td class="num">${item.quantity.toLocaleString()}</td>
-              <td class="num">${supplyPrice.toLocaleString()}</td>
-              <td class="num">${amount.toLocaleString()}</td>
-            </tr>`;
-        }),
-    )
-    .join('');
-
-  const html = `<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8" />
-<title>거래명세서 - ${escapeHtml(customer.customerName)} (${date})</title>
-<style>
-  * { box-sizing: border-box; }
-  body {
-    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
-    color: #1C1917;
-    padding: 40px;
-    max-width: 760px;
-    margin: 0 auto;
-    background: #fff;
-  }
-  h1 {
-    font-size: 22px;
-    font-weight: 700;
-    margin: 0 0 4px;
-    text-align: center;
-  }
-  .sub {
-    text-align: center;
-    color: #78716C;
-    font-size: 13px;
-    margin-bottom: 28px;
-  }
-  .meta {
-    display: flex;
-    justify-content: space-between;
-    font-size: 13px;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid #E7E5E4;
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-  }
-  th, td {
-    border: 1px solid #D6D3D1;
-    padding: 7px 10px;
-  }
-  th {
-    background: #F5F5F4;
-    font-weight: 600;
-    text-align: center;
-  }
-  td.num { text-align: right; }
-  td.center { text-align: center; }
-  tfoot td {
-    background: #FFFBEB;
-    font-weight: 700;
-  }
-  .print-btn {
-    display: block;
-    margin: 24px auto 0;
-    padding: 10px 24px;
-    background: #1C1917;
-    color: #fff;
-    border: none;
-    border-radius: 8px;
-    font-size: 13.5px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  @media print {
-    .print-btn { display: none; }
-    body { padding: 0; }
-  }
-</style>
-</head>
-<body>
-  <h1>거래명세서</h1>
-  <div class="sub">엔젤러스 파트너 주문시스템</div>
-  <div class="meta">
-    <span>거래처: <strong>${escapeHtml(customer.customerName)}</strong></span>
-    <span>거래일자: <strong>${date}</strong></span>
-  </div>
-  <table>
-    <thead>
-      <tr>
-        <th style="width:6%">No.</th>
-        <th style="width:18%">제품코드</th>
-        <th style="width:34%">제품명</th>
-        <th style="width:10%">수량</th>
-        <th style="width:14%">공급단가</th>
-        <th style="width:18%">공급금액</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${rowsHtml}
-    </tbody>
-    <tfoot>
-      <tr>
-        <td colspan="3" style="text-align:center">합계</td>
-        <td class="num">${grandQty.toLocaleString()}</td>
-        <td></td>
-        <td class="num">${grandTotal.toLocaleString()}</td>
-      </tr>
-    </tfoot>
-  </table>
-  <button class="print-btn" onclick="window.print()">인쇄 / PDF로 저장</button>
-</body>
-</html>`;
-
-  const win = window.open('', '_blank');
-  if (!win) {
-    alert('팝업이 차단되었습니다. 팝업 허용 후 다시 시도해주세요.');
-    return;
-  }
-  win.document.write(html);
-  win.document.close();
-}
-
-/** HTML 인젝션 방지용 간단 escape. */
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+/** 로젠택배 운송장 조회 페이지를 새 창에서 연다. */
+function openLogenTracking(trackingNumber: string): void {
+  const url = `https://www.ilogen.com/web/personal/trace/${encodeURIComponent(trackingNumber)}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 function MonthlyOrders({
@@ -2336,9 +2179,6 @@ function MonthlyOrders({
               onToggle={() =>
                 setExpandedDate(expandedDate === date ? null : date)
               }
-              onStatement={(date, orders) =>
-                openStatementInNewWindow(date, orders, customer)
-              }
               baseFont={baseFont}
               customer={customer}
               photosByOrder={photosByOrder}
@@ -2357,7 +2197,6 @@ function MonthlyDateCard({
   orders,
   expanded,
   onToggle,
-  onStatement,
   baseFont,
   customer,
   photosByOrder,
@@ -2366,7 +2205,6 @@ function MonthlyDateCard({
   orders: OrderDetail[];
   expanded: boolean;
   onToggle: () => void;
-  onStatement: (date: string, orders: OrderDetail[]) => void;
   baseFont: number;
   customer: CustomerSession;
   photosByOrder?: Map<string, OrderPhoto[]>;
@@ -2422,24 +2260,38 @@ function MonthlyDateCard({
         >
           {fmtWon(totalAmount)}
         </span>
-        <span
-          role="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onStatement(date, orders);
-          }}
-          style={{
-            ...secondaryBtn,
-            height: 26,
-            padding: '0 10px',
-            fontSize: 11,
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-          }}
-        >
-          명세서
-        </span>
+        {(() => {
+          const allTracking = orders.flatMap((o) => o.tracking_numbers ?? []);
+          const trackingNumber = allTracking[0] ?? null;
+          return (
+            <span
+              role="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (trackingNumber) {
+                  openLogenTracking(trackingNumber);
+                }
+              }}
+              style={{
+                ...secondaryBtn,
+                height: 26,
+                padding: '0 10px',
+                fontSize: 11,
+                cursor: trackingNumber ? 'pointer' : 'not-allowed',
+                opacity: trackingNumber ? 1 : 0.45,
+                display: 'inline-flex',
+                alignItems: 'center',
+              }}
+              title={
+                trackingNumber
+                  ? `로젠택배 조회: ${trackingNumber}`
+                  : '송장번호가 등록되지 않았습니다'
+              }
+            >
+              배송조회
+            </span>
+          );
+        })()}
       </button>
       {expanded && (
         <div

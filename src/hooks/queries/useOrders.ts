@@ -21,6 +21,7 @@ const ORDER_SELECT = `
   status,
   source,
   memo,
+  tracking_numbers,
   is_direct_shipping,
   shipping_info,
   created_by,

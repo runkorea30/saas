@@ -1469,6 +1469,7 @@ export type Database = {
           source: string
           status: string
           total_amount: number
+          tracking_numbers: Json | null
           updated_at: string
         }
         Insert: {
@@ -1483,6 +1484,7 @@ export type Database = {
           source: string
           status?: string
           total_amount: number
+          tracking_numbers?: Json | null
           updated_at?: string
         }
         Update: {
@@ -1497,6 +1499,7 @@ export type Database = {
           source?: string
           status?: string
           total_amount?: number
+          tracking_numbers?: Json | null
           updated_at?: string
         }
         Relationships: [
