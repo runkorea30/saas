@@ -20,8 +20,26 @@ interface GroupableWithCreatedAt extends GroupableOrder {
   created_at: string; // 그룹 내 정렬용
 }
 
+/**
+ * ISO timestamp 또는 'YYYY-MM-DD' 양쪽을 받아 KST 기준 yyyy-mm-dd 반환.
+ *
+ * 🔴 단순 .slice(0, 10) 은 ISO UTC 앞 10자 → KST 자정~09시 등록 건이 전날
+ *    그룹으로 빠지는 버그(거래명세서 출력 시 어제 묶음에 포함). 'YYYY-MM-DD'
+ *    문자열은 이미 날짜이므로 그대로, ISO timestamp 는 KST 변환 후 추출.
+ */
+function toKstDateKey(input: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return input.slice(0, 10);
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  const y = kst.getUTCFullYear();
+  const m = String(kst.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(kst.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function groupKeyOf(order: GroupableOrder): string {
-  const dateKey = order.order_date.slice(0, 10);
+  const dateKey = toKstDateKey(order.order_date);
   const customerKey = order.customer?.id ?? `__no_customer_${order.id}`;
   return `${dateKey}__${customerKey}`;
 }

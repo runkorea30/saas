@@ -35,6 +35,11 @@ function toKstDateKey(iso: string): string {
   return `${y}-${m}-${dd}`;
 }
 
+/** YYYY-MM (KST 기준) 추출 — 월별 매출/미수금 집계 키. */
+function toKstMonthKey(iso: string): string {
+  return toKstDateKey(iso).slice(0, 7);
+}
+
 interface OrderRow {
   id: string;
   customer_id: string;
@@ -784,7 +789,9 @@ export function calcMonthlyReconciliation(
     }
   >();
   for (const o of orders) {
-    const month = o.order_date.slice(0, 7);
+    // 🔴 KST 새벽 0~9시 등록 주문이 UTC 기준 전월로 매핑되어 매출이 전월
+    //    합계에 잘못 합산되던 버그 수정 (toKstMonthKey 사용).
+    const month = toKstMonthKey(o.order_date);
     const key = `${o.customer_id}__${month}`;
     const cycle = (o.settlement_cycle || '익월') as Cycle;
     const existing = salesMap.get(key);
