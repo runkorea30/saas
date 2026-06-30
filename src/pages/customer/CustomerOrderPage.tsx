@@ -1093,6 +1093,39 @@ function LeftPanel({
         customer.customerId,
       );
 
+      // 4-1) 이미지/PDF(파싱 불가) — 빈 주문을 즉시 생성해 OPS 주문 목록에서 보이게 함.
+      //      품목 0건/총액 0원 + attachment_url 로 원본 이미지 연결.
+      //      운영자가 OrderDetailPane 에서 이미지를 보며 직접 품목을 입력.
+      if (!parsable && uploadedFileUrl) {
+        const { data: imageOrder, error: imageOrderErr } = await supabase
+          .from('orders')
+          .insert({
+            company_id: customer.companyId,
+            customer_id: customer.customerId,
+            order_date: new Date().toISOString(),
+            status: 'draft',
+            source: 'portal',
+            memo: message || null,
+            attachment_url: uploadedFileUrl,
+            total_amount: 0,
+          } as unknown as {
+            company_id: string;
+            customer_id: string;
+            order_date: string;
+            status: string;
+            source: string;
+            memo: string | null;
+            attachment_url: string;
+            total_amount: number;
+          })
+          .select('id')
+          .single();
+        // eslint-disable-next-line no-console
+        console.log('[customer-file.imageOrder]', { imageOrder, imageOrderErr });
+        if (imageOrderErr) throw imageOrderErr;
+        createdOrderId = imageOrder?.id ?? null;
+      }
+
       // 5) customer_order_uploads — 모든 경우(엑셀/이미지/PDF) 기록
       const { error: uploadErr } = await supabase
         .from('customer_order_uploads')
@@ -1108,9 +1141,8 @@ function LeftPanel({
               ? (filledShipping as unknown as Json)
               : null,
           items: parsed.length > 0 ? (parsed as unknown as Json) : null,
-          // 엑셀 파싱 성공(주문 자동생성)이면 OPS가 별도 확인 불필요 → done.
-          // 이미지/PDF(미파싱)면 OPS가 직접 보고 수동 입력해야 함 → pending.
-          status: matched.length > 0 ? 'done' : 'pending',
+          // 엑셀 파싱(주문 자동생성) 또는 이미지 주문 생성 성공이면 OPS 주문 목록에서 보이므로 done.
+          status: matched.length > 0 || createdOrderId ? 'done' : 'pending',
         });
       // eslint-disable-next-line no-console
       console.log('[customer-file.uploads]', { uploadErr });

@@ -224,6 +224,7 @@ export function OrderListTable(props: OrderListTableProps) {
             const customerName = o.customer?.name ?? '—';
             const showTrash = hoveredId === o.id || deletingId === o.id;
             const isAdd = o.isAdditional;
+            const isImagePending = !!o.attachment_url && o.items.length === 0;
             return (
               <div
                 key={o.id}
@@ -526,7 +527,7 @@ export function OrderListTable(props: OrderListTableProps) {
                   </span>
                 </div>
 
-                {/* 총액 */}
+                {/* 총액 — 이미지 대기 주문은 뱃지로 대체 */}
                 <div
                   style={{
                     textAlign: 'right',
@@ -535,27 +536,53 @@ export function OrderListTable(props: OrderListTableProps) {
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                   }}
-                  title={`₩${o.total_amount.toLocaleString('ko-KR')}`}
+                  title={
+                    isImagePending
+                      ? '이미지파일 대기'
+                      : `₩${o.total_amount.toLocaleString('ko-KR')}`
+                  }
                 >
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: 'var(--ink)',
-                      fontVariantNumeric: 'tabular-nums',
-                    }}
-                  >
-                    {o.total_amount.toLocaleString('ko-KR')}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      color: 'var(--ink-4)',
-                      letterSpacing: '0.04em',
-                    }}
-                  >
-                    KRW
-                  </div>
+                  {isImagePending ? (
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        fontSize: 10.5,
+                        fontWeight: 600,
+                        color: '#9A3412',
+                        background: '#FFEDD5',
+                        border: '1px solid #FDBA74',
+                        borderRadius: 999,
+                        padding: '2px 8px',
+                        letterSpacing: '0.02em',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      이미지파일 대기
+                    </span>
+                  ) : (
+                    <>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: 'var(--ink)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {o.total_amount.toLocaleString('ko-KR')}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: 'var(--ink-4)',
+                          letterSpacing: '0.04em',
+                        }}
+                      >
+                        KRW
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* 상태 */}

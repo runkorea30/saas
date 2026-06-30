@@ -72,6 +72,8 @@ export interface Order {
   memo: string | null;
   /** 운송장 번호 배열. 거의 1건이지만 복수 등록 가능. orders.tracking_numbers (jsonb). */
   tracking_numbers?: string[] | null;
+  /** 거래처가 첨부한 이미지/PDF의 public URL. 품목 0건 + 값 존재 → "이미지파일 대기" 주문. */
+  attachment_url?: string | null;
   /** 직송 여부 — true 이면 OPS 주문내역에서 "직송" 뱃지 표시. */
   is_direct_shipping?: boolean | null;
   /** 직송 정보 배열. JSONB 컬럼 — Supabase 가 객체로 디시리얼라이즈해서 반환. */

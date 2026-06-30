@@ -6,7 +6,7 @@
  * 🔴 CLAUDE.md §2: 공급가/VAT 계산은 calcSupplyAmount 단일 진입점.
  * 🟠 편집 모드: useOrderItems 별도 fetch + draft 임시 모델. 저장 후 ['order-items', orderId] / ['orders'] 양쪽 invalidate.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { FileText, MoreHorizontal, Tag } from 'lucide-react';
 import {
@@ -36,9 +36,17 @@ export function OrderDetailPane({
   const { companyId } = useCompany();
   const queryClient = useQueryClient();
 
+  /** 거래처가 이미지를 보내 생성된 빈 주문(품목 0건 + attachment_url 존재) 판별. */
+  const isImagePendingOrder =
+    !!order?.attachment_url && (order?.items?.length ?? 0) === 0;
   /** 새 행 추가 모드 — 반품추가/주문추가 클릭 시 활성. */
   const [editMode, setEditMode] = useState(false);
   const [draftItems, setDraftItems] = useState<OrderItemDraft[]>([]);
+  /**
+   * 이미지 대기 주문을 열면 자동으로 편집모드 진입(품목 0건이므로 즉시 입력 가능하게).
+   * orderItems 로딩이 끝나 0건임이 확정된 뒤 1회만 트리거.
+   */
+  const autoEditTriggeredRef = useRef<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   /** 수량 인라인 편집의 임시 오버라이드 — blur 시 DB 반영 + 클리어. */
   const [qtyOverrides, setQtyOverrides] = useState<Record<string, number>>({});
@@ -52,6 +60,24 @@ export function OrderDetailPane({
     order?.id ?? null,
     companyId,
   );
+
+  useEffect(() => {
+    if (
+      order &&
+      companyId &&
+      isImagePendingOrder &&
+      !itemsLoading &&
+      orderItems.length === 0 &&
+      autoEditTriggeredRef.current !== order.id
+    ) {
+      autoEditTriggeredRef.current = order.id;
+      setEditMode(true);
+      setDraftItems([
+        createNewDraft({ orderId: order.id, companyId, isReturn: false }),
+      ]);
+    }
+  }, [order, companyId, isImagePendingOrder, itemsLoading, orderItems.length]);
+
   const { data: products = [] } = useProducts(companyId);
   // 🟠 재고부족 표시 + 재고확인 일괄조정용 — Map<product_id, ProductStockInfo>.
   const { data: stockSummary } = useInventoryStock(companyId);
@@ -555,6 +581,52 @@ export function OrderDetailPane({
             주문추가
           </button>
         </div>
+        {order.attachment_url && (
+          <div
+            style={{
+              marginTop: 10,
+              marginBottom: 4,
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              padding: '10px',
+              background: '#FFF7ED',
+              border: '1px solid #FDBA74',
+              borderRadius: 8,
+            }}
+          >
+            <a
+              href={order.attachment_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="원본 이미지를 새 탭에서 보기"
+              style={{ flexShrink: 0 }}
+            >
+              <img
+                src={order.attachment_url}
+                alt="거래처 첨부 이미지"
+                style={{
+                  width: 96,
+                  height: 96,
+                  objectFit: 'cover',
+                  borderRadius: 6,
+                  border: '1px solid #FDBA74',
+                  cursor: 'zoom-in',
+                  display: 'block',
+                }}
+              />
+            </a>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 2 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#9A3412' }}>
+                거래처가 보낸 이미지
+              </span>
+              <span style={{ fontSize: 11.5, color: '#7C2D12', lineHeight: 1.5 }}>
+                이미지를 클릭하면 새 탭에서 원본을 볼 수 있습니다.
+                이미지를 보면서 아래 품목 입력을 직접 진행해주세요.
+              </span>
+            </div>
+          </div>
+        )}
         <TrackingNumberSection
           orderId={order.id}
           initialTrackingNumbers={order.tracking_numbers ?? []}
