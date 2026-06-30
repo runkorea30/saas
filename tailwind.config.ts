@@ -9,7 +9,12 @@ import animate from 'tailwindcss-animate';
  *   직접 노출해 `bg-brand-wash`, `text-ink-2` 식으로 사용 가능하게 함.
  */
 const config: Config = {
-  darkMode: ['class', '[data-theme="dark"]'],
+  darkMode: [
+    'class',
+    '[data-theme="dark-true"]',
+    '[data-theme="dark-gray"]',
+    '[data-theme="dark-sepia"]',
+  ],
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     container: {

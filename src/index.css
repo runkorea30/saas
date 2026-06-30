@@ -95,70 +95,211 @@
     --ring: 351 55% 27%;                   /* --brand */
   }
 
-  html[data-theme='dark'],
-  .dark {
-    /* ───── Claude Design HEX 토큰 (다크) ───── */
-    --bg: #181512;
-    --bg-sunken: #13100E;
-    --surface: #201C18;
-    --surface-2: #262119;
-    --line: #322C25;
-    --line-strong: #40382F;
+  /* ════════════════════════════════════════════════════════════════════
+     테마 1: True Dark — 거의 순흑 차분한 다크.
+     배경 #0B0B0B / 카드 #1A1A1A / 텍스트 #E8E8E6 (순백 금지, 눈부심 방지)
+     포인트 컬러는 Deep Burgundy 를 다크 배경에 맞게 살짝 밝힘 (#8A3340).
+     ──────────────────────────────────────────────────────────────────── */
+  html[data-theme='dark-true'] {
+    --bg: #0B0B0B;
+    --bg-sunken: #050505;
+    --surface: #1A1A1A;
+    --surface-2: #222222;
+    --line: #2C2C2A;
+    --line-strong: #3A3A38;
 
-    --ink: #ECE3D2;
-    --ink-2: #BEB4A2;
-    --ink-3: #897F6F;
-    --ink-4: #615848;
+    --ink: #E8E8E6;
+    --ink-2: #BFBFBC;
+    --ink-3: #8A8A87;
+    --ink-4: #5A5A57;
 
-    --brand: #C47A80;
-    --brand-deep: #B15F66;
-    --brand-ink: #E8C1C3;
-    --brand-wash: #3A1F23;
-    --brand-wash-2: #4A2329;
+    --brand: #8A3340;
+    --brand-deep: #6B1F2A;
+    --brand-ink: #E8B8BD;
+    --brand-wash: #2A1218;
+    --brand-wash-2: #3A1820;
 
-    --tan: #CE9A6D;
-    --tan-wash: #3A2A1D;
+    --tan: #C28F62;
+    --tan-wash: #2A1F14;
 
     --success: #8CB482;
-    --success-wash: #24311F;
+    --success-wash: #1E2A1B;
     --warning: #D9B16A;
-    --warning-wash: #3A2E18;
+    --warning-wash: #2E2516;
     --danger: #D78479;
-    --danger-wash: #3B1F1C;
+    --danger-wash: #2F1C19;
     --info: #8DB0CC;
-    --info-wash: #1F2A36;
+    --info-wash: #1A2330;
 
-    --side-bg: #0F0D0B;
-    --side-bg-2: #15110E;
-    --side-line: #231E19;
-    --side-ink: #CFC4B0;
-    --side-ink-2: #7D7365;
-    --side-ink-dim: #524A3F;
+    --side-bg: #050505;
+    --side-bg-2: #101010;
+    --side-line: #1F1F1F;
+    --side-ink: #D0D0CE;
+    --side-ink-2: #7F7F7C;
+    --side-ink-dim: #555552;
+
+    --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4);
+
+    /* ── shadcn HSL 브릿지 ── */
+    --background: 0 0% 4%;                 /* --bg #0B0B0B */
+    --foreground: 60 5% 91%;               /* --ink #E8E8E6 */
+    --card: 0 0% 10%;                      /* --surface #1A1A1A */
+    --card-foreground: 60 5% 91%;
+    --popover: 0 0% 10%;
+    --popover-foreground: 60 5% 91%;
+    --primary: 351 46% 37%;                /* --brand #8A3340 */
+    --primary-foreground: 60 5% 91%;
+    --secondary: 0 0% 13%;                 /* --surface-2 */
+    --secondary-foreground: 60 5% 91%;
+    --muted: 0 0% 13%;
+    --muted-foreground: 60 2% 54%;         /* --ink-3 */
+    --accent: 351 41% 12%;                 /* --brand-wash */
+    --accent-foreground: 351 56% 82%;      /* --brand-ink */
+    --destructive: 8 53% 66%;              /* --danger */
+    --destructive-foreground: 0 0% 4%;
+    --border: 60 4% 17%;                   /* --line */
+    --input: 60 4% 17%;
+    --ring: 351 46% 37%;
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     테마 2: 다크그레이 — 차콜 그레이.
+     순흑이 아닌 차분한 회색 톤. 장시간 작업에 가장 무난.
+     포인트 컬러는 True Dark 와 동일 계열 사용.
+     ──────────────────────────────────────────────────────────────────── */
+  html[data-theme='dark-gray'] {
+    --bg: #2C2C2A;
+    --bg-sunken: #232321;
+    --surface: #3A3A38;
+    --surface-2: #424240;
+    --line: #4A4A47;
+    --line-strong: #5A5A57;
+
+    --ink: #F1EFE8;
+    --ink-2: #C8C5BB;
+    --ink-3: #95918A;
+    --ink-4: #67645E;
+
+    --brand: #9A4250;
+    --brand-deep: #6B1F2A;
+    --brand-ink: #EFC6CB;
+    --brand-wash: #3F2228;
+    --brand-wash-2: #4D2A32;
+
+    --tan: #C99672;
+    --tan-wash: #3A2A1D;
+
+    --success: #95BB89;
+    --success-wash: #2A3527;
+    --warning: #DDB874;
+    --warning-wash: #3D311E;
+    --danger: #DC8C81;
+    --danger-wash: #3D2521;
+    --info: #95B7D1;
+    --info-wash: #243140;
+
+    --side-bg: #1F1F1D;
+    --side-bg-2: #262624;
+    --side-line: #2F2F2D;
+    --side-ink: #DAD7CD;
+    --side-ink-2: #8E8B83;
+    --side-ink-dim: #65625B;
 
     --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.2);
-    --shadow: 0 1px 0 rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow: 0 1px 0 rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.3);
     --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
 
-    /* ───── shadcn HSL 브릿지 (다크) ───── */
-    --background: 30 14% 8%;               /* --bg #181512 */
-    --foreground: 40 45% 87%;              /* --ink #ECE3D2 */
-    --card: 30 14% 11%;                    /* --surface */
-    --card-foreground: 40 45% 87%;
-    --popover: 30 14% 11%;
-    --popover-foreground: 40 45% 87%;
-    --primary: 355 37% 62%;                /* --brand #C47A80 */
-    --primary-foreground: 30 14% 8%;
-    --secondary: 37 21% 12%;               /* --surface-2 */
-    --secondary-foreground: 40 45% 87%;
-    --muted: 37 21% 12%;
-    --muted-foreground: 37 11% 49%;        /* --ink-3 */
-    --accent: 355 30% 18%;                 /* --brand-wash */
-    --accent-foreground: 355 37% 62%;
-    --destructive: 6 54% 66%;              /* --danger */
-    --destructive-foreground: 30 14% 8%;
-    --border: 32 15% 17%;                  /* --line */
-    --input: 32 15% 17%;
-    --ring: 355 37% 62%;
+    /* ── shadcn HSL 브릿지 ── */
+    --background: 60 4% 17%;               /* --bg #2C2C2A */
+    --foreground: 47 24% 93%;              /* --ink #F1EFE8 */
+    --card: 60 3% 22%;                     /* --surface #3A3A38 */
+    --card-foreground: 47 24% 93%;
+    --popover: 60 3% 22%;
+    --popover-foreground: 47 24% 93%;
+    --primary: 351 40% 43%;                /* --brand #9A4250 */
+    --primary-foreground: 47 24% 93%;
+    --secondary: 60 2% 25%;                /* --surface-2 */
+    --secondary-foreground: 47 24% 93%;
+    --muted: 60 2% 25%;
+    --muted-foreground: 36 5% 56%;         /* --ink-3 */
+    --accent: 351 31% 19%;                 /* --brand-wash */
+    --accent-foreground: 351 58% 86%;      /* --brand-ink */
+    --destructive: 7 60% 68%;              /* --danger */
+    --destructive-foreground: 60 4% 17%;
+    --border: 60 2% 28%;                   /* --line */
+    --input: 60 2% 28%;
+    --ring: 351 40% 43%;
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     테마 3: 웜 세피아 — 갈색 톤 다크.
+     장시간 가독성 + 종이같은 따뜻한 느낌.
+     포인트 컬러는 앰버(#BA7517) — 버건디 대신 세피아와 어울리는 톤.
+     ──────────────────────────────────────────────────────────────────── */
+  html[data-theme='dark-sepia'] {
+    --bg: #2B2620;
+    --bg-sunken: #221E18;
+    --surface: #3A3328;
+    --surface-2: #423A2E;
+    --line: #4A4233;
+    --line-strong: #5C523F;
+
+    --ink: #E8DDC9;
+    --ink-2: #C5B89F;
+    --ink-3: #968971;
+    --ink-4: #67604F;
+
+    --brand: #BA7517;
+    --brand-deep: #8E5810;
+    --brand-ink: #F0C683;
+    --brand-wash: #3A2A12;
+    --brand-wash-2: #4A361A;
+
+    --tan: #D49C5B;
+    --tan-wash: #3A2A1D;
+
+    --success: #9FBA7A;
+    --success-wash: #2A331D;
+    --warning: #D9A85F;
+    --warning-wash: #3A2C16;
+    --danger: #D67866;
+    --danger-wash: #3A2018;
+    --info: #A6B8C2;
+    --info-wash: #232D33;
+
+    --side-bg: #1E1A14;
+    --side-bg-2: #25211A;
+    --side-line: #322B22;
+    --side-ink: #D5C8AE;
+    --side-ink-2: #8E8268;
+    --side-ink-dim: #635A47;
+
+    --shadow-sm: 0 1px 0 rgba(20, 12, 0, 0.3), 0 1px 2px rgba(20, 12, 0, 0.3);
+    --shadow: 0 1px 0 rgba(20, 12, 0, 0.35), 0 2px 8px rgba(20, 12, 0, 0.4);
+    --shadow-lg: 0 10px 30px rgba(20, 12, 0, 0.55), 0 2px 6px rgba(20, 12, 0, 0.35);
+
+    /* ── shadcn HSL 브릿지 ── */
+    --background: 33 15% 15%;              /* --bg #2B2620 */
+    --foreground: 39 40% 85%;              /* --ink #E8DDC9 */
+    --card: 37 18% 19%;                    /* --surface #3A3328 */
+    --card-foreground: 39 40% 85%;
+    --popover: 37 18% 19%;
+    --popover-foreground: 39 40% 85%;
+    --primary: 35 78% 41%;                 /* --brand #BA7517 */
+    --primary-foreground: 39 40% 85%;
+    --secondary: 35 18% 22%;               /* --surface-2 */
+    --secondary-foreground: 39 40% 85%;
+    --muted: 35 18% 22%;
+    --muted-foreground: 35 14% 52%;        /* --ink-3 */
+    --accent: 32 53% 15%;                  /* --brand-wash */
+    --accent-foreground: 35 79% 73%;       /* --brand-ink */
+    --destructive: 10 58% 62%;             /* --danger */
+    --destructive-foreground: 33 15% 15%;
+    --border: 39 18% 25%;                  /* --line */
+    --input: 39 18% 25%;
+    --ring: 35 78% 41%;
   }
 
   * {
@@ -188,10 +329,25 @@
     background-position: 0 0, 1px 2px;
   }
 
-  html[data-theme='dark'] body {
+  /* True Dark — 미세한 회색 grain, 거의 보이지 않게 */
+  html[data-theme='dark-true'] body {
     background-image:
-      radial-gradient(rgba(255, 240, 200, 0.015) 1px, transparent 1px),
-      radial-gradient(rgba(255, 240, 200, 0.01) 1px, transparent 1px);
+      radial-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px),
+      radial-gradient(rgba(255, 255, 255, 0.008) 1px, transparent 1px);
+  }
+
+  /* Dark Gray — 약간 더 보이는 중성 grain */
+  html[data-theme='dark-gray'] body {
+    background-image:
+      radial-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+      radial-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px);
+  }
+
+  /* Dark Sepia — 따뜻한 베이지 grain (종이 질감 유지) */
+  html[data-theme='dark-sepia'] body {
+    background-image:
+      radial-gradient(rgba(255, 220, 170, 0.022) 1px, transparent 1px),
+      radial-gradient(rgba(255, 220, 170, 0.015) 1px, transparent 1px);
   }
 
   a {
