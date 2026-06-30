@@ -395,6 +395,17 @@ function Header({
       >
         <span
           style={{
+            fontSize: 15,
+            fontWeight: 700,
+            color: '#1C1917',
+            letterSpacing: '-0.01em',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          엔젤러스 파트너 주문시스템
+        </span>
+        <span
+          style={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: 8,
@@ -2006,114 +2017,167 @@ function TodayOrders({
 // ───────────────────────────────────────────────────────────
 
 /**
- * 날짜별 주문 내역 명세서 xlsx 다운로드.
- * 거래처 포털 전용 — 해당 날짜의 전체 품목을 한 시트에 출력.
+ * 날짜별 거래명세서를 새 창(탭)에 HTML로 렌더.
+ * 거래처 포털 전용 — 브라우저 인쇄 기능으로 PDF 저장도 가능.
  */
-function handleDownloadStatement(
+function openStatementInNewWindow(
   date: string,
   orders: OrderDetail[],
   customer: CustomerSession,
 ): void {
-  const borderAll = {
-    top:    { style: 'thin' },
-    bottom: { style: 'thin' },
-    left:   { style: 'thin' },
-    right:  { style: 'thin' },
-  } as const;
-
-  const headerStyle = {
-    font: { bold: true, sz: 10 },
-    fill: { patternType: 'solid', fgColor: { rgb: 'FFE5E7EB' } },
-    alignment: { horizontal: 'center', vertical: 'center' },
-    border: borderAll,
-  };
-  const cellStyle = {
-    font: { sz: 10 },
-    alignment: { vertical: 'center' },
-    border: borderAll,
-  };
-  const cellRight = {
-    ...cellStyle,
-    alignment: { horizontal: 'right', vertical: 'center' },
-    numFmt: '#,##0',
-  };
-  const totalStyle = {
-    font: { bold: true, sz: 10 },
-    fill: { patternType: 'solid', fgColor: { rgb: 'FFFFF9C4' } },
-    alignment: { horizontal: 'right', vertical: 'center' },
-    border: borderAll,
-    numFmt: '#,##0',
-  };
-  const totalLabelStyle = {
-    font: { bold: true, sz: 10 },
-    fill: { patternType: 'solid', fgColor: { rgb: 'FFFFF9C4' } },
-    alignment: { horizontal: 'center', vertical: 'center' },
-    border: borderAll,
-  };
-
-  type Cell = { v?: string | number; f?: string; t: 's' | 'n'; s?: object };
-  const t = (v: string, s?: object): Cell => ({ v, t: 's', ...(s ? { s } : {}) });
-  const n = (v: number, s?: object): Cell => ({ v, t: 'n', ...(s ? { s } : {}) });
-
-  const wsData: Cell[][] = [];
-  wsData.push([
-    t('No.',        headerStyle),
-    t('제품코드',   headerStyle),
-    t('제품명',     headerStyle),
-    t('수량',       headerStyle),
-    t('공급단가',   headerStyle),
-    t('공급금액',   headerStyle),
-  ]);
-
   let rowNo = 1;
   let grandTotal = 0;
   let grandQty = 0;
 
-  for (const order of orders) {
-    for (const item of order.items) {
-      if (!item.product) continue;
-      const supplyPrice = calcSupplyPriceByCustomerGrade(
-        item.product.sell_price,
-        customer.grade,
-        item.product,
-      );
-      const amount = item.quantity * supplyPrice;
-      grandTotal += amount;
-      grandQty   += item.quantity;
+  const rowsHtml = orders
+    .flatMap((order) =>
+      order.items
+        .filter((item) => item.product)
+        .map((item) => {
+          const supplyPrice = calcSupplyPriceByCustomerGrade(
+            item.product!.sell_price,
+            customer.grade,
+            item.product!,
+          );
+          const amount = item.quantity * supplyPrice;
+          grandTotal += amount;
+          grandQty += item.quantity;
+          return `
+            <tr>
+              <td class="num">${rowNo++}</td>
+              <td class="center">${escapeHtml(item.product!.code)}</td>
+              <td>${escapeHtml(item.product!.name)}</td>
+              <td class="num">${item.quantity.toLocaleString()}</td>
+              <td class="num">${supplyPrice.toLocaleString()}</td>
+              <td class="num">${amount.toLocaleString()}</td>
+            </tr>`;
+        }),
+    )
+    .join('');
 
-      wsData.push([
-        n(rowNo++,                cellRight),
-        t(item.product.code,      { ...cellStyle, alignment: { horizontal: 'center', vertical: 'center' } }),
-        t(item.product.name,      cellStyle),
-        n(item.quantity,          cellRight),
-        n(supplyPrice,            cellRight),
-        n(amount,                 cellRight),
-      ]);
-    }
+  const html = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>거래명세서 - ${escapeHtml(customer.customerName)} (${date})</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #1C1917;
+    padding: 40px;
+    max-width: 760px;
+    margin: 0 auto;
+    background: #fff;
   }
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 0 0 4px;
+    text-align: center;
+  }
+  .sub {
+    text-align: center;
+    color: #78716C;
+    font-size: 13px;
+    margin-bottom: 28px;
+  }
+  .meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #E7E5E4;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td {
+    border: 1px solid #D6D3D1;
+    padding: 7px 10px;
+  }
+  th {
+    background: #F5F5F4;
+    font-weight: 600;
+    text-align: center;
+  }
+  td.num { text-align: right; }
+  td.center { text-align: center; }
+  tfoot td {
+    background: #FFFBEB;
+    font-weight: 700;
+  }
+  .print-btn {
+    display: block;
+    margin: 24px auto 0;
+    padding: 10px 24px;
+    background: #1C1917;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  @media print {
+    .print-btn { display: none; }
+    body { padding: 0; }
+  }
+</style>
+</head>
+<body>
+  <h1>거래명세서</h1>
+  <div class="sub">엔젤러스 파트너 주문시스템</div>
+  <div class="meta">
+    <span>거래처: <strong>${escapeHtml(customer.customerName)}</strong></span>
+    <span>거래일자: <strong>${date}</strong></span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:6%">No.</th>
+        <th style="width:18%">제품코드</th>
+        <th style="width:34%">제품명</th>
+        <th style="width:10%">수량</th>
+        <th style="width:14%">공급단가</th>
+        <th style="width:18%">공급금액</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="3" style="text-align:center">합계</td>
+        <td class="num">${grandQty.toLocaleString()}</td>
+        <td></td>
+        <td class="num">${grandTotal.toLocaleString()}</td>
+      </tr>
+    </tfoot>
+  </table>
+  <button class="print-btn" onclick="window.print()">인쇄 / PDF로 저장</button>
+</body>
+</html>`;
 
-  wsData.push([
-    t('합계', totalLabelStyle),
-    t('',     totalLabelStyle),
-    t('',     totalLabelStyle),
-    n(grandQty,   totalStyle),
-    t('',         totalLabelStyle),
-    n(grandTotal, totalStyle),
-  ]);
+  const win = window.open('', '_blank');
+  if (!win) {
+    alert('팝업이 차단되었습니다. 팝업 허용 후 다시 시도해주세요.');
+    return;
+  }
+  win.document.write(html);
+  win.document.close();
+}
 
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [
-    { wch: 6  },
-    { wch: 16 },
-    { wch: 32 },
-    { wch: 8  },
-    { wch: 12 },
-    { wch: 14 },
-  ];
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, '명세서');
-  XLSX.writeFile(wb, `명세서_${customer.customerName}_${date}.xlsx`);
+/** HTML 인젝션 방지용 간단 escape. */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function MonthlyOrders({
@@ -2237,7 +2301,7 @@ function MonthlyOrders({
                 setExpandedDate(expandedDate === date ? null : date)
               }
               onStatement={(date, orders) =>
-                handleDownloadStatement(date, orders, customer)
+                openStatementInNewWindow(date, orders, customer)
               }
               baseFont={baseFont}
               customer={customer}
