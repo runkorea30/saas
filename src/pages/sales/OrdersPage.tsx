@@ -16,6 +16,7 @@ import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
 import { useResizableSplit } from '@/hooks/useResizableSplit';
 import { useOrders } from '@/hooks/queries/useOrders';
+import { getSameDayCustomerOrderIds } from '@/utils/orderGrouping';
 import { OrderListTable } from '@/components/feature/orders/OrderListTable';
 import { OrderDetailPane } from '@/components/feature/orders/OrderDetailPane';
 import { OrderBulkBar } from '@/components/feature/orders/OrderBulkBar';
@@ -75,7 +76,7 @@ export function OrdersPage() {
     ?.selectedOrderId;
 
   // ───── 필터 상태 ─────
-  const [period, setPeriod] = useState<PeriodKey>('month');
+  const [period, setPeriod] = useState<PeriodKey>('today');
   const [custom, setCustom] = useState<{ from: string; to: string }>({
     from: '2026-03-01',
     to: '2026-04-19',
@@ -213,6 +214,8 @@ export function OrdersPage() {
     groupedOrders.find((o) => o.id === selectedId) ?? null;
 
   // ───── 체크박스 일괄 ─────
+  // 같은 거래처 + 같은 날짜(시간 무관) 묶음 처리는 utils/orderGrouping 의 공용
+  // 유틸 사용. 체크박스 경로와 우클릭 경로가 동일 함수를 호출해 정의가 한 곳에만 존재.
   const pageIds = pageRows.map((o) => o.id);
   const allPageChecked = pageIds.length > 0 && pageIds.every((id) => checked[id]);
   const somePageChecked = pageIds.some((id) => checked[id]);
@@ -225,10 +228,12 @@ export function OrdersPage() {
     });
   };
   const toggleOne = (id: string) => {
+    const ids = getSameDayCustomerOrderIds(groupedOrders, id);
     setChecked((c) => {
+      const willCheck = !c[id];
       const next = { ...c };
-      if (next[id]) delete next[id];
-      else next[id] = true;
+      if (willCheck) ids.forEach((i) => (next[i] = true));
+      else ids.forEach((i) => delete next[i]);
       return next;
     });
   };
@@ -336,10 +341,14 @@ export function OrdersPage() {
     orderId: string;
   } | null>(null);
 
-  /** 우클릭 메뉴에서 단일 주문 거래명세서 출력 — handlePrintInvoice에 overrideIds 전달. */
+  /**
+   * 우클릭 메뉴에서 거래명세서 출력 — 같은 거래처+같은 날짜 묶음 전체를 포함해
+   * handlePrintInvoice 에 전달. (체크박스 경로와 동일한 그룹 규칙.)
+   */
   const handlePrintSingleInvoice = (orderId: string) => {
     setContextMenu(null);
-    void handlePrintInvoice([orderId]);
+    const ids = getSameDayCustomerOrderIds(groupedOrders, orderId);
+    void handlePrintInvoice(ids);
   };
 
   /** 우클릭 메뉴에서 상태 직접 변경. */
