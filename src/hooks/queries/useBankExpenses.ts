@@ -204,13 +204,18 @@ export function useUploadBankExpenses() {
       const batchYear = firstDate.getUTCFullYear();
       const batchMonth = firstDate.getUTCMonth() + 1;
 
+      // 🔴 upload_date 는 DATE 컬럼 — toISOString().slice(0,10) 은 UTC 기준이라
+      //    KST 자정~09시 업로드 시 전날로 저장됨. KST 보정 후 yyyy-mm-dd 추출.
+      const nowKst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+      const uploadDate = `${nowKst.getUTCFullYear()}-${String(nowKst.getUTCMonth() + 1).padStart(2, '0')}-${String(nowKst.getUTCDate()).padStart(2, '0')}`;
+
       const { data: upload, error: uploadErr } = await supabase
         .from('bank_expense_uploads')
         .insert({
           company_id: companyId,
           account_name: accountName,
           account_number: parsed.account_number,
-          upload_date: new Date().toISOString().slice(0, 10),
+          upload_date: uploadDate,
           year: batchYear,
           month: batchMonth,
           row_count: parsed.rows.length,
