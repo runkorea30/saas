@@ -10,7 +10,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Calendar, Download, FileText, Flag, Plus, Users } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
 import { useResizableSplit } from '@/hooks/useResizableSplit';
 import { useOrders } from '@/hooks/queries/useOrders';
@@ -66,6 +68,7 @@ function toIso(d: Date): string {
 
 export function OrdersPage() {
   const { companyId, isLoading: companyLoading } = useCompany();
+  const queryClient = useQueryClient();
   const location = useLocation();
   const navigate = useNavigate();
   const incomingOrderId = (location.state as { selectedOrderId?: string } | null)
@@ -240,11 +243,13 @@ export function OrdersPage() {
   // ───── 거래명세서 인쇄 ─────
   const [printGroups, setPrintGroups] = useState<InvoiceCustomerGroup[] | null>(null);
 
-  const handlePrintInvoice = () => {
+  const handlePrintInvoice = async (overrideIds?: string[]) => {
     // 체크된 주문만 추출 — filtered 전체에서 가져와야 페이지네이션을 넘어선 선택도 포함.
     //   거래처 → created_at 오름차순으로 미리 정렬해두면 아래 push 가 그대로 본주문→추가주문 순서가 됨.
+    //   overrideIds 가 있으면(우클릭 메뉴 진입) 그 id 만, 없으면 체크박스 기반.
+    const idSet = overrideIds ? new Set(overrideIds) : null;
     const selected = filtered
-      .filter((o) => checked[o.id])
+      .filter((o) => (idSet ? idSet.has(o.id) : checked[o.id]))
       .slice()
       .sort((a, b) => {
         const ac = a.customer?.id ?? '';
@@ -303,12 +308,50 @@ export function OrdersPage() {
     const groups = Array.from(map.values());
     groups.sort((a, b) => a.customer.name.localeCompare(b.customer.name, 'ko'));
 
+    // 🔴 거래명세서 출력 = 주문 확정 의미 — 출력 대상 주문들을 'confirmed' 로 일괄 변경.
+    //    이미 confirmed/shipped/done/canceled 인 주문도 confirmed 로 덮어쓰는 것은
+    //    의도된 동작(재출력 시에도 최신 확정 처리 유지).
+    const selectedIds = selected.map((o) => o.id);
+    if (companyId && selectedIds.length > 0) {
+      await supabase
+        .from('orders')
+        .update({ status: 'confirmed' })
+        .in('id', selectedIds)
+        .eq('company_id', companyId);
+      await queryClient.invalidateQueries({ queryKey: ['orders'] });
+    }
+
     setPrintGroups(groups);
     // 다음 페인트 사이클에 인쇄 → afterprint 시점에 state 초기화.
     setTimeout(() => {
       window.print();
       setPrintGroups(null);
     }, 300);
+  };
+
+  // ───── 우클릭 컨텍스트 메뉴 ─────
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    orderId: string;
+  } | null>(null);
+
+  /** 우클릭 메뉴에서 단일 주문 거래명세서 출력 — handlePrintInvoice에 overrideIds 전달. */
+  const handlePrintSingleInvoice = (orderId: string) => {
+    setContextMenu(null);
+    void handlePrintInvoice([orderId]);
+  };
+
+  /** 우클릭 메뉴에서 상태 직접 변경. */
+  const handleChangeStatus = async (orderId: string, status: string) => {
+    setContextMenu(null);
+    if (!companyId) return;
+    await supabase
+      .from('orders')
+      .update({ status })
+      .eq('id', orderId)
+      .eq('company_id', companyId);
+    await queryClient.invalidateQueries({ queryKey: ['orders'] });
   };
 
   return (
@@ -437,7 +480,7 @@ export function OrdersPage() {
             </button>
             <button
               type="button"
-              onClick={handlePrintInvoice}
+              onClick={() => void handlePrintInvoice()}
               disabled={selectedCount === 0}
               className="btn-base"
               style={{
@@ -514,6 +557,9 @@ export function OrdersPage() {
               }
               setSelectedId(id);
             }}
+            onContextMenu={(e, orderId) =>
+              setContextMenu({ x: e.clientX, y: e.clientY, orderId })
+            }
             checked={checked}
             onToggleChecked={toggleOne}
             onTogglePageChecked={togglePage}
@@ -590,6 +636,111 @@ export function OrdersPage() {
           </div>,
           document.body,
         )}
+
+      {contextMenu && (
+        <OrderContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+          onChangeStatus={(status) =>
+            handleChangeStatus(contextMenu.orderId, status)
+          }
+          onPrintInvoice={() => handlePrintSingleInvoice(contextMenu.orderId)}
+        />
+      )}
+    </div>
+  );
+}
+
+function OrderContextMenu({
+  x,
+  y,
+  onClose,
+  onChangeStatus,
+  onPrintInvoice,
+}: {
+  x: number;
+  y: number;
+  onClose: () => void;
+  onChangeStatus: (status: string) => void;
+  onPrintInvoice: () => void;
+}) {
+  useEffect(() => {
+    const handleClick = () => onClose();
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('click', handleClick);
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('click', handleClick);
+      document.removeEventListener('keydown', handleEsc);
+    };
+  }, [onClose]);
+
+  const menuWidth = 180;
+  const adjustedX = Math.min(x, window.innerWidth - menuWidth - 8);
+
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: 'fixed',
+        top: y,
+        left: adjustedX,
+        width: menuWidth,
+        background: 'var(--surface)',
+        border: '1px solid var(--line)',
+        borderRadius: 8,
+        boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+        zIndex: 1000,
+        padding: 4,
+        fontSize: 12.5,
+      }}
+    >
+      <button
+        type="button"
+        onClick={onPrintInvoice}
+        style={{
+          width: '100%',
+          textAlign: 'left',
+          padding: '7px 10px',
+          border: 'none',
+          background: 'transparent',
+          cursor: 'pointer',
+          borderRadius: 4,
+          color: 'var(--ink)',
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
+        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+      >
+        거래명세서 출력
+      </button>
+      <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
+      <div style={{ padding: '4px 10px 2px', fontSize: 10.5, color: 'var(--ink-3)' }}>
+        상태 변경
+      </div>
+      {STATUS_OPTIONS.map((opt) => (
+        <button
+          key={opt.id}
+          type="button"
+          onClick={() => onChangeStatus(opt.id)}
+          style={{
+            width: '100%',
+            textAlign: 'left',
+            padding: '7px 10px',
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            borderRadius: 4,
+            color: 'var(--ink)',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+        >
+          {opt.label}
+        </button>
+      ))}
     </div>
   );
 }

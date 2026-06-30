@@ -49,6 +49,7 @@ export interface OrderListTableProps {
   orders: OrderWithGroupInfo[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onContextMenu?: (e: React.MouseEvent, orderId: string) => void;
   checked: Record<string, boolean>;
   onToggleChecked: (id: string) => void;
   onTogglePageChecked: () => void;
@@ -95,6 +96,7 @@ export function OrderListTable(props: OrderListTableProps) {
     orders,
     selectedId,
     onSelect,
+    onContextMenu,
     checked,
     onToggleChecked,
     onTogglePageChecked,
@@ -229,6 +231,11 @@ export function OrderListTable(props: OrderListTableProps) {
               <div
                 key={o.id}
                 onClick={() => onSelect(o.id)}
+                onContextMenu={(e) => {
+                  if (!onContextMenu) return;
+                  e.preventDefault();
+                  onContextMenu(e, o.id);
+                }}
                 style={{
                   position: 'relative',
                   display: 'grid',
