@@ -1330,24 +1330,22 @@ function TrackingNumberSection({
               outline: 'none',
             }}
           />
-          {numbers.length > 1 && (
-            <button
-              type="button"
-              onClick={() => handleRemoveRow(idx)}
-              style={{
-                width: 22,
-                height: 22,
-                border: 'none',
-                background: 'transparent',
-                color: '#94A3B8',
-                cursor: 'pointer',
-                fontSize: 13,
-              }}
-              title="삭제"
-            >
-              ×
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => handleRemoveRow(idx)}
+            style={{
+              width: 22,
+              height: 22,
+              border: 'none',
+              background: 'transparent',
+              color: '#94A3B8',
+              cursor: 'pointer',
+              fontSize: 13,
+            }}
+            title="삭제"
+          >
+            ×
+          </button>
         </div>
       ))}
 
