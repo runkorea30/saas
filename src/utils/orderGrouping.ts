@@ -16,6 +16,10 @@ interface GroupableOrder {
   customer: { id: string } | null;
 }
 
+interface GroupableWithCreatedAt extends GroupableOrder {
+  created_at: string; // 그룹 내 정렬용
+}
+
 function groupKeyOf(order: GroupableOrder): string {
   const dateKey = order.order_date.slice(0, 10);
   const customerKey = order.customer?.id ?? `__no_customer_${order.id}`;
@@ -38,4 +42,28 @@ export function getSameDayCustomerOrderIds(
     if (groupKeyOf(o) === targetKey) ids.push(o.id);
   }
   return ids.length > 0 ? ids : [targetOrderId];
+}
+
+/**
+ * `orders` 를 (customer_id, order_date 의 날짜부분) 키로 그룹핑해 nested 배열 반환.
+ * 각 그룹 내부는 created_at 오름차순(본주문 → 추가주문 순). 그룹 자체의 정렬은
+ * 호출자가 결정 — 시간순/최신순 등 용도에 따라 다름.
+ */
+export function groupOrdersByCustomerAndDate<T extends GroupableWithCreatedAt>(
+  orders: readonly T[],
+): T[][] {
+  const map = new Map<string, T[]>();
+  for (const o of orders) {
+    const k = groupKeyOf(o);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k)!.push(o);
+  }
+  const groups = Array.from(map.values());
+  for (const g of groups) {
+    g.sort(
+      (a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    );
+  }
+  return groups;
 }

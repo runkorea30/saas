@@ -7,12 +7,19 @@
  * 🔴 CLAUDE.md §5: 기존 useOrders 재사용 → fetchAllRows 자동 적용.
  */
 import { useMemo, useState } from 'react';
-import { Camera, X } from 'lucide-react';
+import { Camera, ExternalLink, X } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useOrders } from '@/hooks/queries/useOrders';
 import { useOrderPhotosByOrders, type OrderPhoto } from '@/hooks/queries/useOrderPhotos';
 import { OrderPhotoSection } from '@/components/order/OrderPhotoSection';
 import type { Order } from '@/types/orders';
+import {
+  getCarrierLabel,
+  getTrackingUrl,
+  normalizeTrackingNumbers,
+  type TrackingEntry,
+} from '@/utils/shippingCarriers';
+import { groupOrdersByCustomerAndDate } from '@/utils/orderGrouping';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { RefreshButton } from '../components/RefreshButton';
 
@@ -109,6 +116,21 @@ export function OrderListPage() {
   const orderIds = useMemo(() => orders.map((o) => o.id), [orders]);
   const { data: photosByOrder } = useOrderPhotosByOrders(orderIds, companyId);
 
+  // 같은 거래처+같은 날짜 묶음 — 그룹 내 created_at 오름차순, 그룹 자체는 가장
+  // 늦은 주문 기준 최신순(주문일 desc → created_at desc) 으로 표시.
+  const orderGroups = useMemo(() => {
+    const groups = groupOrdersByCustomerAndDate(orders);
+    groups.sort((a, b) => {
+      const aLast = a[a.length - 1];
+      const bLast = b[b.length - 1];
+      if (aLast.order_date !== bLast.order_date) {
+        return aLast.order_date < bLast.order_date ? 1 : -1;
+      }
+      return aLast.created_at < bLast.created_at ? 1 : -1;
+    });
+    return groups;
+  }, [orders]);
+
   // 🟠 출고 사진 바텀시트 모달 — 카드 하단 버튼 클릭 시 열림.
   const [photoModal, setPhotoModal] = useState<{
     orderId: string;
@@ -172,18 +194,26 @@ export function OrderListPage() {
           <div className="m-empty">해당 기간에 주문이 없습니다.</div>
         ) : (
           <div className="m-list">
-            {orders.map((o) => (
-              <OrderCard
-                key={o.id}
-                order={o}
-                photos={photosByOrder?.get(o.id) ?? []}
-                selected={isUnfolded && selected?.id === o.id}
-                onClick={() => setSelectedId(o.id)}
-                onOpenPhoto={() =>
-                  openPhotoModal(o.id, o.customer?.id ?? null)
-                }
-              />
-            ))}
+            {orderGroups.map((group) => {
+              const groupKey = group.map((o) => o.id).join('|');
+              const selectedInGroup =
+                isUnfolded && selected
+                  ? group.some((o) => o.id === selected.id)
+                  : false;
+              return (
+                <OrderGroupCard
+                  key={groupKey}
+                  group={group}
+                  photosByOrder={photosByOrder}
+                  selectedId={selected?.id ?? null}
+                  selectedInGroup={selectedInGroup}
+                  onSelect={(id) => setSelectedId(id)}
+                  onOpenPhoto={(orderId, customerId) =>
+                    openPhotoModal(orderId, customerId)
+                  }
+                />
+              );
+            })}
           </div>
         )}
       </div>
@@ -227,6 +257,347 @@ export function OrderListPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 같은 거래처+같은 날짜 묶음을 표시하는 카드.
+ * - 단일 주문(group.length === 1) 이면 기존 OrderCard 와 동일하게 단순 표시.
+ * - 묶음(2건 이상) 이면 헤더에 그룹 합계 + "N건 묶음" 배지, 카드 안에 각 주문을
+ *   "최초/추가1/추가2..." 라벨 + 시간 + 개별 금액 으로 나열. 각 행 탭 시 그 주문을
+ *   선택(Z Fold 펼침에서 OrderDetail 갱신).
+ * - 송장: 묶음 전체 송장을 하나의 strip 으로 통합 표시.
+ * - 사진: 묶음 내 모든 주문의 사진 썸네일 + 본주문 ID 기준 모달 진입.
+ */
+function OrderGroupCard({
+  group,
+  photosByOrder,
+  selectedId,
+  selectedInGroup,
+  onSelect,
+  onOpenPhoto,
+}: {
+  group: Order[];
+  photosByOrder: Map<string, OrderPhoto[]> | undefined;
+  selectedId: string | null;
+  selectedInGroup: boolean;
+  onSelect: (orderId: string) => void;
+  onOpenPhoto: (orderId: string, customerId: string | null) => void;
+}) {
+  const first = group[0];
+  if (group.length === 1) {
+    return (
+      <OrderCard
+        order={first}
+        photos={photosByOrder?.get(first.id) ?? []}
+        selected={selectedInGroup}
+        onClick={() => onSelect(first.id)}
+        onOpenPhoto={() => onOpenPhoto(first.id, first.customer?.id ?? null)}
+      />
+    );
+  }
+  // ── 묶음 카드 ──
+  const groupTotal = group.reduce((s, o) => s + o.total_amount, 0);
+  const groupQty = group.reduce(
+    (s, o) => s + o.items.reduce((x, it) => x + (it.quantity ?? 0), 0),
+    0,
+  );
+  const grade = first.customer?.grade ?? null;
+  const status = statusBadge(first.status);
+  const trackingEntries = group.flatMap((o) =>
+    normalizeTrackingNumbers(o.tracking_numbers),
+  );
+  const photos = group.flatMap((o) => photosByOrder?.get(o.id) ?? []);
+  const hasPhoto = photos.length > 0;
+  const THUMB_LIMIT = 4;
+  const thumbs = photos.slice(0, THUMB_LIMIT);
+  const extra = Math.max(0, photos.length - THUMB_LIMIT);
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(first.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(first.id);
+        }
+      }}
+      className="m-card"
+      style={{
+        textAlign: 'left',
+        cursor: 'pointer',
+        borderColor: selectedInGroup ? 'var(--m-primary)' : 'var(--m-border)',
+        background: selectedInGroup
+          ? 'var(--m-primary-wash)'
+          : 'var(--m-surface)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      {/* 헤더 — 거래처 / 등급 / 상태 / 묶음 배지 */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          flexWrap: 'wrap',
+        }}
+      >
+        <span style={{ fontWeight: 600, color: 'var(--m-text)' }}>
+          {first.customer?.name ?? '거래처 미상'}
+        </span>
+        {grade && (
+          <span
+            className="m-badge"
+            style={{ background: gradeBadgeColor(grade), color: '#ffffff' }}
+          >
+            {grade.toUpperCase()}
+          </span>
+        )}
+        <span
+          className="m-badge"
+          style={{
+            background: `${status.color}22`,
+            color: status.color,
+            border: `1px solid ${status.color}`,
+          }}
+        >
+          {status.label}
+        </span>
+        <span
+          className="m-badge"
+          style={{
+            background: '#fef3c7',
+            color: '#92400e',
+            border: '1px solid #fcd34d',
+          }}
+          title="같은 거래처 같은 날짜 묶음"
+        >
+          {group.length}건 묶음
+        </span>
+      </div>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          fontSize: 12,
+          color: 'var(--m-text-secondary)',
+        }}
+      >
+        <span className="m-num">{first.order_date?.slice(0, 10)}</span>
+        <span className="m-num">{fmtWon(groupQty)}개</span>
+      </div>
+      <div
+        className="m-num"
+        style={{
+          fontSize: 16,
+          fontWeight: 700,
+          color: 'var(--m-text)',
+          textAlign: 'right',
+        }}
+      >
+        ₩{fmtWon(groupTotal)}
+      </div>
+
+      {/* 묶음 내 각 주문 row — 최초/추가 라벨 + 시간 + 개별 금액 */}
+      <div
+        style={{
+          marginTop: 2,
+          paddingTop: 8,
+          borderTop: '1px solid var(--m-border)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+        }}
+      >
+        {group.map((o, idx) => {
+          const isAdd = idx > 0;
+          const label = isAdd ? `추가${idx}` : '최초';
+          const t = (o.created_at ?? '').slice(11, 16); // HH:MM (UTC 기준 표시)
+          const qty = o.items.reduce((s, it) => s + (it.quantity ?? 0), 0);
+          const isSel = selectedId === o.id;
+          return (
+            <div
+              key={o.id}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect(o.id);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '6px 8px',
+                borderRadius: 8,
+                background: isSel
+                  ? 'rgba(107, 31, 42, 0.10)'
+                  : isAdd
+                    ? '#fffbeb'
+                    : 'transparent',
+                cursor: 'pointer',
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  minWidth: 36,
+                  color: isAdd ? '#92400e' : 'var(--m-primary)',
+                }}
+              >
+                {label}
+              </span>
+              <span
+                className="m-num"
+                style={{
+                  fontSize: 12,
+                  color: 'var(--m-text-secondary)',
+                  minWidth: 48,
+                }}
+              >
+                {t}
+              </span>
+              <span
+                className="m-num"
+                style={{
+                  fontSize: 12,
+                  color: 'var(--m-text-secondary)',
+                  flex: 1,
+                  textAlign: 'right',
+                }}
+              >
+                {fmtWon(qty)}개
+              </span>
+              <span
+                className="m-num"
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: 'var(--m-text)',
+                  minWidth: 80,
+                  textAlign: 'right',
+                }}
+              >
+                ₩{fmtWon(o.total_amount)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 묶음 전체 송장 통합 표시 */}
+      <TrackingNumberStrip entries={trackingEntries} />
+
+      {/* 사진 — 묶음 내 모든 주문의 사진 통합. 모달은 본주문 ID 기준으로 진입. */}
+      <div
+        style={{
+          marginTop: 4,
+          paddingTop: 8,
+          borderTop: '1px solid var(--m-border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        }}
+      >
+        {hasPhoto ? (
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenPhoto(first.id, first.customer?.id ?? null);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              cursor: 'pointer',
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            {thumbs.map((p) => (
+              <div
+                key={p.id}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 6,
+                  overflow: 'hidden',
+                  background: 'var(--m-border)',
+                  flex: '0 0 auto',
+                }}
+              >
+                <img
+                  src={p.storage_url}
+                  alt="출고사진"
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    display: 'block',
+                  }}
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.visibility = 'hidden';
+                  }}
+                />
+              </div>
+            ))}
+            {extra > 0 && (
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: 'var(--m-text-secondary)',
+                  marginLeft: 2,
+                }}
+              >
+                +{extra}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: 11,
+              color: 'var(--m-text-secondary)',
+            }}
+          >
+            <Camera size={12} />
+            <span>사진 없음</span>
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenPhoto(first.id, first.customer?.id ?? null);
+          }}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            fontSize: 11,
+            fontWeight: 600,
+            padding: '4px 10px',
+            borderRadius: 999,
+            border: 0,
+            cursor: 'pointer',
+            background: hasPhoto ? 'var(--m-border)' : 'var(--m-primary)',
+            color: hasPhoto ? 'var(--m-text)' : '#ffffff',
+            flex: '0 0 auto',
+          }}
+        >
+          <Camera size={12} />
+          <span>{hasPhoto ? '사진 보기/추가' : '출고 촬영'}</span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -326,6 +697,12 @@ function OrderCard({
       >
         ₩{fmtWon(order.total_amount)}
       </div>
+
+      {/* 송장번호 — OPS 에서 등록된 데이터를 읽기 전용으로 표시. 조회 가능 택배사는
+          탭 시 새 탭으로 조회 페이지 오픈, 퀵/직접전달은 정보 표시만. */}
+      <TrackingNumberStrip
+        entries={normalizeTrackingNumbers(order.tracking_numbers)}
+      />
 
       {/* 카드 하단: 출고 사진 — 썸네일 직접 표시 + 촬영/추가 버튼 */}
       <div
@@ -437,7 +814,66 @@ function OrderCard({
   );
 }
 
+/**
+ * 송장번호 가로 스트립 — "택배사명:송장번호" 형태의 칩 나열.
+ * 조회 URL 이 있는 택배사(로젠/CJ/한진/우체국)는 탭 시 새 탭 오픈,
+ * 퀵/직접전달은 회색 칩으로만 표시. 입력/등록 UI 없음 — 조회 전용.
+ */
+function TrackingNumberStrip({ entries }: { entries: TrackingEntry[] }) {
+  if (entries.length === 0) return null;
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 6,
+        alignItems: 'center',
+      }}
+    >
+      {entries.map((tn, idx) => {
+        const label = getCarrierLabel(tn.carrier);
+        const url = getTrackingUrl(tn.carrier, tn.number);
+        const hasUrl = !!url;
+        const handleClick = (e: React.MouseEvent) => {
+          if (!hasUrl || !url) return;
+          // 카드 onClick 으로 버블링 차단 — 송장 탭이 주문 선택을 바꾸면 어색함.
+          e.stopPropagation();
+          window.open(url, '_blank', 'noopener,noreferrer');
+        };
+        return (
+          <span
+            key={`${tn.carrier}-${tn.number}-${idx}`}
+            role={hasUrl ? 'button' : undefined}
+            onClick={hasUrl ? handleClick : undefined}
+            title={hasUrl ? `${label} 조회: ${tn.number}` : `${label}: ${tn.number}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '3px 9px',
+              fontSize: 11,
+              fontWeight: 600,
+              borderRadius: 999,
+              fontVariantNumeric: 'tabular-nums',
+              color: hasUrl ? '#1D4ED8' : 'var(--m-text-secondary)',
+              background: hasUrl ? 'rgba(29, 78, 216, 0.10)' : 'var(--m-border)',
+              border: `1px solid ${hasUrl ? 'rgba(29, 78, 216, 0.35)' : 'transparent'}`,
+              cursor: hasUrl ? 'pointer' : 'default',
+            }}
+          >
+            <span>
+              {label}:{tn.number}
+            </span>
+            {hasUrl && <ExternalLink size={10} strokeWidth={2} />}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function OrderDetail({ order }: { order: Order }) {
+  const trackingEntries = normalizeTrackingNumbers(order.tracking_numbers);
   return (
     <div>
       <div style={{ marginBottom: 12 }}>
@@ -454,6 +890,11 @@ function OrderDetail({ order }: { order: Order }) {
           <span className="m-num">{order.order_date?.slice(0, 10)}</span>
           {order.memo && <span> · {order.memo}</span>}
         </div>
+        {trackingEntries.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <TrackingNumberStrip entries={trackingEntries} />
+          </div>
+        )}
       </div>
       <div className="m-card" style={{ padding: 0, overflow: 'hidden' }}>
         {order.items.length === 0 ? (
