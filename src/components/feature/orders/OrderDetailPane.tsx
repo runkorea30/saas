@@ -8,7 +8,16 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { FileText, MoreHorizontal, Tag, Trash2 } from 'lucide-react';
+import { ExternalLink, FileText, MoreHorizontal, Tag, Trash2 } from 'lucide-react';
+import {
+  CARRIERS,
+  DEFAULT_CARRIER,
+  getCarrierLabel,
+  getTrackingUrl,
+  normalizeTrackingNumbers,
+  type CarrierCode,
+  type TrackingEntry,
+} from '@/utils/shippingCarriers';
 import {
   GradeBadge,
   SourceIcon,
@@ -662,7 +671,7 @@ export function OrderDetailPane({
         <TrackingNumberSection
           key={order.id}
           orderId={order.id}
-          initialTrackingNumbers={order.tracking_numbers ?? []}
+          initialTrackingNumbers={normalizeTrackingNumbers(order.tracking_numbers)}
         />
         {order.is_direct_shipping &&
           (() => {
@@ -1227,62 +1236,84 @@ function DetailEmpty() {
 
 /**
  * 송장번호 입력 — 거의 1건이지만 복수 등록 가능.
- * 로젠택배 운송장 번호 기준 (기본 택배사 = 로젠택배).
- * 저장 즉시 orders.tracking_numbers (jsonb 배열) 업데이트.
+ * 각 행은 택배사 + 송장번호 한 쌍. 기본 택배사 = 로젠택배.
+ * 저장 즉시 orders.tracking_numbers (jsonb 배열 of {carrier, number}) 업데이트.
  */
 function TrackingNumberSection({
   orderId,
   initialTrackingNumbers,
 }: {
   orderId: string;
-  initialTrackingNumbers: string[];
+  initialTrackingNumbers: TrackingEntry[];
 }) {
   const queryClient = useQueryClient();
-  const [numbers, setNumbers] = useState<string[]>(
-    initialTrackingNumbers.length > 0 ? initialTrackingNumbers : [''],
-  );
+  const initialRows: TrackingEntry[] =
+    initialTrackingNumbers.length > 0
+      ? initialTrackingNumbers
+      : [{ carrier: DEFAULT_CARRIER, number: '' }];
+  const [rows, setRows] = useState<TrackingEntry[]>(initialRows);
   const [saving, setSaving] = useState(false);
-  // 마지막 저장 시점의 값 — 변경 여부 판단(저장 버튼 활성/비활성)에 사용.
-  const [savedSnapshot, setSavedSnapshot] = useState<string[]>(
-    initialTrackingNumbers.length > 0 ? initialTrackingNumbers : [''],
-  );
+  const [savedSnapshot, setSavedSnapshot] = useState<TrackingEntry[]>(initialRows);
 
-  const isDirty = JSON.stringify(numbers) !== JSON.stringify(savedSnapshot);
+  const isDirty = JSON.stringify(rows) !== JSON.stringify(savedSnapshot);
 
-  const persist = async (next: string[]) => {
-    const cleaned = next.map((n) => n.trim()).filter(Boolean);
+  const persist = async (next: TrackingEntry[]) => {
+    const cleaned: TrackingEntry[] = next
+      .map((r) => ({ carrier: r.carrier, number: r.number.trim() }))
+      .filter((r) => r.number.length > 0);
     setSaving(true);
+    // Supabase 자동생성 Json 타입은 모든 키에 index signature 를 요구해 strict
+    // 객체 타입과 충돌. payload 는 JSON 직렬화 가능하므로 update 인자 통째로
+    // unknown 경유 캐스팅으로 통과.
     await supabase
       .from('orders')
-      .update({ tracking_numbers: cleaned })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update({ tracking_numbers: cleaned } as any)
       .eq('id', orderId);
     queryClient.invalidateQueries({ queryKey: ['orders'] });
     setSaving(false);
     setSavedSnapshot(next);
   };
 
-  /** 입력값에서 하이픈(-)을 즉시 제거. 숫자/문자 운송장번호 모두 대비해 숫자만 강제하지 않음. */
+  /** 입력값에서 하이픈(-) 즉시 제거. */
   const sanitize = (value: string): string => value.replace(/-/g, '');
 
-  const handleChange = (idx: number, value: string) => {
-    const next = [...numbers];
-    next[idx] = sanitize(value);
-    setNumbers(next);
+  const handleNumberChange = (idx: number, value: string) => {
+    setRows((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], number: sanitize(value) };
+      return next;
+    });
+  };
+
+  const handleCarrierChange = (idx: number, code: CarrierCode) => {
+    setRows((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], carrier: code };
+      return next;
+    });
   };
 
   const handleSaveClick = () => {
-    void persist(numbers);
+    void persist(rows);
   };
 
   const handleAddRow = () => {
-    setNumbers((prev) => [...prev, '']);
+    setRows((prev) => [...prev, { carrier: DEFAULT_CARRIER, number: '' }]);
   };
 
   const handleRemoveRow = (idx: number) => {
-    const next = numbers.filter((_, i) => i !== idx);
-    const finalRows = next.length > 0 ? next : [''];
-    setNumbers(finalRows);
+    const next = rows.filter((_, i) => i !== idx);
+    const finalRows: TrackingEntry[] =
+      next.length > 0 ? next : [{ carrier: DEFAULT_CARRIER, number: '' }];
+    setRows(finalRows);
     void persist(finalRows);
+  };
+
+  const handleOpenTracking = (entry: TrackingEntry) => {
+    const url = getTrackingUrl(entry.carrier, entry.number);
+    if (!url) return;
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -1310,44 +1341,102 @@ function TrackingNumberSection({
         }}
       >
         <Tag size={10} strokeWidth={1.8} />
-        송장번호 (로젠택배){saving && ' · 저장중…'}
+        송장번호{saving && ' · 저장중…'}
       </div>
 
-      {numbers.map((num, idx) => (
-        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <input
-            type="text"
-            value={num}
-            onChange={(e) => handleChange(idx, e.target.value)}
-            placeholder="운송장 번호 입력"
-            style={{
-              flex: 1,
-              height: 28,
-              padding: '0 8px',
-              fontSize: 12,
-              border: '1px solid #CBD5E1',
-              borderRadius: 4,
-              outline: 'none',
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => handleRemoveRow(idx)}
-            style={{
-              width: 22,
-              height: 22,
-              border: 'none',
-              background: 'transparent',
-              color: '#94A3B8',
-              cursor: 'pointer',
-              fontSize: 13,
-            }}
-            title="삭제"
+      {rows.map((row, idx) => {
+        const savedRow = savedSnapshot[idx];
+        const isPersisted =
+          !!savedRow &&
+          savedRow.carrier === row.carrier &&
+          savedRow.number === row.number &&
+          row.number.trim().length > 0;
+        const trackable =
+          isPersisted && !!getTrackingUrl(row.carrier, row.number);
+        return (
+          <div
+            key={idx}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            ×
-          </button>
-        </div>
-      ))}
+            <select
+              value={row.carrier}
+              onChange={(e) =>
+                handleCarrierChange(idx, e.target.value as CarrierCode)
+              }
+              style={{
+                height: 28,
+                padding: '0 6px',
+                fontSize: 12,
+                border: '1px solid #CBD5E1',
+                borderRadius: 4,
+                background: '#FFFFFF',
+                outline: 'none',
+                minWidth: 96,
+              }}
+            >
+              {CARRIERS.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={row.number}
+              onChange={(e) => handleNumberChange(idx, e.target.value)}
+              placeholder="운송장 번호 입력"
+              style={{
+                flex: 1,
+                height: 28,
+                padding: '0 8px',
+                fontSize: 12,
+                border: '1px solid #CBD5E1',
+                borderRadius: 4,
+                outline: 'none',
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => handleOpenTracking(row)}
+              disabled={!trackable}
+              title={
+                trackable
+                  ? `${getCarrierLabel(row.carrier)} 조회 새 탭에서 열기`
+                  : '저장된 송장번호 + 조회 가능 택배사일 때만 활성'
+              }
+              style={{
+                width: 26,
+                height: 26,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: 'none',
+                background: 'transparent',
+                color: trackable ? '#2563EB' : '#CBD5E1',
+                cursor: trackable ? 'pointer' : 'not-allowed',
+              }}
+            >
+              <ExternalLink size={13} strokeWidth={1.8} />
+            </button>
+            <button
+              type="button"
+              onClick={() => handleRemoveRow(idx)}
+              style={{
+                width: 22,
+                height: 22,
+                border: 'none',
+                background: 'transparent',
+                color: '#94A3B8',
+                cursor: 'pointer',
+                fontSize: 13,
+              }}
+              title="삭제"
+            >
+              ×
+            </button>
+          </div>
+        );
+      })}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2 }}>
         <button

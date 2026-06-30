@@ -7,7 +7,7 @@
  *    품절(stock ≤ 0) / 부족(0 < stock < LOW_THRESHOLD) / 재고(그 이상).
  */
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ArrowRight, Loader2, Search } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
@@ -79,6 +79,7 @@ export function CustomerOrderInput({
   onBack,
 }: CustomerOrderInputProps) {
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const productsQuery = useQuery<ProductRow[]>({
     queryKey: ['customer-order-products', customer.companyId],
     queryFn: () => fetchActiveProducts(customer.companyId),
@@ -600,6 +601,14 @@ export function CustomerOrderInput({
         open={!!submitResult?.show}
         hasChanges={submitResult?.hasChanges ?? false}
         onClose={() => {
+          // 메인 화면 복귀 시 오늘/월별 주문 캐시 무효화 — staleTime(15s/30s)
+          // 안에 묶여 방금 보낸 주문이 안 보이는 현상 차단.
+          queryClient.invalidateQueries({
+            queryKey: ['customer-orders-today-v3', customer.customerId],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ['customer-orders-monthly-v3', customer.customerId],
+          });
           setSubmitResult(null);
           onBack();
         }}

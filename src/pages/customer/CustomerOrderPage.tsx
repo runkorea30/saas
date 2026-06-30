@@ -5,7 +5,7 @@
  * 로그인 후에는 메인(파일/메시지/직송) 또는 직접 입력 모드 노출.
  */
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, LogOut, Trash2, X } from 'lucide-react';
 import { useOrderPhotosByOrders, type OrderPhoto } from '@/hooks/queries/useOrderPhotos';
 // xlsx-js-style 은 SheetJS xlsx 의 fork — 동일 API + 셀 스타일(s) 지원.
@@ -27,6 +27,12 @@ import { MessageSection } from '@/components/feature/customer-order/MessageSecti
 import { DirectOrderEntryCard } from '@/components/feature/customer-order/DirectOrderEntryCard';
 import { DirectShippingSection } from '@/components/feature/customer-order/DirectShippingSection';
 import { SubmitSuccessDialog } from '@/components/feature/customer-order/SubmitSuccessDialog';
+import {
+  getCarrierLabel,
+  getTrackingUrl,
+  normalizeTrackingNumbers,
+  type TrackingEntry,
+} from '@/utils/shippingCarriers';
 import {
   calcCurrentStockByProduct,
   calcSupplyPriceByCustomerGrade,
@@ -208,7 +214,7 @@ interface OrderDetail {
   total_amount: number;
   memo: string | null;
   status: string;
-  tracking_numbers: string[] | null;
+  tracking_numbers: TrackingEntry[] | null;
   items: OrderItemDetail[];
 }
 
@@ -523,6 +529,7 @@ function LeftPanel({
   onOpenInput: () => void;
 }) {
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   const [message, setMessage] = useState('');
   const [shipping, setShipping] = useState<ShippingRow[]>([emptyShipping()]);
@@ -534,6 +541,19 @@ function LeftPanel({
     show: boolean;
     hasChanges: boolean;
   } | null>(null);
+
+  // 확인 다이얼로그 닫힐 때 오늘/월별 주문 캐시 무효화 — 방금 보낸 주문이
+  // staleTime 안에 묶여 화면에 안 뜨는 현상을 차단. 월별은 year/month 가 다른
+  // 캐시도 한꺼번에 무효화하기 위해 customer.customerId prefix 만 지정.
+  const handleSubmitDialogClose = () => {
+    queryClient.invalidateQueries({
+      queryKey: ['customer-orders-today-v3', customer.customerId],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['customer-orders-monthly-v3', customer.customerId],
+    });
+    setSubmitResult(null);
+  };
 
   const handleFile = (f: File | null) => {
     setFile(f);
@@ -1308,7 +1328,7 @@ function LeftPanel({
       <SubmitSuccessDialog
         open={!!submitResult?.show}
         hasChanges={submitResult?.hasChanges ?? false}
-        onClose={() => setSubmitResult(null)}
+        onClose={handleSubmitDialogClose}
       />
     </div>
   );
@@ -2085,9 +2105,10 @@ function TodayOrders({
 
 // ───────────────────────────────────────────────────────────
 
-/** 로젠택배 운송장 조회 페이지를 새 창에서 연다. */
-function openLogenTracking(trackingNumber: string): void {
-  const url = `https://www.ilogen.com/web/personal/trace/${encodeURIComponent(trackingNumber)}`;
+/** 택배사가 조회 URL 을 제공하는 경우 새 탭으로 연다. 퀵/직접전달은 무동작. */
+function openTracking(carrier: string, trackingNumber: string): void {
+  const url = getTrackingUrl(carrier, trackingNumber);
+  if (!url) return;
   window.open(url, '_blank', 'noopener,noreferrer');
 }
 
@@ -2431,33 +2452,37 @@ function OrderCard({
         {/* 🔴 주문 단위 송장번호 — 여러 건이어도 각 카드마다 자기 것만 정확히 표시.
             직송 주문(direct=true)은 "직송" 뱃지와 나란히 보여 거래처가 곧바로
             고객에게 송장번호를 전달할 수 있게 함. */}
-        {(order.tracking_numbers ?? []).length > 0 && (
+        {normalizeTrackingNumbers(order.tracking_numbers).length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-            {(order.tracking_numbers ?? []).map((tn) => (
-              <span
-                key={tn}
-                role="button"
-                onClick={() => openLogenTracking(tn)}
-                title={`로젠택배 조회: ${tn}`}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  height: 22,
-                  padding: '0 8px',
-                  fontSize: 10.5,
-                  fontWeight: 600,
-                  color: '#1D4ED8',
-                  background: '#EFF6FF',
-                  border: '1px solid #BFDBFE',
-                  borderRadius: 999,
-                  cursor: 'pointer',
-                  fontVariantNumeric: 'tabular-nums',
-                }}
-              >
-                {tn}
-              </span>
-            ))}
+            {normalizeTrackingNumbers(order.tracking_numbers).map((tn, idx) => {
+              const label = getCarrierLabel(tn.carrier);
+              const hasUrl = !!getTrackingUrl(tn.carrier, tn.number);
+              return (
+                <span
+                  key={`${tn.carrier}-${tn.number}-${idx}`}
+                  role={hasUrl ? 'button' : undefined}
+                  onClick={hasUrl ? () => openTracking(tn.carrier, tn.number) : undefined}
+                  title={hasUrl ? `${label} 조회: ${tn.number}` : `${label}: ${tn.number}`}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    height: 22,
+                    padding: '0 8px',
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    color: hasUrl ? '#1D4ED8' : '#475569',
+                    background: hasUrl ? '#EFF6FF' : '#F1F5F9',
+                    border: `1px solid ${hasUrl ? '#BFDBFE' : '#CBD5E1'}`,
+                    borderRadius: 999,
+                    cursor: hasUrl ? 'pointer' : 'default',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {label}:{tn.number}
+                </span>
+              );
+            })}
           </div>
         )}
         <span
