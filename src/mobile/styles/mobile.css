@@ -99,6 +99,21 @@ body.mobile-active #root {
   font-variant-numeric: tabular-nums;
 }
 
+/**
+ * 스크롤바 시각 숨김 — 스크롤 기능은 유지.
+ * 폴드 펼침 2열 레이아웃에서 좌/우 패널의 스크롤바가 콘텐츠 위에 겹쳐 글자
+ * (금액 끝자리 등) 를 가리는 문제 해소용. 모바일 외 화면에는 영향 없음.
+ */
+.m-hide-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE / legacy Edge */
+}
+.m-hide-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none; /* Chrome / Safari / Chromium Edge */
+}
+
 .m-card {
   background: var(--m-surface);
   border: 1px solid var(--m-border);

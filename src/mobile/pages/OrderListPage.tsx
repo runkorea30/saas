@@ -232,6 +232,8 @@ export function OrderListPage() {
     >
       {/* 좌측(또는 단일) 리스트 — 펼침 시 35% + 자체 스크롤 */}
       <div
+        // 펼침 모드에서만 스크롤바 시각 숨김 (스크롤 기능 유지).
+        className={isUnfolded ? 'm-hide-scrollbar' : undefined}
         style={{
           flex: isUnfolded ? '0 0 35%' : '1 1 auto',
           borderRight: isUnfolded ? '1px solid var(--m-border)' : 'none',
@@ -291,6 +293,7 @@ export function OrderListPage() {
       {showDetail && (
         <div
           ref={detailScrollRef}
+          className="m-hide-scrollbar"
           style={{
             flex: 1,
             minWidth: 0,
