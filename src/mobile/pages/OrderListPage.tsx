@@ -99,10 +99,31 @@ function statusBadge(status: Order['status']) {
   return { label: '대기', color: 'var(--m-warning)' };
 }
 
+/**
+ * 우측(또는 하단) 디테일 패널의 표시 모드.
+ * - single: 묶음 내 특정 1건 주문의 품목만 표시
+ * - group : 같은 거래처+같은 날짜 묶음의 모든 주문 품목을 섹션별로 합쳐 표시
+ */
+type ViewSel =
+  | { kind: 'single'; orderId: string }
+  | { kind: 'group'; orderIds: string[] };
+
+function viewSelEquals(a: ViewSel | null, b: ViewSel | null): boolean {
+  if (!a || !b) return a === b;
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'single' && b.kind === 'single') return a.orderId === b.orderId;
+  if (a.kind === 'group' && b.kind === 'group') {
+    if (a.orderIds.length !== b.orderIds.length) return false;
+    const setA = new Set(a.orderIds);
+    return b.orderIds.every((id) => setA.has(id));
+  }
+  return false;
+}
+
 export function OrderListPage() {
   const { companyId } = useCompany();
   const [period, setPeriod] = useState<PeriodKey>('today');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [viewSel, setViewSel] = useState<ViewSel | null>(null);
   const isUnfolded = useMediaQuery('(min-width: 601px)');
 
   const range = useMemo(() => getRange(period), [period]);
@@ -148,8 +169,39 @@ export function OrderListPage() {
     setPhotoModal(null);
   };
 
-  const selected = orders.find((o) => o.id === selectedId) ?? orders[0] ?? null;
-  const showDetail = isUnfolded && selected !== null;
+  // viewSel 이 유효하지 않으면(주문 목록 갱신/필터 변경 등) 첫 그룹의 첫 주문으로 폴백.
+  const effectiveViewSel: ViewSel | null = useMemo(() => {
+    const isValid = (() => {
+      if (!viewSel) return false;
+      if (viewSel.kind === 'single')
+        return orders.some((o) => o.id === viewSel.orderId);
+      return viewSel.orderIds.every((id) =>
+        orders.some((o) => o.id === id),
+      );
+    })();
+    if (isValid) return viewSel;
+    const first = orderGroups[0]?.[0];
+    return first ? { kind: 'single', orderId: first.id } : null;
+  }, [viewSel, orders, orderGroups]);
+
+  // 디테일 패널에 보여줄 주문(들) — 단일이면 1건, 묶음이면 group orders.
+  const detailOrders: Order[] = useMemo(() => {
+    if (!effectiveViewSel) return [];
+    if (effectiveViewSel.kind === 'single') {
+      const o = orders.find((x) => x.id === effectiveViewSel.orderId);
+      return o ? [o] : [];
+    }
+    return effectiveViewSel.orderIds
+      .map((id) => orders.find((x) => x.id === id))
+      .filter((x): x is Order => !!x);
+  }, [effectiveViewSel, orders]);
+
+  const showDetail = isUnfolded && detailOrders.length > 0;
+
+  const handleSelectSingle = (orderId: string) =>
+    setViewSel({ kind: 'single', orderId });
+  const handleSelectGroup = (orderIds: string[]) =>
+    setViewSel({ kind: 'group', orderIds });
 
   return (
     <div
@@ -196,21 +248,15 @@ export function OrderListPage() {
           <div className="m-list">
             {orderGroups.map((group) => {
               const groupKey = group.map((o) => o.id).join('|');
-              const selectedInGroup =
-                isUnfolded && selected
-                  ? group.some((o) => o.id === selected.id)
-                  : false;
               return (
                 <OrderGroupCard
                   key={groupKey}
                   group={group}
                   photosByOrder={photosByOrder}
-                  selectedId={selected?.id ?? null}
-                  selectedInGroup={selectedInGroup}
-                  onSelect={(id) => setSelectedId(id)}
-                  onOpenPhoto={(orderId, customerId) =>
-                    openPhotoModal(orderId, customerId)
-                  }
+                  viewSel={effectiveViewSel}
+                  onSelectSingle={handleSelectSingle}
+                  onSelectGroup={handleSelectGroup}
+                  onOpenPhoto={openPhotoModal}
                 />
               );
             })}
@@ -218,10 +264,14 @@ export function OrderListPage() {
         )}
       </div>
 
-      {/* 우측 상세 (펼침 한정) */}
+      {/* 우측 상세 (펼침 한정) — single: OrderDetail, group: OrderGroupDetail */}
       {showDetail && (
         <div style={{ flex: 1, minWidth: 0, padding: '12px 16px' }}>
-          <OrderDetail order={selected!} />
+          {effectiveViewSel?.kind === 'group' ? (
+            <OrderGroupDetail orders={detailOrders} />
+          ) : (
+            <OrderDetail order={detailOrders[0]!} />
+          )}
         </div>
       )}
 
@@ -273,26 +323,37 @@ export function OrderListPage() {
 function OrderGroupCard({
   group,
   photosByOrder,
-  selectedId,
-  selectedInGroup,
-  onSelect,
+  viewSel,
+  onSelectSingle,
+  onSelectGroup,
   onOpenPhoto,
 }: {
   group: Order[];
   photosByOrder: Map<string, OrderPhoto[]> | undefined;
-  selectedId: string | null;
-  selectedInGroup: boolean;
-  onSelect: (orderId: string) => void;
+  viewSel: ViewSel | null;
+  onSelectSingle: (orderId: string) => void;
+  onSelectGroup: (orderIds: string[]) => void;
   onOpenPhoto: (orderId: string, customerId: string | null) => void;
 }) {
   const first = group[0];
+  const groupOrderIds = group.map((o) => o.id);
+  // 그룹 헤더 자체가 선택된 상태(전체보기 모드)인지 — viewSel kind='group' 이고
+  // orderIds 가 이 그룹과 정확히 일치할 때만 true.
+  const isGroupSelected = viewSelEquals(viewSel, {
+    kind: 'group',
+    orderIds: groupOrderIds,
+  });
+  // single 모드에서 어느 행이 선택되었는지 — 행 단위 border 강조용.
+  const selectedSingleOrderId =
+    viewSel?.kind === 'single' ? viewSel.orderId : null;
+
   if (group.length === 1) {
     return (
       <OrderCard
         order={first}
         photos={photosByOrder?.get(first.id) ?? []}
-        selected={selectedInGroup}
-        onClick={() => onSelect(first.id)}
+        selected={selectedSingleOrderId === first.id}
+        onClick={() => onSelectSingle(first.id)}
         onOpenPhoto={() => onOpenPhoto(first.id, first.customer?.id ?? null)}
       />
     );
@@ -314,93 +375,113 @@ function OrderGroupCard({
   const thumbs = photos.slice(0, THUMB_LIMIT);
   const extra = Math.max(0, photos.length - THUMB_LIMIT);
 
+  // 카드는 group 선택과 무관하게 항상 surface 배경 유지. 묶음 어떤 행이라도
+  // 선택되어 있으면 카드 전체 테두리만 강조 — 어떤 행이 선택됐는지는 행 자체
+  // 의 border 로 별도 표시.
+  const someRowSelected =
+    selectedSingleOrderId !== null &&
+    group.some((o) => o.id === selectedSingleOrderId);
+  const cardHighlighted = isGroupSelected || someRowSelected;
+
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={() => onSelect(first.id)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onSelect(first.id);
-        }
-      }}
       className="m-card"
       style={{
         textAlign: 'left',
-        cursor: 'pointer',
-        borderColor: selectedInGroup ? 'var(--m-primary)' : 'var(--m-border)',
-        background: selectedInGroup
-          ? 'var(--m-primary-wash)'
-          : 'var(--m-surface)',
+        // 카드 자체는 클릭 영역으로 쓰지 않음 — 헤더/행에 각각 핸들러.
+        borderColor: cardHighlighted ? 'var(--m-primary)' : 'var(--m-border)',
+        borderWidth: cardHighlighted ? 2 : 1,
+        background: 'var(--m-surface)',
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
       }}
     >
-      {/* 헤더 — 거래처 / 등급 / 상태 / 묶음 배지 */}
+      {/* 헤더 (거래처/배지/날짜/합계) — 탭 시 묶음 전체보기. 그룹 선택 시 border 강조. */}
       <div
+        role="button"
+        tabIndex={0}
+        onClick={() => onSelectGroup(groupOrderIds)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onSelectGroup(groupOrderIds);
+          }
+        }}
         style={{
           display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          flexWrap: 'wrap',
+          flexDirection: 'column',
+          gap: 6,
+          padding: '6px 8px',
+          margin: '-6px -8px 0',
+          borderRadius: 8,
+          border: `2px solid ${isGroupSelected ? 'var(--m-primary)' : 'transparent'}`,
+          cursor: 'pointer',
         }}
       >
-        <span style={{ fontWeight: 600, color: 'var(--m-text)' }}>
-          {first.customer?.name ?? '거래처 미상'}
-        </span>
-        {grade && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+        >
+          <span style={{ fontWeight: 600, color: 'var(--m-text)' }}>
+            {first.customer?.name ?? '거래처 미상'}
+          </span>
+          {grade && (
+            <span
+              className="m-badge"
+              style={{ background: gradeBadgeColor(grade), color: '#ffffff' }}
+            >
+              {grade.toUpperCase()}
+            </span>
+          )}
           <span
             className="m-badge"
-            style={{ background: gradeBadgeColor(grade), color: '#ffffff' }}
+            style={{
+              background: `${status.color}22`,
+              color: status.color,
+              border: `1px solid ${status.color}`,
+            }}
           >
-            {grade.toUpperCase()}
+            {status.label}
           </span>
-        )}
-        <span
-          className="m-badge"
+          <span
+            className="m-badge"
+            style={{
+              background: '#fef3c7',
+              color: '#92400e',
+              border: '1px solid #fcd34d',
+            }}
+            title="같은 거래처 같은 날짜 묶음"
+          >
+            {group.length}건 묶음
+          </span>
+        </div>
+        <div
           style={{
-            background: `${status.color}22`,
-            color: status.color,
-            border: `1px solid ${status.color}`,
+            display: 'flex',
+            justifyContent: 'space-between',
+            fontSize: 12,
+            color: 'var(--m-text-secondary)',
           }}
         >
-          {status.label}
-        </span>
-        <span
-          className="m-badge"
+          <span className="m-num">{first.order_date?.slice(0, 10)}</span>
+          <span className="m-num">{fmtWon(groupQty)}개</span>
+        </div>
+        <div
+          className="m-num"
           style={{
-            background: '#fef3c7',
-            color: '#92400e',
-            border: '1px solid #fcd34d',
+            fontSize: 16,
+            fontWeight: 700,
+            color: 'var(--m-text)',
+            textAlign: 'right',
           }}
-          title="같은 거래처 같은 날짜 묶음"
         >
-          {group.length}건 묶음
-        </span>
-      </div>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          fontSize: 12,
-          color: 'var(--m-text-secondary)',
-        }}
-      >
-        <span className="m-num">{first.order_date?.slice(0, 10)}</span>
-        <span className="m-num">{fmtWon(groupQty)}개</span>
-      </div>
-      <div
-        className="m-num"
-        style={{
-          fontSize: 16,
-          fontWeight: 700,
-          color: 'var(--m-text)',
-          textAlign: 'right',
-        }}
-      >
-        ₩{fmtWon(groupTotal)}
+          ₩{fmtWon(groupTotal)}
+        </div>
       </div>
 
       {/* 묶음 내 각 주문 row — 최초/추가 라벨 + 시간 + 개별 금액 */}
@@ -419,25 +500,34 @@ function OrderGroupCard({
           const label = isAdd ? `추가${idx}` : '최초';
           const t = (o.created_at ?? '').slice(11, 16); // HH:MM (UTC 기준 표시)
           const qty = o.items.reduce((s, it) => s + (it.quantity ?? 0), 0);
-          const isSel = selectedId === o.id;
+          const isSel = selectedSingleOrderId === o.id;
           return (
             <div
               key={o.id}
+              role="button"
+              tabIndex={0}
               onClick={(e) => {
                 e.stopPropagation();
-                onSelect(o.id);
+                onSelectSingle(o.id);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onSelectSingle(o.id);
+                }
               }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
+                // 🟠 추가주문 행의 amber-50 배경(#fffbeb)을 제거 — 거의 흰색이라
+                //    선택 하이라이트로 오인되는 시각 충돌이 있었음.
+                //    "최초/추가N" 라벨 텍스트만으로 구분 + 선택은 border 로 명시.
                 padding: '6px 8px',
                 borderRadius: 8,
-                background: isSel
-                  ? 'rgba(107, 31, 42, 0.10)'
-                  : isAdd
-                    ? '#fffbeb'
-                    : 'transparent',
+                border: `2px solid ${isSel ? 'var(--m-primary)' : 'transparent'}`,
+                background: 'transparent',
                 cursor: 'pointer',
               }}
             >
@@ -638,8 +728,10 @@ function OrderCard({
       style={{
         textAlign: 'left',
         cursor: 'pointer',
+        // 선택 표시는 border 만으로 — 묶음 카드 행 스타일과 일관.
         borderColor: selected ? 'var(--m-primary)' : 'var(--m-border)',
-        background: selected ? 'var(--m-primary-wash)' : 'var(--m-surface)',
+        borderWidth: selected ? 2 : 1,
+        background: 'var(--m-surface)',
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
@@ -868,6 +960,176 @@ function TrackingNumberStrip({ entries }: { entries: TrackingEntry[] }) {
           </span>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * 묶음(같은 거래처+같은 날짜) 전체보기 상세 — 카드 헤더 탭 시 사용.
+ * 각 주문을 "최초/추가N (HH:MM)" 섹션 헤더 아래에 품목 표로 나열하고,
+ * 맨 아래 묶음 전체 합계를 표시.
+ */
+function OrderGroupDetail({ orders }: { orders: Order[] }) {
+  if (orders.length === 0) return null;
+  const head = orders[0];
+  const totalAmount = orders.reduce((s, o) => s + o.total_amount, 0);
+  const trackingEntries = orders.flatMap((o) =>
+    normalizeTrackingNumbers(o.tracking_numbers),
+  );
+  return (
+    <div>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 18, fontWeight: 600 }}>
+          {head.customer?.name ?? '거래처 미상'}
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            color: 'var(--m-text-secondary)',
+            marginTop: 4,
+          }}
+        >
+          <span className="m-num">{head.order_date?.slice(0, 10)}</span>
+          <span> · {orders.length}건 묶음</span>
+        </div>
+        {trackingEntries.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <TrackingNumberStrip entries={trackingEntries} />
+          </div>
+        )}
+      </div>
+
+      {orders.map((o, idx) => {
+        const isAdd = idx > 0;
+        const label = isAdd ? `추가${idx}` : '최초';
+        const t = (o.created_at ?? '').slice(11, 16);
+        return (
+          <div key={o.id} style={{ marginBottom: 14 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 8,
+                marginBottom: 6,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: isAdd ? '#92400e' : 'var(--m-primary)',
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  background: isAdd
+                    ? 'rgba(252, 211, 77, 0.20)'
+                    : 'var(--m-primary-wash)',
+                }}
+              >
+                {label}
+              </span>
+              <span
+                className="m-num"
+                style={{ fontSize: 12, color: 'var(--m-text-secondary)' }}
+              >
+                {t}
+              </span>
+              <div style={{ flex: 1 }} />
+              <span
+                className="m-num"
+                style={{ fontSize: 13, fontWeight: 600, color: 'var(--m-text)' }}
+              >
+                ₩{fmtWon(o.total_amount)}
+              </span>
+            </div>
+            <div className="m-card" style={{ padding: 0, overflow: 'hidden' }}>
+              {o.items.length === 0 ? (
+                <div className="m-empty">제품이 없습니다.</div>
+              ) : (
+                o.items.map((it, i) => (
+                  <div
+                    key={it.id}
+                    style={{
+                      display: 'flex',
+                      gap: 10,
+                      alignItems: 'center',
+                      padding: '10px 12px',
+                      borderBottom:
+                        i < o.items.length - 1
+                          ? '1px solid var(--m-border)'
+                          : 'none',
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          color: 'var(--m-text)',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                        title={it.product?.name ?? ''}
+                      >
+                        {it.product?.name ?? '—'}
+                      </div>
+                      <div
+                        className="m-num"
+                        style={{
+                          fontSize: 11,
+                          color: 'var(--m-text-secondary)',
+                        }}
+                      >
+                        {it.product?.code}
+                      </div>
+                    </div>
+                    <div
+                      className="m-num"
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 500,
+                        minWidth: 48,
+                        textAlign: 'right',
+                      }}
+                    >
+                      {fmtWon(it.quantity)}
+                    </div>
+                    <div
+                      className="m-num"
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        minWidth: 80,
+                        textAlign: 'right',
+                      }}
+                    >
+                      ₩{fmtWon(it.amount)}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        );
+      })}
+
+      <div
+        style={{
+          marginTop: 14,
+          paddingTop: 12,
+          borderTop: '2px solid var(--m-border)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          fontSize: 14,
+        }}
+      >
+        <span style={{ color: 'var(--m-text-secondary)' }}>묶음 전체 합계</span>
+        <span
+          className="m-num"
+          style={{ fontWeight: 700, color: 'var(--m-primary)' }}
+        >
+          ₩{fmtWon(totalAmount)}
+        </span>
+      </div>
     </div>
   );
 }
