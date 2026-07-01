@@ -75,8 +75,13 @@ export function MobileOrderUpload({ session, onSubmitted }: Props) {
 
     try {
       // Storage 업로드. anon 정책상 listBuckets 는 항상 실패하므로 사전 체크 없이 바로 업로드.
-      const safeName = file.name.replace(/[^\w.\-가-힣]/g, '_');
-      const path = `customer-uploads/${session.companyId}/${session.customerId}/${Date.now()}_${safeName}`;
+      // 원본 파일명은 customer_order_uploads.file_name 에 그대로 보존(관리자 표시용).
+      // Storage 경로에 쓰는 파일명은 확장자만 뽑아 timestamp 로 재구성 —
+      // 한글/공백/이모지 등 Storage 가 URL 인코딩 후 거부할 수 있는 문자를 완전 배제.
+      const extMatch = /\.([a-zA-Z0-9]{1,5})$/.exec(file.name);
+      const ext = (extMatch?.[1] ?? 'bin').toLowerCase();
+      const safeName = `${Date.now()}.${ext}`;
+      const path = `customer-uploads/${session.companyId}/${session.customerId}/${safeName}`;
       const uploadRes = await supabase.storage
         .from(BUCKET)
         .upload(path, file, { contentType: file.type || undefined });
