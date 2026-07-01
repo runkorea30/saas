@@ -290,21 +290,23 @@ export function TaxInvoicesPage() {
     bulkMut.mutate(
       { year, month, rows },
       {
-        onSuccess: ({ inserted, skipped, failed, errors }) => {
+        onSuccess: ({ inserted, updated, failed, errors }) => {
           setBulkConfirmOpen(false);
           if (failed > 0) {
             const head = errors[0] ?? '';
             const tail = errors.length > 1 ? ` 외 ${errors.length - 1}건` : '';
             showToast({
               kind: 'error',
-              text: `${inserted}건 발행 / ${failed}건 실패 — ${head}${tail}`,
+              text: `신규 ${inserted} / 재생성 ${updated} / 실패 ${failed}건 — ${head}${tail}`,
             });
             return;
           }
-          const skipNote = skipped > 0 ? ` (이미 발행 ${skipped}건 스킵)` : '';
+          const parts: string[] = [];
+          if (inserted > 0) parts.push(`신규 발행 ${inserted}건`);
+          if (updated > 0) parts.push(`재생성 ${updated}건`);
           showToast({
             kind: 'success',
-            text: `${inserted}건의 세금계산서를 발행했습니다${skipNote}`,
+            text: parts.length > 0 ? parts.join(' · ') : '변경 사항이 없습니다',
           });
         },
         onError: (e) => {
@@ -478,12 +480,12 @@ export function TaxInvoicesPage() {
             <button
               type="button"
               onClick={() => setBulkConfirmOpen(true)}
-              disabled={!hasUnissuedRows || bulkMut.isPending}
+              disabled={rows.length === 0 || bulkMut.isPending}
               className="border border-[var(--line)] rounded-md bg-[var(--surface)] hover:bg-[var(--surface-2)] flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
               style={{ height: 32, padding: '0 12px', fontSize: 12.5 }}
             >
               <FileText size={13} strokeWidth={1.8} />
-              이달 전체 생성 {hasUnissuedRows ? `(${summary.unissuedCount})` : ''}
+              이달 전체 생성 {rows.length > 0 ? `(${rows.length})` : ''}
             </button>
             <button
               type="button"
@@ -677,12 +679,18 @@ export function TaxInvoicesPage() {
       <ConfirmDialog
         open={bulkConfirmOpen}
         onClose={() => setBulkConfirmOpen(false)}
-        title="세금계산서 일괄 생성"
+        title="세금계산서 이달 전체 생성"
         body={
           <>
-            미발행 <strong>{summary.unissuedCount}건</strong>의 세금계산서를 생성합니다.
+            {year}년 {month}월 1일~말일 전체를 기준으로 총{' '}
+            <strong>{rows.length}건</strong> 처리합니다.
             <br />
-            이미 발행된 건은 스킵됩니다. 계속하시겠습니까?
+            신규 발행 <strong>{summary.unissuedCount}건</strong> · 기존 재생성{' '}
+            <strong>{summary.issuedCount}건</strong>
+            <br />
+            <span style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>
+              기존 발행 건은 최신 매출 합계로 덮어쓰기 됩니다.
+            </span>
           </>
         }
         confirmLabel="생성"

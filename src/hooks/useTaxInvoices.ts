@@ -346,25 +346,52 @@ export function useCreateTaxInvoice(companyId: string | null) {
 
 export interface BulkInsertResult {
   inserted: number;
-  skipped: number;       // 23505 중복 — 다른 세션이 먼저 발행했거나 stale 데이터
+  updated: number;       // 🔴 기존 발행 건은 스킵이 아닌 재계산(UPDATE)으로 갱신
   failed: number;
   errors: string[];      // 표시용 — "거래처명: 에러메시지"
 }
 
+/**
+ * 🔴 이달 전체 (재)발행 — upsert semantics.
+ *
+ * · 발행 범위: `useTaxInvoiceRows` 의 `monthRangeKst()` 로 이미 해당 월 1일~말일 전체를
+ *   집계 → 언제 눌러도 항상 full month 기준으로 재계산됨.
+ * · 기존 발행 건은 최신 orders 합계로 UPDATE (총액/공급가/세액/issued_at 갱신).
+ * · 신규는 INSERT. 23505 race 시 skip (다음 클릭에서 갱신되므로 무해).
+ */
 export function useCreateTaxInvoicesBulk(companyId: string | null) {
   const queryClient = useQueryClient();
   return useMutation<BulkInsertResult, Error, { year: number; month: number; rows: TaxInvoiceRow[] }>({
     mutationFn: async (input) => {
       if (!companyId) throw new Error('회사 정보가 없습니다.');
-      const unissued = input.rows.filter((r) => r.invoice === null);
-      const result: BulkInsertResult = { inserted: 0, skipped: 0, failed: 0, errors: [] };
-      if (unissued.length === 0) return result;
+      const result: BulkInsertResult = { inserted: 0, updated: 0, failed: 0, errors: [] };
+      if (input.rows.length === 0) return result;
 
       const issuedAt = new Date().toISOString();
 
-      // 🟠 순차 INSERT: 한 행 실패가 전체를 막지 않도록.
-      //    23505(unique violation) 은 stale 데이터로 간주하고 skip.
-      for (const r of unissued) {
+      // 🟠 순차 처리: 한 행 실패가 전체를 막지 않도록.
+      for (const r of input.rows) {
+        if (r.invoice) {
+          // UPDATE — 기존 발행 건을 최신 합계로 재계산.
+          const { error } = await supabase
+            .from('tax_invoices')
+            .update({
+              total_amount: r.total_amount,
+              supply_amount: r.supply_amount,
+              vat_amount: r.vat_amount,
+              issued_at: issuedAt,
+            })
+            .eq('id', r.invoice.id)
+            .eq('company_id', companyId);
+          if (error) {
+            result.failed += 1;
+            result.errors.push(`${r.subject.name}: ${error.message}`);
+            continue;
+          }
+          result.updated += 1;
+          continue;
+        }
+        // INSERT — 미발행 신규 건.
         const payload = {
           company_id: companyId,
           customer_id: r.subjectType === 'customer' ? r.subjectId : null,
@@ -384,10 +411,8 @@ export function useCreateTaxInvoicesBulk(companyId: string | null) {
           result.inserted += 1;
           continue;
         }
-        if (error.code === '23505') {
-          result.skipped += 1;
-          continue;
-        }
+        // 23505 race: 다른 세션이 먼저 INSERT — 재조회 후 다음 클릭에서 UPDATE 됨.
+        if (error.code === '23505') continue;
         result.failed += 1;
         result.errors.push(`${r.subject.name}: ${error.message}`);
       }
