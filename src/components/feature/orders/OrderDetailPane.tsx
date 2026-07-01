@@ -8,7 +8,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ExternalLink, FileText, MoreHorizontal, Tag, Trash2 } from 'lucide-react';
+import { ChevronDown, ExternalLink, FileText, MessageSquare, MoreHorizontal, Tag, Trash2 } from 'lucide-react';
 import {
   CARRIERS,
   DEFAULT_CARRIER,
@@ -670,31 +670,36 @@ export function OrderDetailPane({
             </div>
           </div>
         )}
+        <TrackingNumberSection
+          key={order.id}
+          orderId={order.id}
+          initialTrackingNumbers={normalizeTrackingNumbers(order.tracking_numbers)}
+          currentStatus={order.status}
+        />
+        {/* 메모 — 송장번호 섹션 바로 아래. 값이 있을 때만 노출. */}
         {order.memo && (
-          <div
-            style={{
-              marginTop: 10,
-              marginBottom: 4,
-              padding: '10px 12px',
-              background: 'var(--surface-2)',
-              border: '1px solid var(--line-strong)',
-              borderRadius: 8,
-            }}
-          >
+          <div style={{ marginTop: 12, marginBottom: 4 }}>
             <div
               style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: 'var(--ink-3)',
-                textTransform: 'uppercase',
-                letterSpacing: 0.4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                marginBottom: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                color: 'var(--ink-2)',
               }}
             >
+              <MessageSquare size={13} strokeWidth={1.8} />
               메모
             </div>
             <p
               style={{
-                margin: '6px 0 0',
+                margin: 0,
+                padding: '10px 12px',
+                background: 'var(--surface-2)',
+                border: '1px solid var(--line-strong)',
+                borderRadius: 8,
                 fontSize: 12.5,
                 lineHeight: 1.55,
                 color: 'var(--ink)',
@@ -706,12 +711,6 @@ export function OrderDetailPane({
             </p>
           </div>
         )}
-        <TrackingNumberSection
-          key={order.id}
-          orderId={order.id}
-          initialTrackingNumbers={normalizeTrackingNumbers(order.tracking_numbers)}
-          currentStatus={order.status}
-        />
         {order.is_direct_shipping &&
           (() => {
             // shipping_info 가 string(JSON) 또는 object 배열로 올 수 있어 양쪽 처리.
