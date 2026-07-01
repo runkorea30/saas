@@ -419,7 +419,7 @@ export function CustomerOrderInput({
             disabled={busy}
             className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[13px] transition-colors disabled:opacity-55 ${
               showDirect
-                ? 'border-[#15803d] bg-[#dcfce7] font-semibold text-[#15803d]'
+                ? 'border-[var(--p-success)] bg-[var(--p-success-wash)] font-semibold text-[var(--p-success)]'
                 : 'border-[var(--p-line)] bg-[var(--p-card-bg)] text-[var(--p-ink-2)] hover:bg-[var(--p-card-bg)]'
             }`}
           >

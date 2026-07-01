@@ -43,14 +43,14 @@ export function SubmitSuccessDialog({
         role="dialog"
         aria-modal="true"
       >
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
-          <Check className="h-7 w-7 text-green-600" strokeWidth={2.5} />
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--p-success-wash)]">
+          <Check className="h-7 w-7 text-[var(--p-success)]" strokeWidth={2.5} />
         </div>
         <p className="text-[15px] font-semibold text-[var(--p-ink)]">
           주문서가 전송되었습니다.
         </p>
         {hasChanges && (
-          <p className="mt-2 text-[13px] leading-relaxed text-amber-600">
+          <p className="mt-2 text-[13px] leading-relaxed text-[var(--p-warning-strong)]">
             주문내용 중 변경된 사항이 있으니
             <br />
             오늘 주문내역에서 확인하세요.
