@@ -670,6 +670,42 @@ export function OrderDetailPane({
             </div>
           </div>
         )}
+        {order.memo && (
+          <div
+            style={{
+              marginTop: 10,
+              marginBottom: 4,
+              padding: '10px 12px',
+              background: 'var(--surface-2)',
+              border: '1px solid var(--line-strong)',
+              borderRadius: 8,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: 'var(--ink-3)',
+                textTransform: 'uppercase',
+                letterSpacing: 0.4,
+              }}
+            >
+              메모
+            </div>
+            <p
+              style={{
+                margin: '6px 0 0',
+                fontSize: 12.5,
+                lineHeight: 1.55,
+                color: 'var(--ink)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {order.memo}
+            </p>
+          </div>
+        )}
         <TrackingNumberSection
           key={order.id}
           orderId={order.id}
