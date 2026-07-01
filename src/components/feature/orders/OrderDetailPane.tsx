@@ -624,6 +624,47 @@ export function OrderDetailPane({
             주문추가
           </button>
         </div>
+        {/* 메모 — 헤더 정보 바로 아래 상단 고정. 어떤 주문 상태(이미지대기/편집)에서도
+             스크롤 없이 즉시 노출. trim() 검사로 공백만 있는 값도 배제. */}
+        {order.memo && order.memo.trim().length > 0 && (
+          <div
+            style={{
+              marginTop: 10,
+              marginBottom: 4,
+              padding: '10px 12px',
+              background: 'var(--surface-2)',
+              border: '1px solid var(--line-strong)',
+              borderRadius: 8,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                marginBottom: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                color: 'var(--ink-2)',
+              }}
+            >
+              <MessageSquare size={13} strokeWidth={1.8} />
+              메모
+            </div>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 12.5,
+                lineHeight: 1.55,
+                color: 'var(--ink)',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {order.memo}
+            </p>
+          </div>
+        )}
         {order.attachment_url && (
           <div
             style={{
@@ -676,41 +717,6 @@ export function OrderDetailPane({
           initialTrackingNumbers={normalizeTrackingNumbers(order.tracking_numbers)}
           currentStatus={order.status}
         />
-        {/* 메모 — 송장번호 섹션 바로 아래. 값이 있을 때만 노출. */}
-        {order.memo && (
-          <div style={{ marginTop: 12, marginBottom: 4 }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                marginBottom: 6,
-                fontSize: 12,
-                fontWeight: 600,
-                color: 'var(--ink-2)',
-              }}
-            >
-              <MessageSquare size={13} strokeWidth={1.8} />
-              메모
-            </div>
-            <p
-              style={{
-                margin: 0,
-                padding: '10px 12px',
-                background: 'var(--surface-2)',
-                border: '1px solid var(--line-strong)',
-                borderRadius: 8,
-                fontSize: 12.5,
-                lineHeight: 1.55,
-                color: 'var(--ink)',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}
-            >
-              {order.memo}
-            </p>
-          </div>
-        )}
         {order.is_direct_shipping &&
           (() => {
             // shipping_info 가 string(JSON) 또는 object 배열로 올 수 있어 양쪽 처리.

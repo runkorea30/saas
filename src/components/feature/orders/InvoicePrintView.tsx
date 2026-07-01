@@ -414,6 +414,25 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                       );
                     })()}
 
+                  {/* 메모 — 거래처가 남긴 자유 메모. 직송 배송지 아래, 품목표 위. */}
+                  {o.memo && o.memo.trim().length > 0 && (
+                    <div
+                      style={{
+                        border: '1px solid #cdd6e0',
+                        borderTop: 'none',
+                        padding: '1.2mm 3mm',
+                        fontSize: '9.5pt',
+                        background: '#fffdf7',
+                        lineHeight: 1.5,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      <span style={{ fontWeight: 700, marginRight: '2mm' }}>메모</span>
+                      {o.memo}
+                    </div>
+                  )}
+
                   <table
                     style={{
                       width: '100%',
