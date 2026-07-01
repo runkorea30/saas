@@ -1633,10 +1633,13 @@ function OrdersTab({
 }
 
 function StatusTag({ status }: { status: string }) {
+  // 🔴 신규 4단계 라벨. 레거시(done)는 표시(읽기)만 유지.
   const map: Record<string, { label: string; bg: string; color: string }> = {
-    confirmed: { label: '확정', bg: 'var(--info-wash)', color: 'var(--info)' },
-    shipped:   { label: '배송', bg: 'var(--warning-wash)', color: 'var(--warning)' },
-    done:      { label: '완료', bg: 'var(--success-wash)', color: 'var(--success)' },
+    received:   { label: '주문접수', bg: 'var(--info-wash)',    color: 'var(--info)' },
+    confirmed:  { label: '주문확인', bg: 'var(--warning-wash)', color: 'var(--warning)' },
+    processing: { label: '처리중',   bg: '#f3ecff',             color: '#6d28d9' },
+    shipped:    { label: '발송완료', bg: 'var(--success-wash)', color: 'var(--success)' },
+    done:       { label: '완료',     bg: 'var(--surface-2)',    color: 'var(--ink-3)' },
   };
   const m = map[status] ?? { label: status, bg: 'var(--surface-2)', color: 'var(--ink-3)' };
   return (

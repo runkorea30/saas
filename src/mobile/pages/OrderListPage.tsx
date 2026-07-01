@@ -89,14 +89,17 @@ function gradeBadgeColor(grade: string | null | undefined): string {
   }
 }
 
+// 🟠 신규 4단계 라벨 매핑. 색상은 mobile 3-token(m-success/warning/danger) 안에서:
+//    received/confirmed/processing → warning (진행 중), shipped → success, canceled → danger.
+//    레거시 draft/done 은 각각 임시/완료 로 표시(읽기 전용).
 function statusBadge(status: Order['status']) {
-  if (status === 'confirmed' || status === 'shipped' || status === 'done') {
-    return { label: '확정', color: 'var(--m-success)' };
-  }
-  if (status === 'canceled') {
-    return { label: '취소', color: 'var(--m-danger)' };
-  }
-  return { label: '대기', color: 'var(--m-warning)' };
+  if (status === 'shipped') return { label: '발송완료', color: 'var(--m-success)' };
+  if (status === 'processing') return { label: '처리중', color: 'var(--m-warning)' };
+  if (status === 'confirmed') return { label: '주문확인', color: 'var(--m-warning)' };
+  if (status === 'received') return { label: '주문접수', color: 'var(--m-warning)' };
+  if (status === 'canceled') return { label: '취소', color: 'var(--m-danger)' };
+  if (status === 'done') return { label: '완료', color: 'var(--m-success)' };
+  return { label: '임시', color: 'var(--m-warning)' };
 }
 
 /**

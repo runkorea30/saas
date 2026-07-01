@@ -43,12 +43,13 @@ const PERIOD_OPTIONS: { id: PeriodKey; label: string }[] = [
   { id: 'custom', label: '사용자 지정' },
 ];
 
+// 🟠 필터 옵션은 신규 4단계만. 레거시(draft/done/canceled)는 필터에서 제외.
+//    기존 draft/done/canceled 상태 주문의 뱃지 표시(읽기) 는 StatusBadge 에서 계속 지원.
 const STATUS_OPTIONS: { id: OrderStatus; label: string; dot: string }[] = [
-  { id: 'draft', label: '임시', dot: 'var(--ink-4)' },
-  { id: 'confirmed', label: '확정', dot: 'var(--info)' },
-  { id: 'shipped', label: '출고', dot: 'var(--warning)' },
-  { id: 'done', label: '완료', dot: 'var(--success)' },
-  { id: 'canceled', label: '취소', dot: 'var(--danger)' },
+  { id: 'received',   label: '주문접수', dot: 'var(--info)' },
+  { id: 'confirmed',  label: '주문확인', dot: 'var(--warning)' },
+  { id: 'processing', label: '처리중',   dot: '#8b5cf6' },
+  { id: 'shipped',    label: '발송완료', dot: 'var(--success)' },
 ];
 
 const dateInputStyle: React.CSSProperties = {
