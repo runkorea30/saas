@@ -318,6 +318,7 @@ export function MobileOrderHistory({ session }: Props) {
             <OrderCard
               key={o.id}
               order={o}
+              customerName={session.customerName}
               expanded={expandedId === o.id}
               onToggle={() => toggleExpand(o.id)}
             />
@@ -362,16 +363,17 @@ export function MobileOrderHistory({ session }: Props) {
 
 function OrderCard({
   order,
+  customerName,
   expanded,
   onToggle,
 }: {
   order: OrderRow;
+  customerName: string;
   expanded: boolean;
   onToggle: () => void;
 }) {
   const style = orderStatusStyle(order.status);
   const items = order.order_items ?? [];
-  const itemCount = items.length;
   const totalQty = items.reduce((s, i) => s + (i.quantity ?? 0), 0);
   const tracking = normalizeTrackingNumbers(order.tracking_numbers);
 
@@ -383,10 +385,10 @@ function OrderCard({
         border: '1px solid var(--mo-border)',
         borderRadius: 16,
         padding: 16,
-        boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
+        boxShadow: '0 2px 12px rgba(0,0,0,0.20)',
       }}
     >
-      {/* 헤더 클릭 영역 */}
+      {/* 헤더 클릭 영역 — 3-Row (거래처명+상태 / 날짜+수량 / 금액) */}
       <div
         role="button"
         tabIndex={0}
@@ -399,42 +401,67 @@ function OrderCard({
         }}
         style={{ cursor: 'pointer' }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-          <div style={{ minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 13,
-                color: 'var(--mo-text-secondary)',
-                marginBottom: 2,
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            >
-              {formatKstDate(order.order_date)}
-            </div>
-            <div
-              style={{
-                fontSize: 12,
-                color: 'var(--mo-text-secondary)',
-              }}
-            >
-              {itemCount}종 · {totalQty}개
-            </div>
-          </div>
-          <div style={{ textAlign: 'right', flexShrink: 0 }}>
-            <StatusPill style={style} />
-            <div
-              style={{
-                fontSize: 22,
-                fontWeight: 700,
-                marginTop: 6,
-                color: 'var(--mo-text-primary)',
-                fontVariantNumeric: 'tabular-nums',
-                letterSpacing: '-0.01em',
-              }}
-            >
-              {formatKrw(order.total_amount)}
-            </div>
-          </div>
+        {/* Row 1: 거래처명 좌측 (17px/700) + 상태 배지 우측 */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 6,
+            gap: 8,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 17,
+              fontWeight: 700,
+              color: 'var(--mo-text-primary)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              minWidth: 0,
+            }}
+          >
+            {customerName}
+          </span>
+          <StatusPill style={style} />
+        </div>
+
+        {/* Row 2: 날짜 좌측 + 수량 우측 (12px/secondary) */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            marginBottom: 8,
+          }}
+        >
+          <span style={{ fontSize: 12, color: 'var(--mo-text-secondary)' }}>
+            {formatKstDate(order.order_date)}
+          </span>
+          <span
+            style={{
+              fontSize: 12,
+              color: 'var(--mo-text-secondary)',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {totalQty}개
+          </span>
+        </div>
+
+        {/* Row 3: 금액 우측 정렬 (22px/700/accent) */}
+        <div style={{ textAlign: 'right' }}>
+          <span
+            style={{
+              fontSize: 22,
+              fontWeight: 700,
+              color: 'var(--mo-accent)',
+              fontVariantNumeric: 'tabular-nums',
+              letterSpacing: '-0.01em',
+            }}
+          >
+            {formatKrw(order.total_amount)}
+          </span>
         </div>
       </div>
 
