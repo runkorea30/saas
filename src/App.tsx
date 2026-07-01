@@ -26,6 +26,7 @@ import { SalesAnalysisPage } from '@/pages/sales/SalesAnalysisPage';
 import { CustomersPage } from '@/pages/settings/CustomersPage';
 import { CustomerGroupsPage } from '@/pages/settings/CustomerGroupsPage';
 import { PortalNoticePage } from '@/pages/settings/PortalNoticePage';
+import { BackupPage } from '@/pages/settings/BackupPage';
 import { ProductsPage } from '@/pages/inventory/ProductsPage';
 import { StockPage } from '@/pages/inventory/StockPage';
 import { ImportReceivingPage } from '@/pages/inventory/ImportReceivingPage';
@@ -123,6 +124,7 @@ function App() {
             <Route path="customers" element={<CustomersPage />} />
             <Route path="customer-groups" element={<CustomerGroupsPage />} />
             <Route path="portal-notice" element={<PortalNoticePage />} />
+            <Route path="backup" element={<BackupPage />} />
           </Route>
 
           {/* 레거시 /orders → /sales/orders */}

@@ -80,6 +80,7 @@ export const navSections: NavSection[] = [
       { path: '/settings/customers', label: '거래처' },
       { path: '/settings/customer-groups', label: '거래처 그룹' },
       { path: '/settings/portal-notice', label: '포털 공지사항' },
+      { path: '/settings/backup', label: '데이터 백업' },
     ],
   },
 ];
