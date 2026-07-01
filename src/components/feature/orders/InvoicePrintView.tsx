@@ -213,7 +213,8 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
               // 마지막 거래처는 page-break 없음 — 빈 페이지 방지.
               pageBreakAfter: isLast ? 'auto' : 'always',
               breakAfter: isLast ? 'auto' : 'page',
-              padding: '4mm 0',
+              // 🟠 종이 절약: 4mm → 2mm (50%). @page margin-top 도 12→6mm 로 축소.
+              padding: '2mm 0',
             }}
           >
             {/* 1) 타이틀 */}
@@ -223,9 +224,10 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                 fontWeight: 700,
                 letterSpacing: '0.4em',
                 textAlign: 'center',
-                margin: '0 0 6mm 0',
+                // 🟠 종이 절약: 6mm → 3mm
+                margin: '0 0 3mm 0',
                 borderBottom: '2px solid #111',
-                paddingBottom: '2mm',
+                paddingBottom: '1.5mm',
               }}
             >
               거 래 명 세 서
@@ -237,7 +239,8 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                 display: 'flex',
                 gap: '6mm',
                 alignItems: 'flex-start',
-                marginBottom: '6mm',
+                // 🟠 종이 절약: 헤더 ↔ 주문 테이블 간격 6mm → 2mm
+                marginBottom: '2mm',
               }}
             >
               {/* 좌측 */}
@@ -313,7 +316,7 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
               const subtotal = orderSubtotal(o);
               const rows = buildRows(o.items);
               return (
-                <div key={o.id} style={{ marginBottom: '6mm' }}>
+                <div key={o.id} style={{ marginBottom: '2mm' }}>
                   {/* 섹션 타이틀 — 배지 + 직송 배지 (옵션) */}
                   <div
                     style={{
@@ -322,7 +325,7 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                       gap: '2mm',
                       background: '#eef2f6',
                       border: '1px solid #cdd6e0',
-                      padding: '2mm 3mm',
+                      padding: '0.8mm 3mm',
                       fontSize: '11pt',
                       fontWeight: 700,
                     }}
@@ -356,7 +359,7 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                           style={{
                             border: '1px solid #cdd6e0',
                             borderTop: 'none',
-                            padding: '2mm 3mm',
+                            padding: '1mm 3mm',
                             fontSize: '9pt',
                             background: '#fafbfc',
                           }}
@@ -439,7 +442,7 @@ export function InvoicePrintView({ groups }: InvoicePrintViewProps) {
                                 style={{
                                   background: '#f9f6ef',
                                   border: '1px solid #000',
-                                  padding: '1.5mm 3mm',
+                                  padding: '0.8mm 3mm',
                                   fontWeight: 700,
                                 }}
                               >
@@ -544,7 +547,8 @@ function thCenter(width: string): React.CSSProperties {
   return {
     width,
     border: '1px solid #000',
-    padding: '1.5mm 2mm',
+    // 🟠 종이 절약: 1.5mm → 0.8mm (~3px)
+    padding: '0.8mm 2mm',
     textAlign: 'center',
     fontWeight: 700,
   };
@@ -552,7 +556,7 @@ function thCenter(width: string): React.CSSProperties {
 function thLeft(): React.CSSProperties {
   return {
     border: '1px solid #000',
-    padding: '1.5mm 3mm',
+    padding: '0.8mm 3mm',
     textAlign: 'left',
     fontWeight: 700,
   };
@@ -561,7 +565,7 @@ function thRight(width: string): React.CSSProperties {
   return {
     width,
     border: '1px solid #000',
-    padding: '1.5mm 3mm',
+    padding: '0.8mm 3mm',
     textAlign: 'right',
     fontWeight: 700,
   };
@@ -570,7 +574,8 @@ function thRight(width: string): React.CSSProperties {
 function td(align: 'left' | 'center' | 'right'): React.CSSProperties {
   return {
     border: '1px solid #000',
-    padding: '1.2mm 2mm',
+    // 🟠 종이 절약: 1.2mm → 0.6mm (~2.3px). 텍스트 붙지 않는 최소치.
+    padding: '0.6mm 2mm',
     textAlign: align,
     fontVariantNumeric: align === 'right' ? 'tabular-nums' : 'normal',
   };

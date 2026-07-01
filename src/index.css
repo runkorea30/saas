@@ -664,6 +664,7 @@
   }
   @page {
     size: A4 portrait;
-    margin: 12mm 10mm;
+    /* 상단만 절반으로 축소 (12mm → 6mm) — 종이 절약 목적. 좌우/하단은 유지. */
+    margin: 6mm 10mm 12mm 10mm;
   }
 }
