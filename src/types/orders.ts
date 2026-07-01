@@ -82,6 +82,11 @@ export interface Order {
   is_direct_shipping?: boolean | null;
   /** 직송 정보 배열. JSONB 컬럼 — Supabase 가 객체로 디시리얼라이즈해서 반환. */
   shipping_info?: OrderShippingEntry[] | null;
+  /** 4단계 상태 전환 타임스탬프 (2026-07 도입). null = 해당 단계 미도달. */
+  received_at?: string | null;
+  confirmed_at?: string | null;
+  processing_at?: string | null;
+  shipped_at?: string | null;
   created_by: string | null;
   customer: OrderCustomerRef | null;
   creator: OrderCreatorRef | null;

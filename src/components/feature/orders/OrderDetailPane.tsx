@@ -8,7 +8,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, FileText, MoreHorizontal, Tag, Trash2 } from 'lucide-react';
+import { ChevronDown, ExternalLink, FileText, MoreHorizontal, Tag, Trash2 } from 'lucide-react';
 import {
   CARRIERS,
   DEFAULT_CARRIER,
@@ -32,6 +32,8 @@ import { useOrderItems, type OrderItemRow } from '@/hooks/queries/useOrderItems'
 import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 import { useProducts, type Product } from '@/hooks/queries/useProducts';
 import { OrderPhotoSection } from '@/components/order/OrderPhotoSection';
+import { useToast } from '@/components/ui/Toast';
+import type { OrderStatus } from '@/types/common';
 import type { Order, OrderItemDraft } from '@/types/orders';
 
 export function OrderDetailPane({
@@ -534,7 +536,7 @@ export function OrderDetailPane({
           >
             {order.id.slice(0, 8)}
           </span>
-          <StatusBadge status={order.status} />
+          <StatusPicker order={order} />
           <SourceIcon source={order.source} />
           {isAdditional && (
             <span
@@ -1231,6 +1233,148 @@ function DetailEmpty() {
       <div style={{ fontSize: 11.5, color: 'var(--ink-3)', textAlign: 'center' }}>
         왼쪽 목록에서 주문을 클릭하면 상세 내용이 여기에 표시됩니다.
       </div>
+    </div>
+  );
+}
+
+/**
+ * 상태 수동 변경 UI — 헤더의 상태 뱃지 자리에 렌더.
+ * 클릭 시 드롭다운으로 5개 옵션(주문접수/주문확인/처리중/발송완료/취소) 표시.
+ * 선택 시 orders.status + 해당 *_at 타임스탬프 함께 UPDATE. 역방향 전환도 허용.
+ * 취소(canceled) 는 별도 타임스탬프 없이 status 만 갱신.
+ */
+const STATUS_OPTIONS: { value: OrderStatus; label: string }[] = [
+  { value: 'received', label: '주문접수' },
+  { value: 'confirmed', label: '주문확인' },
+  { value: 'processing', label: '처리중' },
+  { value: 'shipped', label: '발송완료' },
+  { value: 'canceled', label: '취소' },
+];
+
+const STATUS_TIMESTAMP: Partial<Record<OrderStatus, string>> = {
+  received: 'received_at',
+  confirmed: 'confirmed_at',
+  processing: 'processing_at',
+  shipped: 'shipped_at',
+};
+
+function StatusPicker({ order }: { order: Order }) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const changeStatus = async (next: OrderStatus) => {
+    if (busy || next === order.status) {
+      setOpen(false);
+      return;
+    }
+    setBusy(true);
+    setOpen(false);
+    const timestampCol = STATUS_TIMESTAMP[next];
+    const payload: Record<string, unknown> = { status: next };
+    if (timestampCol) payload[timestampCol] = new Date().toISOString();
+    const { error } = await supabase
+      .from('orders')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update(payload as any)
+      .eq('id', order.id);
+    setBusy(false);
+    if (error) {
+      showToast({ kind: 'error', text: `상태 변경 실패: ${error.message}` });
+      return;
+    }
+    const label = STATUS_OPTIONS.find((o) => o.value === next)?.label ?? next;
+    showToast({ kind: 'success', text: `상태가 "${label}"(으)로 변경되었습니다.` });
+    void queryClient.invalidateQueries({ queryKey: ['orders'] });
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', display: 'inline-flex' }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={busy}
+        title="상태 변경"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 3,
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          cursor: busy ? 'wait' : 'pointer',
+          opacity: busy ? 0.5 : 1,
+        }}
+      >
+        <StatusBadge status={order.status} />
+        <ChevronDown size={11} strokeWidth={1.8} color="var(--ink-3)" />
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 4px)',
+            left: 0,
+            zIndex: 40,
+            minWidth: 130,
+            background: 'var(--surface)',
+            border: '1px solid var(--line)',
+            borderRadius: 8,
+            boxShadow: 'var(--shadow-lg)',
+            padding: 4,
+          }}
+        >
+          {STATUS_OPTIONS.map((opt) => {
+            const active = opt.value === order.status;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => void changeStatus(opt.value)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                  padding: '7px 10px',
+                  border: 'none',
+                  borderRadius: 6,
+                  background: active ? 'var(--brand-wash)' : 'transparent',
+                  color: active ? 'var(--brand)' : 'var(--ink-2)',
+                  fontSize: 12,
+                  fontFamily: 'var(--font-kr)',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={(e) => {
+                  if (!active) e.currentTarget.style.background = 'var(--surface-2)';
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                <StatusBadge status={opt.value} />
+                {active && (
+                  <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--brand)' }}>
+                    현재
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
