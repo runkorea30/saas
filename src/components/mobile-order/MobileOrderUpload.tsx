@@ -90,7 +90,45 @@ export function MobileOrderUpload({ session, onSubmitted }: Props) {
       const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(path);
       const fileUrl = publicData?.publicUrl ?? path;
 
-      // customer_order_uploads INSERT.
+      // orders INSERT — OPS 주문 목록에 노출되도록 빈 주문 생성.
+      //   · CustomerOrderPage(portal) 이미지 접수와 동일 패턴.
+      //   · 관리자는 OrderDetailPane 에서 attachment_url 을 열어보며 품목을 직접 입력.
+      //   · received_at 은 database.ts 미반영(types desync) — 캐스팅으로 우회.
+      const nowIso = new Date().toISOString();
+      const orderRes = await supabase
+        .from('orders')
+        .insert({
+          company_id: session.companyId,
+          customer_id: session.customerId,
+          order_date: nowIso,
+          status: 'received',
+          received_at: nowIso,
+          source: 'mobile',
+          memo: memo.trim() || null,
+          attachment_url: fileUrl,
+          total_amount: 0,
+          // received_at 은 database.ts 에 없어(types desync) 캐스팅 인터페이스에서 제외 —
+          // 런타임 객체 리터럴에는 유지되므로 INSERT 값에는 포함됨.
+        } as unknown as {
+          company_id: string;
+          customer_id: string;
+          order_date: string;
+          status: string;
+          source: string;
+          memo: string | null;
+          attachment_url: string;
+          total_amount: number;
+        })
+        .select('id')
+        .single();
+      if (orderRes.error || !orderRes.data) {
+        // eslint-disable-next-line no-console
+        console.error('[mo.upload.order]', orderRes.error);
+        throw new Error('주문 접수에 실패했습니다.');
+      }
+      const newOrderId = orderRes.data.id;
+
+      // customer_order_uploads INSERT — 방금 만든 order 와 연결. order 가 이미 있으므로 status='done'.
       const insertRes = await supabase.from('customer_order_uploads').insert({
         company_id: session.companyId,
         customer_id: session.customerId,
@@ -98,7 +136,8 @@ export function MobileOrderUpload({ session, onSubmitted }: Props) {
         file_name: file.name,
         file_url: fileUrl,
         message: memo.trim() || null,
-        status: 'pending',
+        order_id: newOrderId,
+        status: 'done',
       });
       if (insertRes.error) {
         // eslint-disable-next-line no-console
