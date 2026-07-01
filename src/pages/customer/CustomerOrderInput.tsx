@@ -102,6 +102,9 @@ export function CustomerOrderInput({
   //   판정은 filledShippingForInsert(shipping).length > 0 (CustomerOrderPage 와 동일 패턴).
   const [showDirect, setShowDirect] = useState(false);
   const [shipping, setShipping] = useState<ShippingRow[]>([emptyShipping()]);
+  // 거래처가 남기는 자유 메모 — orders.memo 에 그대로 저장.
+  //   비어있으면 null 저장 (관리자 표시에서 "-").
+  const [memo, setMemo] = useState('');
   // 전송 완료 다이얼로그 — 닫히면 onBack() 으로 메인 화면 복귀.
   const [submitResult, setSubmitResult] = useState<{
     show: boolean;
@@ -294,6 +297,7 @@ export function CustomerOrderInput({
           customer_id: customer.customerId,
           upload_type: 'direct',
           items,
+          message: memo.trim() || null,
           shipping_info: isDirect
             ? (filledShipping as unknown as Json)
             : null,
@@ -315,7 +319,7 @@ export function CustomerOrderInput({
         status: 'received',
         received_at: nowIso,
         source: 'portal',
-        memo: '거래처 직접입력 주문',
+        memo: memo.trim() || null,
         shipping_info: isDirect ? (filledShipping as unknown as Json) : null,
         is_direct_shipping: isDirect,
         total_amount: totalAmount,
@@ -645,6 +649,25 @@ export function CustomerOrderInput({
                 </div>
               );
             })}
+
+            {/* 메모 카드 — 스크롤 최하단. 없으면 null 저장. */}
+            <div className="border-t border-[var(--p-card-bg)] px-[22px] py-4">
+              <label
+                htmlFor="customer-order-memo"
+                className="mb-2 block text-[12px] font-semibold text-[var(--p-ink-2)]"
+              >
+                메모 (선택)
+              </label>
+              <textarea
+                id="customer-order-memo"
+                value={memo}
+                onChange={(e) => setMemo(e.target.value)}
+                placeholder="배송 요청, 특이사항 등을 입력하세요."
+                rows={3}
+                disabled={busy}
+                className="w-full resize-y rounded-md border border-[var(--p-line)] bg-[var(--p-card-bg)] px-3 py-2 text-[13px] text-[var(--p-ink)] outline-none focus:border-[var(--p-brand)] disabled:opacity-55"
+              />
+            </div>
           </div>
 
           {/* 하단 고정 푸터 */}
