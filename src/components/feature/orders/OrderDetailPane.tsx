@@ -1239,16 +1239,17 @@ function DetailEmpty() {
 
 /**
  * 상태 수동 변경 UI — 헤더의 상태 뱃지 자리에 렌더.
- * 클릭 시 드롭다운으로 5개 옵션(주문접수/주문확인/처리중/발송완료/취소) 표시.
+ * 클릭 시 드롭다운으로 신규 4단계 옵션(주문접수/주문확인/처리중/발송완료) 표시.
  * 선택 시 orders.status + 해당 *_at 타임스탬프 함께 UPDATE. 역방향 전환도 허용.
- * 취소(canceled) 는 별도 타임스탬프 없이 status 만 갱신.
+ *
+ * 🟠 레거시 상태(draft/done/canceled)는 선택 옵션에서 제거 — 현재 그 상태인 주문의
+ *    뱃지 표시(읽기)는 StatusBadge 에서 계속 지원. 신규로 진입하는 경로만 4단계로 제한.
  */
 const STATUS_OPTIONS: { value: OrderStatus; label: string }[] = [
   { value: 'received', label: '주문접수' },
   { value: 'confirmed', label: '주문확인' },
   { value: 'processing', label: '처리중' },
   { value: 'shipped', label: '발송완료' },
-  { value: 'canceled', label: '취소' },
 ];
 
 const STATUS_TIMESTAMP: Partial<Record<OrderStatus, string>> = {
