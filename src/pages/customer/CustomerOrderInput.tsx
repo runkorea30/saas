@@ -446,7 +446,26 @@ export function CustomerOrderInput({
         </div>
       </header>
 
-      {/* ── 직송 정보 — 상시 노출. 채운 행이 있으면 직송 주문으로 저장. ── */}
+      {/* ── 메모 — 헤더 다음, 직송 정보 위. 상시 노출로 놓침 방지. ── */}
+      <div className="shrink-0 border-b border-[var(--p-line)] bg-[var(--p-card-bg)] px-6 py-3">
+        <label
+          htmlFor="customer-order-memo"
+          className="mb-1.5 flex items-center gap-1.5 text-[12px] font-semibold text-[var(--p-ink-2)]"
+        >
+          메모 <span className="text-[11px] font-normal text-[var(--p-ink-3)]">(선택)</span>
+        </label>
+        <textarea
+          id="customer-order-memo"
+          value={memo}
+          onChange={(e) => setMemo(e.target.value)}
+          placeholder="배송 요청, 특이사항 등을 입력하세요."
+          rows={2}
+          disabled={busy}
+          className="w-full resize-y rounded-md border border-[var(--p-line)] bg-[var(--p-bg)] px-3 py-2 text-[13px] text-[var(--p-ink)] outline-none focus:border-[var(--p-brand)] disabled:opacity-55"
+        />
+      </div>
+
+      {/* ── 직송 정보 — 메모 아래. 채운 행이 있으면 직송 주문으로 저장. ── */}
       <div className="shrink-0 border-b border-[var(--p-line)] bg-[var(--p-card-bg)] px-[22px] py-3">
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-baseline gap-2">
@@ -642,25 +661,6 @@ export function CustomerOrderInput({
               );
             })}
 
-          </div>
-
-          {/* 메모 카드 — 스크롤 컨테이너 밖, 하단 푸터 바로 위. 상시 노출로 놓침 방지. */}
-          <div className="shrink-0 border-t border-[var(--p-card-bg)] bg-[var(--p-card-bg)] px-6 py-3">
-            <label
-              htmlFor="customer-order-memo"
-              className="mb-1.5 flex items-center gap-1.5 text-[12px] font-semibold text-[var(--p-ink-2)]"
-            >
-              메모 <span className="text-[11px] font-normal text-[var(--p-ink-3)]">(선택)</span>
-            </label>
-            <textarea
-              id="customer-order-memo"
-              value={memo}
-              onChange={(e) => setMemo(e.target.value)}
-              placeholder="배송 요청, 특이사항 등을 입력하세요."
-              rows={2}
-              disabled={busy}
-              className="w-full resize-y rounded-md border border-[var(--p-line)] bg-[var(--p-bg)] px-3 py-2 text-[13px] text-[var(--p-ink)] outline-none focus:border-[var(--p-brand)] disabled:opacity-55"
-            />
           </div>
 
           {/* 하단 고정 푸터 */}
