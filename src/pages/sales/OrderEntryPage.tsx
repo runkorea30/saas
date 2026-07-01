@@ -151,7 +151,6 @@ export function OrderEntryPage() {
   const attachmentUrlFromQuery = searchParams.get('attachmentUrl');
   const sourceOrderId = searchParams.get('sourceOrderId');
   const [orderDate, setOrderDate] = useState<string>(todayKstDateString());
-  const [memo, setMemo] = useState('');
   const [recentCustomerIds, setRecentCustomerIds] = useState<string[]>(() =>
     readRecent(),
   );
@@ -409,7 +408,6 @@ export function OrderEntryPage() {
     setCustomerId('');
     setOrderDate(todayKstDateString());
     setOrderType('일반주문');
-    setMemo('');
     setRows(Array.from({ length: INITIAL_ROW_COUNT }, () => makeEmptyRow(false)));
     setUploadedFile(null);
     setShowSuggestions(false);
@@ -647,7 +645,8 @@ export function OrderEntryPage() {
         p_order_date: composeOrderTimestamp(orderDate),
         p_source: 'manual',
         p_status: 'confirmed',
-        p_memo: memo || null,
+        // 이미지 대기 주문 인계(sourceOrderId 있는 경우)의 memo 보존 로직은 별도 커밋에서 추가.
+        p_memo: null,
         p_items: itemsPayload,
       });
       if (error) throw error;
@@ -681,7 +680,6 @@ export function OrderEntryPage() {
     companyId,
     customerId,
     orderDate,
-    memo,
     queryClient,
     navigate,
     stockSummary,
@@ -771,17 +769,6 @@ export function OrderEntryPage() {
               value={orderDate}
               onChange={(e) => setOrderDate(e.target.value)}
               className="border border-[var(--line-strong)] rounded px-2 py-1.5 text-sm bg-[var(--surface)] text-[var(--ink)] focus:outline-none focus:border-[var(--brand)]"
-            />
-          </div>
-
-          <div className="flex-1 min-w-32">
-            <div className="text-xs text-[var(--ink-3)] mb-1">메모</div>
-            <input
-              type="text"
-              value={memo}
-              onChange={(e) => setMemo(e.target.value)}
-              placeholder="메모"
-              className="w-full border border-[var(--line-strong)] rounded px-2 py-1.5 text-sm bg-[var(--surface)] text-[var(--ink)] focus:outline-none focus:border-[var(--brand)]"
             />
           </div>
 
