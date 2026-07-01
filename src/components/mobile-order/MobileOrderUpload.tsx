@@ -16,6 +16,80 @@ import type { MobileSession } from '@/lib/mobileOrderAuth';
 const BUCKET = 'order-photos';
 const MAX_FILE_BYTES = 15 * 1024 * 1024; // 15 MB
 const ALLOWED_MIME_PREFIX = ['image/', 'application/pdf'];
+const COMPRESS_MAX_SIDE = 1600;
+const COMPRESS_QUALITY = 0.85;
+
+// ───────────────────────────────────────────────────────────
+// 이미지 압축 (Canvas 기반)
+// ───────────────────────────────────────────────────────────
+
+/**
+ * 업로드 전 이미지 압축. 다음 케이스는 원본 그대로 반환:
+ *  - PDF (application/pdf)
+ *  - Image 로드 실패 (silent fallback)
+ *  - 압축 후 오히려 크거나 같음
+ *
+ * 카메라 촬영 사진(3~8MB)을 500KB~1MB 수준으로 줄여 모바일 네트워크
+ * 업로드 성공률/속도를 개선. 긴 변이 COMPRESS_MAX_SIDE(1600px) 초과 시에만
+ * 리사이즈, JPEG 품질은 COMPRESS_QUALITY(0.85).
+ */
+async function compressImage(file: File): Promise<File> {
+  if (file.type === 'application/pdf') return file;
+
+  return new Promise<File>((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+
+      if (width > COMPRESS_MAX_SIDE || height > COMPRESS_MAX_SIDE) {
+        if (width >= height) {
+          height = Math.round((height * COMPRESS_MAX_SIDE) / width);
+          width = COMPRESS_MAX_SIDE;
+        } else {
+          width = Math.round((width * COMPRESS_MAX_SIDE) / height);
+          height = COMPRESS_MAX_SIDE;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(file);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob || blob.size >= file.size) {
+            resolve(file);
+            return;
+          }
+          resolve(
+            new File([blob], file.name, {
+              type: 'image/jpeg',
+              lastModified: Date.now(),
+            }),
+          );
+        },
+        'image/jpeg',
+        COMPRESS_QUALITY,
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+
+    img.src = url;
+  });
+}
 
 interface Props {
   session: MobileSession;
@@ -75,17 +149,26 @@ export function MobileOrderUpload({ session }: Props) {
     setSubmitting(true);
 
     try {
+      // 업로드 전 이미지 압축 (PDF/실패 시 원본 반환).
+      const fileToUpload = await compressImage(file);
+
       // Storage 업로드. anon 정책상 listBuckets 는 항상 실패하므로 사전 체크 없이 바로 업로드.
       // 원본 파일명은 customer_order_uploads.file_name 에 그대로 보존(관리자 표시용).
-      // Storage 경로에 쓰는 파일명은 확장자만 뽑아 timestamp 로 재구성 —
+      // Storage 경로 파일명은 확장자만 뽑아 timestamp 로 재구성 —
       // 한글/공백/이모지 등 Storage 가 URL 인코딩 후 거부할 수 있는 문자를 완전 배제.
-      const extMatch = /\.([a-zA-Z0-9]{1,5})$/.exec(file.name);
-      const ext = (extMatch?.[1] ?? 'bin').toLowerCase();
+      // 확장자는 fileToUpload.type 우선(압축 성공 시 jpg / PDF 시 pdf),
+      // 그 외(압축 실패로 원본 유지)는 원본 file.name 확장자 사용.
+      const ext =
+        fileToUpload.type === 'image/jpeg'
+          ? 'jpg'
+          : fileToUpload.type === 'application/pdf'
+            ? 'pdf'
+            : (/\.([a-zA-Z0-9]{1,5})$/.exec(file.name)?.[1] ?? 'bin').toLowerCase();
       const safeName = `${Date.now()}.${ext}`;
       const path = `customer-uploads/${session.companyId}/${session.customerId}/${safeName}`;
       const uploadRes = await supabase.storage
         .from(BUCKET)
-        .upload(path, file, { contentType: file.type || undefined });
+        .upload(path, fileToUpload, { contentType: fileToUpload.type || undefined });
       if (uploadRes.error) {
         // eslint-disable-next-line no-console
         console.error('[mo.upload.storage]', uploadRes.error);
