@@ -2292,6 +2292,7 @@ function OrderCard({
       >
         <Badge kind={extra ? 'extra' : 'regular'} />
         {direct && <Badge kind="direct" />}
+        <PortalStatusBadge status={order.status} />
         {showTime && (
           <span style={{ color: 'var(--p-ink-3)', fontVariantNumeric: 'tabular-nums' }}>
             {formatHM(order.order_date)}
@@ -2516,6 +2517,40 @@ function Badge({ kind }: { kind: 'regular' | 'extra' | 'direct' }) {
     direct: { bg: 'var(--p-info-soft-bg)', fg: 'var(--p-info)', label: '직송' },
   };
   const s = styles[kind];
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '2px 8px',
+        borderRadius: 999,
+        background: s.bg,
+        color: s.fg,
+        fontSize: 11,
+        fontWeight: 600,
+      }}
+    >
+      {s.label}
+    </span>
+  );
+}
+
+/**
+ * 포털용 주문 상태 뱃지 — OPS StatusBadge 와 동일한 4단계 + 레거시.
+ * · received=파랑 / confirmed=주황 / processing=보라 / shipped=초록 / draft·done·canceled=회색
+ * · 포털 테마 토큰(--p-*) 사용. processing 은 전용 토큰 없어 인라인 hex (라이트/다크 공용).
+ */
+function PortalStatusBadge({ status }: { status: string }) {
+  const styles: Record<string, { bg: string; fg: string; label: string }> = {
+    received:   { bg: 'var(--p-info-wash)',    fg: 'var(--p-info)',    label: '주문접수' },
+    confirmed:  { bg: 'var(--p-warning-wash)', fg: 'var(--p-warning)', label: '주문확인' },
+    processing: { bg: 'rgba(139, 92, 246, 0.18)', fg: '#7c3aed',       label: '처리중' },
+    shipped:    { bg: 'var(--p-success-wash)', fg: 'var(--p-success)', label: '발송완료' },
+    // 레거시 3종 — 회색 계열
+    draft:      { bg: 'var(--p-bg)',           fg: 'var(--p-ink-3)',   label: '임시' },
+    done:       { bg: 'var(--p-bg)',           fg: 'var(--p-ink-3)',   label: '완료' },
+    canceled:   { bg: 'var(--p-danger-wash)',  fg: 'var(--p-danger)',  label: '취소' },
+  };
+  const s = styles[status] ?? styles.received;
   return (
     <span
       style={{
