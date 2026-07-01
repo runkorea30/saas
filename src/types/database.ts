@@ -394,6 +394,9 @@ export type Database = {
           id: string
           items: Json | null
           message: string | null
+          order_id: string | null
+          processed_at: string | null
+          processed_memo: string | null
           shipping_info: Json | null
           status: string
           upload_type: string
@@ -407,6 +410,9 @@ export type Database = {
           id?: string
           items?: Json | null
           message?: string | null
+          order_id?: string | null
+          processed_at?: string | null
+          processed_memo?: string | null
           shipping_info?: Json | null
           status?: string
           upload_type: string
@@ -420,6 +426,9 @@ export type Database = {
           id?: string
           items?: Json | null
           message?: string | null
+          order_id?: string | null
+          processed_at?: string | null
+          processed_memo?: string | null
           shipping_info?: Json | null
           status?: string
           upload_type?: string
@@ -430,6 +439,13 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_order_uploads_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
             referencedColumns: ["id"]
           },
         ]
@@ -1388,6 +1404,58 @@ export type Database = {
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "user_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mobile_order_sessions: {
+        Row: {
+          company_id: string
+          created_at: string
+          customer_id: string
+          customer_user_id: string
+          expires_at: string
+          id: string
+          session_token: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          customer_id: string
+          customer_user_id: string
+          expires_at: string
+          id?: string
+          session_token: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          customer_id?: string
+          customer_user_id?: string
+          expires_at?: string
+          id?: string
+          session_token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mobile_order_sessions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mobile_order_sessions_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mobile_order_sessions_customer_user_id_fkey"
+            columns: ["customer_user_id"]
+            isOneToOne: false
+            referencedRelation: "customer_users"
             referencedColumns: ["id"]
           },
         ]

@@ -1,0 +1,316 @@
+/**
+ * 파트너 모바일 주문 페이지(/mobile-order) 전용 테마 & 레이아웃.
+ *
+ * 🔴 OPS 의 data-theme (전역) 와 독립. 여기서 정의한 --mo-* CSS 변수는
+ *    루트 div[data-mobile-theme] 하위에서만 유효.
+ * 🟠 최대 너비 480px 모바일 최적화. 하단 탭 fixed + safe-area 고려.
+ */
+
+/* ─── 다크 테마 (기본값) ──────────────────────────────── */
+[data-mobile-theme='dark'] {
+  --mo-bg: #0f0f0f;
+  --mo-bg-card: #1a1a1a;
+  --mo-bg-input: #252525;
+  --mo-border: #2e2e2e;
+  --mo-text-primary: #f0f0f0;
+  --mo-text-secondary: #8a8a8a;
+  --mo-accent: #4f83cc;
+  --mo-accent-hover: #6b9fd4;
+  --mo-danger: #e05555;
+  --mo-warning: #d4842a;
+  --mo-success: #3a9e5f;
+  --mo-badge-out-bg: #3d1414;
+  --mo-badge-out-text: #f87171;
+  --mo-badge-low-bg: #3d2f0a;
+  --mo-badge-low-text: #fbbf24;
+  --mo-overlay: rgba(0, 0, 0, 0.6);
+}
+
+/* ─── 라이트 테마 ─────────────────────────────────────── */
+[data-mobile-theme='light'] {
+  --mo-bg: #f5f5f5;
+  --mo-bg-card: #ffffff;
+  --mo-bg-input: #f0f0f0;
+  --mo-border: #e0e0e0;
+  --mo-text-primary: #1a1a1a;
+  --mo-text-secondary: #6b6b6b;
+  --mo-accent: #2563eb;
+  --mo-accent-hover: #1d4ed8;
+  --mo-danger: #dc2626;
+  --mo-warning: #d97706;
+  --mo-success: #16a34a;
+  --mo-badge-out-bg: #fee2e2;
+  --mo-badge-out-text: #991b1b;
+  --mo-badge-low-bg: #fef3c7;
+  --mo-badge-low-text: #92400e;
+  --mo-overlay: rgba(0, 0, 0, 0.4);
+}
+
+/* ─── 루트 컨테이너 ───────────────────────────────────── */
+.mo-root {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--mo-bg);
+  color: var(--mo-text-primary);
+  font-family:
+    'Pretendard',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  display: flex;
+  justify-content: center;
+  /* 하단 탭 높이 + safe area 만큼 여유 확보 (children 이 스크롤 될 때 마지막 요소가 가려지지 않도록) */
+}
+
+.mo-frame {
+  width: 100%;
+  max-width: 480px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--mo-bg);
+  position: relative;
+}
+
+/* ─── 헤더 ────────────────────────────────────────────── */
+.mo-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: 56px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--mo-bg);
+  border-bottom: 1px solid var(--mo-border);
+}
+
+.mo-header__brand {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--mo-text-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.mo-header__title {
+  flex: 1;
+  text-align: center;
+  font-size: 13px;
+  color: var(--mo-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mo-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mo-icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: var(--mo-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.mo-icon-btn:hover {
+  background: var(--mo-bg-input);
+  color: var(--mo-text-primary);
+}
+.mo-icon-btn:active {
+  transform: scale(0.96);
+}
+
+/* ─── 본문 스크롤 영역 ────────────────────────────────── */
+.mo-main {
+  flex: 1;
+  padding: 16px 16px calc(80px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ─── 하단 탭 (fixed) ─────────────────────────────────── */
+.mo-tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  background: var(--mo-bg-card);
+  border-top: 1px solid var(--mo-border);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.mo-tabs__inner {
+  width: 100%;
+  max-width: 480px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+}
+.mo-tab {
+  height: 64px;
+  background: transparent;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--mo-text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+.mo-tab[data-active='true'] {
+  color: var(--mo-accent);
+}
+.mo-tab:active {
+  transform: scale(0.98);
+}
+
+/* ─── 재사용 요소 ─────────────────────────────────────── */
+.mo-card {
+  background: var(--mo-bg-card);
+  border: 1px solid var(--mo-border);
+  border-radius: 12px;
+  padding: 16px;
+}
+.mo-card + .mo-card {
+  margin-top: 12px;
+}
+
+.mo-input,
+.mo-textarea {
+  width: 100%;
+  background: var(--mo-bg-input);
+  border: 1px solid var(--mo-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: var(--mo-text-primary);
+  font-size: 16px; /* iOS zoom 방지 */
+  font-family: inherit;
+  outline: none;
+  transition: border-color 120ms ease;
+  box-sizing: border-box;
+}
+.mo-textarea {
+  resize: vertical;
+  min-height: 96px;
+  line-height: 1.5;
+}
+.mo-input:focus,
+.mo-textarea:focus {
+  border-color: var(--mo-accent);
+}
+.mo-input::placeholder,
+.mo-textarea::placeholder {
+  color: var(--mo-text-secondary);
+}
+
+.mo-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mo-text-secondary);
+  margin-bottom: 6px;
+}
+
+.mo-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 14px 24px;
+  background: var(--mo-accent);
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease;
+  min-height: 48px;
+}
+.mo-btn-primary:hover:not(:disabled) {
+  background: var(--mo-accent-hover);
+}
+.mo-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mo-btn-primary:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.mo-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 20px;
+  background: var(--mo-bg-input);
+  color: var(--mo-text-primary);
+  border: 1px solid var(--mo-border);
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  min-height: 44px;
+}
+.mo-btn-secondary:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.mo-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.mo-badge--out {
+  background: var(--mo-badge-out-bg);
+  color: var(--mo-badge-out-text);
+}
+.mo-badge--low {
+  background: var(--mo-badge-low-bg);
+  color: var(--mo-badge-low-text);
+}
+
+.mo-error {
+  color: var(--mo-danger);
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.mo-spin {
+  animation: mo-spin 1s linear infinite;
+}
+@keyframes mo-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

@@ -40,6 +40,7 @@ import { IncomeStatementPage } from '@/pages/finance/IncomeStatementPage';
 import { BillingPage } from '@/pages/sales/BillingPage';
 import { DocumentsPage } from '@/pages/documents/DocumentsPage';
 import { MobileApp } from '@/mobile/MobileApp';
+import MobileOrderPage from '@/pages/MobileOrderPage';
 
 function App() {
   const { session, isLoading, login, logout } = useOpsAuth();
@@ -83,6 +84,9 @@ function App() {
 
       {/* 모바일 PWA — OPS 로그인 불필요 */}
       <Route path="/mobile/*" element={<MobileApp />} />
+
+      {/* 파트너 모바일 주문(팩스/카톡 거래처) — 자체 로그인 + 독립 테마 */}
+      <Route path="/mobile-order" element={<MobileOrderPage />} />
 
       {/* OPS 전체 — 로그인 필요 */}
       {!session ? (
