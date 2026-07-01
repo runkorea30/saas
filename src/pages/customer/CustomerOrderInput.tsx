@@ -650,24 +650,25 @@ export function CustomerOrderInput({
               );
             })}
 
-            {/* 메모 카드 — 스크롤 최하단. 없으면 null 저장. */}
-            <div className="border-t border-[var(--p-card-bg)] px-[22px] py-4">
-              <label
-                htmlFor="customer-order-memo"
-                className="mb-2 block text-[12px] font-semibold text-[var(--p-ink-2)]"
-              >
-                메모 (선택)
-              </label>
-              <textarea
-                id="customer-order-memo"
-                value={memo}
-                onChange={(e) => setMemo(e.target.value)}
-                placeholder="배송 요청, 특이사항 등을 입력하세요."
-                rows={3}
-                disabled={busy}
-                className="w-full resize-y rounded-md border border-[var(--p-line)] bg-[var(--p-card-bg)] px-3 py-2 text-[13px] text-[var(--p-ink)] outline-none focus:border-[var(--p-brand)] disabled:opacity-55"
-              />
-            </div>
+          </div>
+
+          {/* 메모 카드 — 스크롤 컨테이너 밖, 하단 푸터 바로 위. 상시 노출로 놓침 방지. */}
+          <div className="shrink-0 border-t border-[var(--p-card-bg)] bg-[var(--p-card-bg)] px-6 py-3">
+            <label
+              htmlFor="customer-order-memo"
+              className="mb-1.5 flex items-center gap-1.5 text-[12px] font-semibold text-[var(--p-ink-2)]"
+            >
+              메모 <span className="text-[11px] font-normal text-[var(--p-ink-3)]">(선택)</span>
+            </label>
+            <textarea
+              id="customer-order-memo"
+              value={memo}
+              onChange={(e) => setMemo(e.target.value)}
+              placeholder="배송 요청, 특이사항 등을 입력하세요."
+              rows={2}
+              disabled={busy}
+              className="w-full resize-y rounded-md border border-[var(--p-line)] bg-[var(--p-bg)] px-3 py-2 text-[13px] text-[var(--p-ink)] outline-none focus:border-[var(--p-brand)] disabled:opacity-55"
+            />
           </div>
 
           {/* 하단 고정 푸터 */}
