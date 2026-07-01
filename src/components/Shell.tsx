@@ -91,8 +91,8 @@ export function Shell({ onLogout }: { onLogout: () => Promise<void> }) {
               customer_id: string;
               source: string | null;
             };
-            // 거래처 포털에서 들어온 주문만 알림 — OPS 내부 수동 주문은 제외.
-            if (newOrder.source !== 'portal') return;
+            // 거래처 포털(portal)/파트너 모바일(mobile) 접수만 알림 — OPS 내부 수동 주문은 제외.
+            if (newOrder.source !== 'portal' && newOrder.source !== 'mobile') return;
             handleArrivalRef.current?.(newOrder.customer_id);
           } catch (e) {
             console.error('[portal-orders] handler error:', e);
