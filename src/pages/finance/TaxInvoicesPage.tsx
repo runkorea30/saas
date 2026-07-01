@@ -11,7 +11,14 @@
  */
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Download, FileText, Trash2 } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  ExternalLink,
+  FileText,
+  Trash2,
+} from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useCompany } from '@/hooks/useCompany';
 import { supabase } from '@/lib/supabase';
@@ -458,6 +465,16 @@ export function TaxInvoicesPage() {
             </div>
 
             {/* 액션 */}
+            <a
+              href="https://hometax.go.kr/websquare/websquare.html?w2xPath=/ui/pp/index_pp.xml&menuCd=search&searchInfo1084901104"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="border border-[var(--line)] rounded-md bg-[var(--surface)] hover:bg-[var(--surface-2)] flex items-center gap-1.5 text-[var(--ink)] no-underline"
+              style={{ height: 32, padding: '0 12px', fontSize: 12.5 }}
+            >
+              <ExternalLink size={13} strokeWidth={1.8} />
+              국세청 전자세금계산서 일괄 작성
+            </a>
             <button
               type="button"
               onClick={() => setBulkConfirmOpen(true)}
