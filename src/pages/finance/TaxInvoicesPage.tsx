@@ -474,7 +474,7 @@ export function TaxInvoicesPage() {
 
             {/* 액션 */}
             <a
-              href="https://hometax.go.kr/websquare/websquare.html?w2xPath=/ui/pp/index_pp.xml&menuCd=search&searchInfo1084901104"
+              href="https://hometax.go.kr/websquare/websquare.html?w2xPath=/ui/pp/index_pp.xml&tmIdx=46&tm2lIdx=4601010000&tm3lIdx=4601010500"
               target="_blank"
               rel="noopener noreferrer"
               className="border border-[var(--line)] rounded-md bg-[var(--surface)] hover:bg-[var(--surface-2)] flex items-center gap-1.5 text-[var(--ink)] no-underline"
