@@ -313,7 +313,7 @@ export function MobileOrderForm({ session }: Props) {
       </button>
 
       {/* 성공 모달 — 확인 클릭 시 페이지 새로고침. */}
-      {showSuccessModal ? <SuccessModal customerName={session.customerName} /> : null}
+      {showSuccessModal ? <SuccessModal /> : null}
     </div>
   );
 }
@@ -322,7 +322,7 @@ export function MobileOrderForm({ session }: Props) {
 // 성공 모달 — 확인 → window.location.reload()
 // ───────────────────────────────────────────────────────────
 
-function SuccessModal({ customerName }: { customerName: string }) {
+function SuccessModal() {
   return (
     <div
       role="dialog"
@@ -374,9 +374,7 @@ function SuccessModal({ customerName }: { customerName: string }) {
             margin: '0 0 8px',
           }}
         >
-          {customerName}의 주문이
-          <br />
-          접수되었습니다.
+          주문서가 전송되었습니다.
         </p>
         <p
           style={{
