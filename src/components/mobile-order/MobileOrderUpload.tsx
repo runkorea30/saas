@@ -9,7 +9,7 @@
  * 🟠 15MB 초과 파일은 사전 차단 — 모바일 네트워크에서 업로드 실패 방지.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Camera, ImagePlus, FileText, X, Loader2, CheckCircle2 } from 'lucide-react';
+import { Camera, ImagePlus, FileText, X, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { MobileSession } from '@/lib/mobileOrderAuth';
 
@@ -19,11 +19,14 @@ const ALLOWED_MIME_PREFIX = ['image/', 'application/pdf'];
 
 interface Props {
   session: MobileSession;
-  /** 전송 성공 시 부모에 알림 — 예: 주문 확인 탭으로 이동. */
+  /**
+   * (Deprecated) 전송 성공 시 부모 알림 콜백.
+   * 성공 시 자체 모달을 띄운 뒤 사용자 확인 후 window.location.reload() 하므로 호출 안 함.
+   */
   onSubmitted?: () => void;
 }
 
-export function MobileOrderUpload({ session, onSubmitted }: Props) {
+export function MobileOrderUpload({ session }: Props) {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
@@ -32,7 +35,7 @@ export function MobileOrderUpload({ session, onSubmitted }: Props) {
   const [memo, setMemo] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   // previewUrl 은 URL.createObjectURL 결과 → 언마운트/교체 시 revoke.
   useEffect(() => {
@@ -44,7 +47,6 @@ export function MobileOrderUpload({ session, onSubmitted }: Props) {
 
   const handleFilePicked = (picked: File | null): void => {
     setError(null);
-    setSuccess(null);
     if (!picked) return;
 
     if (!ALLOWED_MIME_PREFIX.some((p) => picked.type.startsWith(p))) {
@@ -70,7 +72,6 @@ export function MobileOrderUpload({ session, onSubmitted }: Props) {
   const handleSubmit = async (): Promise<void> => {
     if (!file || submitting) return;
     setError(null);
-    setSuccess(null);
     setSubmitting(true);
 
     try {
@@ -150,14 +151,13 @@ export function MobileOrderUpload({ session, onSubmitted }: Props) {
         throw new Error('주문서 접수에 실패했습니다.');
       }
 
-      // 성공 상태 + 폼 초기화.
-      setSuccess("주문서가 전송되었습니다. '주문 확인' 탭에서 처리 결과를 확인하세요.");
+      // 폼 초기화 후 성공 모달 표시. 사용자가 확인 버튼을 누르면 페이지 새로고침.
       setFile(null);
       setPreviewUrl(null);
       setMemo('');
       if (cameraInputRef.current) cameraInputRef.current.value = '';
       if (galleryInputRef.current) galleryInputRef.current.value = '';
-      onSubmitted?.();
+      setShowSuccessModal(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : '전송 중 오류가 발생했습니다.');
     } finally {
@@ -321,30 +321,10 @@ export function MobileOrderUpload({ session, onSubmitted }: Props) {
         />
       </div>
 
-      {/* 상태/에러 */}
+      {/* 에러 — 성공은 아래 모달로 처리. */}
       {error ? (
         <div className="mo-error" role="alert" style={{ marginTop: 12 }}>
           {error}
-        </div>
-      ) : null}
-      {success ? (
-        <div
-          role="status"
-          style={{
-            marginTop: 12,
-            padding: 12,
-            borderRadius: 10,
-            background: 'var(--mo-bg-card)',
-            border: '1px solid var(--mo-success)',
-            color: 'var(--mo-success)',
-            fontSize: 13,
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 8,
-          }}
-        >
-          <CheckCircle2 size={18} style={{ flexShrink: 0, marginTop: 1 }} />
-          <span>{success}</span>
         </div>
       ) : null}
 
@@ -386,6 +366,100 @@ export function MobileOrderUpload({ session, onSubmitted }: Props) {
         style={{ display: 'none' }}
         onChange={(e) => handleFilePicked(e.target.files?.[0] ?? null)}
       />
+
+      {/* 성공 모달 — 확인 클릭 시 페이지 새로고침. */}
+      {showSuccessModal ? <SuccessModal customerName={session.customerName} /> : null}
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────
+// 성공 모달 — 확인 → window.location.reload()
+// ───────────────────────────────────────────────────────────
+
+function SuccessModal({ customerName }: { customerName: string }) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+        padding: 24,
+      }}
+    >
+      <div
+        style={{
+          background: 'var(--mo-bg-card)',
+          border: '1px solid var(--mo-border)',
+          borderRadius: 16,
+          padding: '28px 24px',
+          width: '100%',
+          maxWidth: 320,
+          textAlign: 'center',
+        }}
+      >
+        <div
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: '50%',
+            background: 'var(--mo-success)',
+            color: '#fff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 16px',
+            fontSize: 28,
+            fontWeight: 700,
+          }}
+        >
+          ✓
+        </div>
+        <p
+          style={{
+            color: 'var(--mo-text-primary)',
+            fontSize: 16,
+            fontWeight: 600,
+            margin: '0 0 8px',
+          }}
+        >
+          {customerName}의 주문이
+          <br />
+          접수되었습니다.
+        </p>
+        <p
+          style={{
+            color: 'var(--mo-text-secondary)',
+            fontSize: 13,
+            margin: '0 0 24px',
+          }}
+        >
+          담당자 확인 후 처리됩니다.
+        </p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          style={{
+            width: '100%',
+            background: 'var(--mo-accent)',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 10,
+            padding: 14,
+            fontSize: 15,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          확인
+        </button>
+      </div>
     </div>
   );
 }

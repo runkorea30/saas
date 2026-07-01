@@ -9,7 +9,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, CheckCircle2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import {
@@ -25,6 +25,10 @@ import {
 
 interface Props {
   session: MobileSession;
+  /**
+   * (Deprecated) 성공 시 부모 알림 콜백.
+   * 성공 시 자체 모달을 띄우고 사용자 확인 후 window.location.reload() 하므로 호출 안 함.
+   */
   onSubmitted?: (orderId: string) => void;
 }
 
@@ -36,12 +40,12 @@ interface SelectedSummary {
   amount: number;
 }
 
-export function MobileOrderForm({ session, onSubmitted }: Props) {
+export function MobileOrderForm({ session }: Props) {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [memo, setMemo] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successOrderId, setSuccessOrderId] = useState<string | null>(null);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   // 제품 목록 (활성만)
   const productsQuery = useQuery({
@@ -107,7 +111,6 @@ export function MobileOrderForm({ session, onSubmitted }: Props) {
 
   const handleChangeQty = (productId: string, quantity: number): void => {
     setError(null);
-    setSuccessOrderId(null);
     setQuantities((prev) => {
       const next = { ...prev };
       if (quantity <= 0) delete next[productId];
@@ -120,13 +123,11 @@ export function MobileOrderForm({ session, onSubmitted }: Props) {
     setQuantities({});
     setMemo('');
     setError(null);
-    setSuccessOrderId(null);
   };
 
   const handleSubmit = async (): Promise<void> => {
     if (submitting || selected.length === 0) return;
     setError(null);
-    setSuccessOrderId(null);
     setSubmitting(true);
 
     try {
@@ -155,11 +156,10 @@ export function MobileOrderForm({ session, onSubmitted }: Props) {
         throw new Error('주문 접수에 실패했습니다. 잠시 후 다시 시도해 주세요.');
       }
 
-      const newOrderId = String(data);
-      setSuccessOrderId(newOrderId);
+      // 폼 초기화 후 성공 모달 표시. 사용자가 확인 버튼을 누르면 페이지 새로고침.
       setQuantities({});
       setMemo('');
-      onSubmitted?.(newOrderId);
+      setShowSuccessModal(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : '주문 접수 중 오류가 발생했습니다.');
     } finally {
@@ -289,30 +289,10 @@ export function MobileOrderForm({ session, onSubmitted }: Props) {
         />
       </div>
 
-      {/* 상태/에러 */}
+      {/* 에러 — 성공은 아래 모달로 처리. */}
       {error ? (
         <div className="mo-error" role="alert" style={{ marginTop: 12 }}>
           {error}
-        </div>
-      ) : null}
-      {successOrderId ? (
-        <div
-          role="status"
-          style={{
-            marginTop: 12,
-            padding: 12,
-            borderRadius: 10,
-            background: 'var(--mo-bg-card)',
-            border: '1px solid var(--mo-success)',
-            color: 'var(--mo-success)',
-            fontSize: 13,
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 8,
-          }}
-        >
-          <CheckCircle2 size={18} style={{ flexShrink: 0, marginTop: 1 }} />
-          <span>주문이 접수되었습니다. '주문 확인' 탭에서 진행 상태를 확인하세요.</span>
         </div>
       ) : null}
 
@@ -331,6 +311,100 @@ export function MobileOrderForm({ session, onSubmitted }: Props) {
             ? '품목을 선택하세요'
             : `주문 접수 (${totalQty}개 · ₩${totalAmount.toLocaleString('ko-KR')})`}
       </button>
+
+      {/* 성공 모달 — 확인 클릭 시 페이지 새로고침. */}
+      {showSuccessModal ? <SuccessModal customerName={session.customerName} /> : null}
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────
+// 성공 모달 — 확인 → window.location.reload()
+// ───────────────────────────────────────────────────────────
+
+function SuccessModal({ customerName }: { customerName: string }) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+        padding: 24,
+      }}
+    >
+      <div
+        style={{
+          background: 'var(--mo-bg-card)',
+          border: '1px solid var(--mo-border)',
+          borderRadius: 16,
+          padding: '28px 24px',
+          width: '100%',
+          maxWidth: 320,
+          textAlign: 'center',
+        }}
+      >
+        <div
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: '50%',
+            background: 'var(--mo-success)',
+            color: '#fff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 16px',
+            fontSize: 28,
+            fontWeight: 700,
+          }}
+        >
+          ✓
+        </div>
+        <p
+          style={{
+            color: 'var(--mo-text-primary)',
+            fontSize: 16,
+            fontWeight: 600,
+            margin: '0 0 8px',
+          }}
+        >
+          {customerName}의 주문이
+          <br />
+          접수되었습니다.
+        </p>
+        <p
+          style={{
+            color: 'var(--mo-text-secondary)',
+            fontSize: 13,
+            margin: '0 0 24px',
+          }}
+        >
+          담당자 확인 후 처리됩니다.
+        </p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          style={{
+            width: '100%',
+            background: 'var(--mo-accent)',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 10,
+            padding: 14,
+            fontSize: 15,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          확인
+        </button>
+      </div>
     </div>
   );
 }
