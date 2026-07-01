@@ -74,20 +74,7 @@ export function MobileOrderUpload({ session, onSubmitted }: Props) {
     setSubmitting(true);
 
     try {
-      // 1) 버킷 존재 확인 (에러 응답이 명확해지도록).
-      const listBucketsRes = await supabase.storage.listBuckets();
-      if (listBucketsRes.error) {
-        // 권한상 listBuckets 가 막혀있을 수도 있음 → 실패해도 업로드 계속 시도.
-        // eslint-disable-next-line no-console
-        console.warn('[mo.upload.listBuckets]', listBucketsRes.error);
-      } else {
-        const exists = listBucketsRes.data?.some((b) => b.name === BUCKET);
-        if (!exists) {
-          throw new Error('파일 저장소가 설정되지 않았습니다. 관리자에게 문의하세요.');
-        }
-      }
-
-      // 2) Storage 업로드.
+      // Storage 업로드. anon 정책상 listBuckets 는 항상 실패하므로 사전 체크 없이 바로 업로드.
       const safeName = file.name.replace(/[^\w.\-가-힣]/g, '_');
       const path = `customer-uploads/${session.companyId}/${session.customerId}/${Date.now()}_${safeName}`;
       const uploadRes = await supabase.storage
@@ -99,11 +86,11 @@ export function MobileOrderUpload({ session, onSubmitted }: Props) {
         throw new Error('파일 업로드에 실패했습니다.');
       }
 
-      // 3) public URL 확보 (기존 CustomerOrderPage 와 동일 정책 — 관리자 화면 미리보기용).
+      // public URL 확보 (기존 CustomerOrderPage 와 동일 정책 — 관리자 화면 미리보기용).
       const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(path);
       const fileUrl = publicData?.publicUrl ?? path;
 
-      // 4) customer_order_uploads INSERT.
+      // customer_order_uploads INSERT.
       const insertRes = await supabase.from('customer_order_uploads').insert({
         company_id: session.companyId,
         customer_id: session.customerId,
@@ -119,7 +106,7 @@ export function MobileOrderUpload({ session, onSubmitted }: Props) {
         throw new Error('주문서 접수에 실패했습니다.');
       }
 
-      // 5) 성공 상태 + 폼 초기화.
+      // 성공 상태 + 폼 초기화.
       setSuccess("주문서가 전송되었습니다. '주문 확인' 탭에서 처리 결과를 확인하세요.");
       setFile(null);
       setPreviewUrl(null);
@@ -193,15 +180,23 @@ export function MobileOrderUpload({ session, onSubmitted }: Props) {
         </div>
       ) : (
         <div className="mo-card">
-          {/* 미리보기 */}
-          <div style={{ position: 'relative', marginBottom: 12 }}>
+          {/* 미리보기 — 하단 전송 버튼이 화면 밖으로 밀리지 않도록 높이 제한. */}
+          <div
+            style={{
+              position: 'relative',
+              marginBottom: 12,
+              maxHeight: 220,
+              overflow: 'hidden',
+              borderRadius: 8,
+            }}
+          >
             {isImage && previewUrl ? (
               <img
                 src={previewUrl}
                 alt="첨부 미리보기"
                 style={{
                   width: '100%',
-                  maxHeight: 360,
+                  maxHeight: 200,
                   objectFit: 'contain',
                   borderRadius: 8,
                   background: 'var(--mo-bg-input)',
@@ -309,17 +304,27 @@ export function MobileOrderUpload({ session, onSubmitted }: Props) {
         </div>
       ) : null}
 
-      {/* 제출 */}
-      <button
-        type="button"
-        className="mo-btn-primary"
-        onClick={handleSubmit}
-        disabled={!file || submitting}
-        style={{ marginTop: 16 }}
+      {/* 제출 — mo-main 스크롤 컨테이너 하단에 sticky 로 붙어 항상 노출. */}
+      <div
+        style={{
+          position: 'sticky',
+          bottom: 0,
+          marginTop: 16,
+          paddingTop: 12,
+          paddingBottom: 8,
+          background: 'var(--mo-bg)',
+        }}
       >
-        {submitting ? <Loader2 size={16} className="mo-spin" /> : null}
-        {submitting ? '전송 중…' : '주문서 전송'}
-      </button>
+        <button
+          type="button"
+          className="mo-btn-primary"
+          onClick={handleSubmit}
+          disabled={!file || submitting}
+        >
+          {submitting ? <Loader2 size={16} className="mo-spin" /> : null}
+          {submitting ? '전송 중…' : '주문서 전송'}
+        </button>
+      </div>
 
       {/* Hidden inputs — 카메라와 갤러리 각각 별도 트리거 */}
       <input
