@@ -331,12 +331,20 @@ function CustomerOrderShell({
   const { showToast } = useToast();
   const [mode, setMode] = useState<'main' | 'input'>('main');
   const [fontScale, setFontScale] = useState(1);
+  // 메인 → 직접입력 전환 시 LeftPanel 이 넘겨준 message/shipping 을 임시 보관.
+  //   CustomerOrderInput 에 initialMemo / initialShipping 으로 주입.
+  const [handoffMemo, setHandoffMemo] = useState<string>('');
+  const [handoffShipping, setHandoffShipping] = useState<ShippingRow[] | undefined>(
+    undefined,
+  );
 
   if (mode === 'input') {
     return (
       <CustomerOrderInput
         customer={customer}
         onBack={() => setMode('main')}
+        initialMemo={handoffMemo}
+        initialShipping={handoffShipping}
       />
     );
   }
@@ -357,7 +365,11 @@ function CustomerOrderShell({
         <div className="flex min-w-0 flex-[0_0_67%] flex-col gap-3">
           <LeftPanel
             customer={customer}
-            onOpenInput={() => setMode('input')}
+            onOpenInput={(memo, shipping) => {
+              setHandoffMemo(memo);
+              setHandoffShipping(shipping);
+              setMode('input');
+            }}
           />
           {/* 오늘 (좌) + 월별 (우) */}
           <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
@@ -512,7 +524,8 @@ function LeftPanel({
   onOpenInput,
 }: {
   customer: CustomerSession;
-  onOpenInput: () => void;
+  /** 직접입력 화면 진입 시 메인의 message/shipping 을 함께 인계. */
+  onOpenInput: (memo: string, shipping: ShippingRow[]) => void;
 }) {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
@@ -1160,7 +1173,7 @@ function LeftPanel({
 
       {/* 1행3열 — 주문서 직접 입력 */}
       <div className="col-start-3 row-start-1">
-        <DirectOrderEntryCard onClick={onOpenInput} />
+        <DirectOrderEntryCard onClick={() => onOpenInput(message, shipping)} />
       </div>
 
       {/* 2행 2~3열 span — 직송 정보 */}
