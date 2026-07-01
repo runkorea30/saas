@@ -233,8 +233,59 @@ export function MobileOrderForm({ session }: Props) {
     );
   }
 
+  const willAddFee =
+    totalAmount > 0 && totalAmount < DELIVERY_FEE_THRESHOLD;
+  const displayTotal = willAddFee ? totalAmount + DELIVERY_FEE_AMOUNT : totalAmount;
+  const hasSelection = selected.length > 0;
+
   return (
     <div>
+      {/* 상단 sticky 주문서전송 버튼 — mo-main 스크롤 컨테이너 최상단 고정. */}
+      <div
+        style={{
+          position: 'sticky',
+          top: 0,
+          marginTop: -16,
+          marginLeft: -16,
+          marginRight: -16,
+          marginBottom: 12,
+          padding: '10px 16px',
+          background: 'var(--mo-bg)',
+          borderBottom: '1px solid var(--mo-border)',
+          zIndex: 5,
+        }}
+      >
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={!hasSelection || submitting}
+          style={{
+            width: '100%',
+            padding: 10,
+            background: hasSelection ? 'var(--mo-accent)' : 'var(--mo-border)',
+            color: hasSelection ? '#fff' : 'var(--mo-text-secondary)',
+            border: 'none',
+            borderRadius: 10,
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: hasSelection && !submitting ? 'pointer' : 'default',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            minHeight: 40,
+            fontFamily: 'inherit',
+          }}
+        >
+          {submitting ? <Loader2 size={14} className="mo-spin" /> : null}
+          {submitting
+            ? '전송 중…'
+            : hasSelection
+              ? `주문서전송 (${totalQty}개 · ₩${displayTotal.toLocaleString('ko-KR')})`
+              : '주문서전송 — 품목을 선택하세요'}
+        </button>
+      </div>
+
       <MobileOrderProductList
         products={products}
         stockMap={stockMap}
@@ -343,39 +394,6 @@ export function MobileOrderForm({ session }: Props) {
           {error}
         </div>
       ) : null}
-
-      {/* 제출 — sticky bottom. mo-main 스크롤 컨테이너 하단에 붙어 항상 노출. */}
-      <div
-        style={{
-          position: 'sticky',
-          bottom: 0,
-          marginTop: 16,
-          paddingTop: 12,
-          paddingBottom: 8,
-          background: 'var(--mo-bg)',
-        }}
-      >
-        <button
-          type="button"
-          className="mo-btn-primary"
-          onClick={handleSubmit}
-          disabled={selected.length === 0 || submitting}
-        >
-          {submitting ? <Loader2 size={16} className="mo-spin" /> : null}
-          {submitting
-            ? '전송 중…'
-            : selected.length === 0
-              ? '품목을 선택하세요'
-              : (() => {
-                  const willAddFee =
-                    totalAmount > 0 && totalAmount < DELIVERY_FEE_THRESHOLD;
-                  const displayTotal = willAddFee
-                    ? totalAmount + DELIVERY_FEE_AMOUNT
-                    : totalAmount;
-                  return `주문서전송 (${totalQty}개 · ₩${displayTotal.toLocaleString('ko-KR')})`;
-                })()}
-        </button>
-      </div>
 
       {/* 성공 모달 — 확인 클릭 시 페이지 새로고침. */}
       {showSuccessModal ? <SuccessModal /> : null}
