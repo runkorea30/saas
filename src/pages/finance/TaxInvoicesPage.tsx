@@ -227,10 +227,17 @@ export function TaxInvoicesPage() {
   const [deleteTarget, setDeleteTarget] = useState<TaxInvoiceRow | null>(null);
 
   // ───── 파생 ─────
+  //   🔴 KPI 합계는 저장된 tax_invoice 기준(발행된 실제 금액). fresh 매출과 다를 수 있음.
   const summary = useMemo(() => {
     const issuedRows = rows.filter((r) => r.invoice !== null);
-    const supplyTotal = issuedRows.reduce((s, r) => s + r.supply_amount, 0);
-    const vatTotal = issuedRows.reduce((s, r) => s + r.vat_amount, 0);
+    const supplyTotal = issuedRows.reduce(
+      (s, r) => s + (r.invoice?.supply_amount ?? r.supply_amount),
+      0,
+    );
+    const vatTotal = issuedRows.reduce(
+      (s, r) => s + (r.invoice?.vat_amount ?? r.vat_amount),
+      0,
+    );
     return {
       issuedCount: issuedRows.length,
       supplyTotal,
@@ -381,7 +388,6 @@ export function TaxInvoicesPage() {
 
   const isLoading = rowsQuery.isLoading;
   const hasIssuedRows = summary.issuedCount > 0;
-  const hasUnissuedRows = summary.unissuedCount > 0;
 
   // ───────────────────────────────────────────────────────────
   // 렌더
@@ -544,6 +550,7 @@ export function TaxInvoicesPage() {
                 <Th align="right">공급가액</Th>
                 <Th align="right">세액</Th>
                 <Th align="right">합계 (VAT포함)</Th>
+                <Th align="right">매출</Th>
                 <Th align="center">상태</Th>
                 <Th align="center" width={120}>작업</Th>
               </tr>
@@ -552,7 +559,7 @@ export function TaxInvoicesPage() {
               {isLoading && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     style={{
                       padding: '40px 16px',
                       textAlign: 'center',
@@ -566,7 +573,7 @@ export function TaxInvoicesPage() {
               {!isLoading && rows.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     style={{
                       padding: '40px 16px',
                       textAlign: 'center',
@@ -581,6 +588,15 @@ export function TaxInvoicesPage() {
                 rows.map((row) => {
                   const issued = row.invoice !== null;
                   const rowColor = issued ? 'var(--ink)' : 'var(--ink-3)';
+                  // 🔴 표시 규칙:
+                  //   공급가/세액/합계 = 발행됐으면 tax_invoices 저장값, 아니면 fresh 미리보기.
+                  //   매출 컬럼      = 항상 orders 기반 fresh 합계.
+                  //   drift          = 발행됐고 저장값과 fresh 가 다른 경우 오렌지 하이라이트.
+                  const shownSupply = row.invoice?.supply_amount ?? row.supply_amount;
+                  const shownVat = row.invoice?.vat_amount ?? row.vat_amount;
+                  const shownTotal = row.invoice?.total_amount ?? row.total_amount;
+                  const salesTotal = row.total_amount;
+                  const hasDrift = issued && shownTotal !== salesTotal;
                   return (
                     <tr
                       key={`${row.subjectType}:${row.subjectId}`}
@@ -616,17 +632,33 @@ export function TaxInvoicesPage() {
                       <Td align="right">{row.order_count}건</Td>
                       <Td align="right">
                         <span style={{ fontFamily: 'var(--font-num)' }}>
-                          {fmtWon(row.supply_amount)}
+                          {fmtWon(shownSupply)}
                         </span>
                       </Td>
                       <Td align="right">
                         <span style={{ fontFamily: 'var(--font-num)' }}>
-                          {fmtWon(row.vat_amount)}
+                          {fmtWon(shownVat)}
                         </span>
                       </Td>
                       <Td align="right">
                         <span style={{ fontFamily: 'var(--font-num)', fontWeight: 500 }}>
-                          {fmtWon(row.total_amount)}
+                          {fmtWon(shownTotal)}
+                        </span>
+                      </Td>
+                      <Td align="right">
+                        <span
+                          style={{
+                            fontFamily: 'var(--font-num)',
+                            color: hasDrift ? 'var(--warning)' : 'var(--ink-3)',
+                            fontWeight: hasDrift ? 600 : 400,
+                          }}
+                          title={
+                            hasDrift
+                              ? `발행 후 매출이 ${fmtWon(salesTotal - shownTotal)}원 변동 — 이달 전체 생성으로 재발행 필요`
+                              : undefined
+                          }
+                        >
+                          {fmtWon(salesTotal)}
                         </span>
                       </Td>
                       <Td align="center">
