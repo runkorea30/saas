@@ -220,65 +220,54 @@ function ProductCard({ product, currentStock, supplyPrice, quantity, onChange }:
     <div
       className="mo-card"
       style={{
-        padding: 12,
+        padding: '10px 12px',
         opacity: isOut ? 0.55 : 1,
         display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 10,
       }}
     >
-      {/* 1행: 제품명 + 재고 배지/수량 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: 'var(--mo-text-primary)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-            title={product.name}
-          >
-            {product.name}
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: 'var(--mo-text-secondary)',
-              marginTop: 2,
-            }}
-          >
-            {product.code} · {product.category}
-          </div>
+      {/* 좌: 제품명(1행) + 공급가/배지(2행) */}
+      <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: 'var(--mo-text-primary)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={product.name}
+        >
+          {product.name}
         </div>
-
-        <div style={{ flexShrink: 0, textAlign: 'right' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span
+            style={{
+              fontSize: 12,
+              color: 'var(--mo-text-secondary)',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            ₩{supplyPrice.toLocaleString('ko-KR')}
+          </span>
           {isOut ? (
             <span className="mo-badge mo-badge--out">품절</span>
           ) : isLow ? (
-            <span className="mo-badge mo-badge--low">재고 부족</span>
-          ) : (
-            <div style={{ fontSize: 11, color: 'var(--mo-text-secondary)' }}>
-              재고 {currentStock}
-            </div>
-          )}
+            <span className="mo-badge mo-badge--low">재고부족</span>
+          ) : null}
         </div>
       </div>
 
-      {/* 2행: 공급가 + 수량 조정 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--mo-text-primary)' }}>
-          ₩{supplyPrice.toLocaleString('ko-KR')}
-        </div>
-        <QtyStepper
-          value={quantity}
-          onChange={onChange}
-          disabled={isOut}
-          maxStock={currentStock}
-        />
-      </div>
+      {/* 우: 수량 조정 스테퍼 */}
+      <QtyStepper
+        value={quantity}
+        onChange={onChange}
+        disabled={isOut}
+        maxStock={currentStock}
+      />
     </div>
   );
 }
@@ -309,9 +298,9 @@ function QtyStepper({ value, onChange, disabled }: StepperProps) {
   };
 
   const btnStyle: React.CSSProperties = {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 6,
     border: '1px solid var(--mo-border)',
     background: 'var(--mo-bg-input)',
     color: 'var(--mo-text-primary)',
@@ -323,7 +312,7 @@ function QtyStepper({ value, onChange, disabled }: StepperProps) {
   };
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       <button
         type="button"
         onClick={dec}
@@ -331,7 +320,7 @@ function QtyStepper({ value, onChange, disabled }: StepperProps) {
         style={{ ...btnStyle, opacity: disabled || value <= 0 ? 0.5 : 1 }}
         aria-label="수량 감소"
       >
-        <Minus size={14} />
+        <Minus size={13} />
       </button>
       <input
         type="text"
@@ -342,14 +331,14 @@ function QtyStepper({ value, onChange, disabled }: StepperProps) {
         disabled={disabled}
         placeholder="0"
         style={{
-          width: 44,
-          height: 32,
+          width: 36,
+          height: 28,
           textAlign: 'center',
-          borderRadius: 8,
+          borderRadius: 6,
           border: '1px solid var(--mo-border)',
           background: 'var(--mo-bg-input)',
           color: 'var(--mo-text-primary)',
-          fontSize: 14,
+          fontSize: 13,
           fontWeight: 600,
           outline: 'none',
         }}
@@ -361,7 +350,7 @@ function QtyStepper({ value, onChange, disabled }: StepperProps) {
         style={{ ...btnStyle, opacity: disabled ? 0.5 : 1 }}
         aria-label="수량 증가"
       >
-        <Plus size={14} />
+        <Plus size={13} />
       </button>
     </div>
   );

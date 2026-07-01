@@ -191,7 +191,7 @@ function AuthenticatedShell({
             onClick={() => onChangeView('form')}
           >
             <ClipboardList size={20} />
-            <span>직접 주문</span>
+            <span>주문서입력</span>
           </button>
           <button
             type="button"

@@ -16,6 +16,13 @@ import {
   calcCurrentStockByProduct,
   calcSupplyPriceByCustomerGrade,
 } from '@/utils/calculations';
+import {
+  DELIVERY_FEE_PRODUCT_ID,
+  DELIVERY_FEE_AMOUNT,
+  DELIVERY_FEE_THRESHOLD,
+  calcDeliveryFee,
+  removeDeliveryFeeFromOrder,
+} from '@/utils/deliveryFee';
 import type { MobileSession } from '@/lib/mobileOrderAuth';
 import type { Json } from '@/types/database';
 import {
@@ -131,13 +138,40 @@ export function MobileOrderForm({ session }: Props) {
     setSubmitting(true);
 
     try {
-      // p_items 는 RPC 상 jsonb — 재귀 Json 타입 매칭이 어려워 명시적 캐스팅.
-      const items: Json = selected.map((s) => ({
+      // 🔴 택배비 자동추가 4규칙 — CustomerOrderPage(포털) 과 동일 로직 재사용.
+      //    비-직송 가정(모바일 주문서입력은 직송 UI 없음). 오늘 같은 거래처
+      //    다른 주문들과 합산해 판정.
+      const decision = await calcDeliveryFee({
+        companyId: session.companyId,
+        customerId: session.customerId,
+        newOrderAmount: totalAmount,
+        isDirectShipping: false,
+      });
+
+      if (decision.removeDeliveryFeeFromOrderId) {
+        await removeDeliveryFeeFromOrder({
+          companyId: session.companyId,
+          orderId: decision.removeDeliveryFeeFromOrderId,
+        });
+      }
+
+      const itemRows = selected.map((s) => ({
         product_id: s.productId,
         quantity: s.quantity,
         unit_price: s.supplyPrice,
         amount: s.amount,
-      })) as unknown as Json;
+      }));
+      if (decision.addDeliveryFee) {
+        itemRows.push({
+          product_id: DELIVERY_FEE_PRODUCT_ID,
+          quantity: 1,
+          unit_price: DELIVERY_FEE_AMOUNT,
+          amount: DELIVERY_FEE_AMOUNT,
+        });
+      }
+
+      // p_items 는 RPC 상 jsonb — 재귀 Json 타입 매칭이 어려워 명시적 캐스팅.
+      const items = itemRows as unknown as Json;
 
       const { data, error: rpcErr } = await supabase.rpc('insert_order', {
         p_company_id: session.companyId,
@@ -225,6 +259,20 @@ export function MobileOrderForm({ session }: Props) {
             <span>선택 {selected.length}종 · {totalQty}개</span>
             <span>₩{totalAmount.toLocaleString('ko-KR')}</span>
           </div>
+          {/* 택배비 낙관적 안내 — 서버는 오늘 합산 규칙(4규칙)으로 최종 판정.
+              오늘 다른 주문에 이미 택배비가 있으면 실제로는 추가되지 않을 수 있음. */}
+          {totalAmount > 0 && totalAmount < DELIVERY_FEE_THRESHOLD ? (
+            <div
+              style={{
+                marginTop: 4,
+                marginBottom: 6,
+                fontSize: 12,
+                color: 'var(--mo-warning)',
+              }}
+            >
+              + 택배비 ₩{DELIVERY_FEE_AMOUNT.toLocaleString('ko-KR')} (10만원 미만 자동 추가)
+            </div>
+          ) : null}
           <div
             style={{
               display: 'flex',
@@ -296,21 +344,38 @@ export function MobileOrderForm({ session }: Props) {
         </div>
       ) : null}
 
-      {/* 제출 */}
-      <button
-        type="button"
-        className="mo-btn-primary"
-        onClick={handleSubmit}
-        disabled={selected.length === 0 || submitting}
-        style={{ marginTop: 16 }}
+      {/* 제출 — sticky bottom. mo-main 스크롤 컨테이너 하단에 붙어 항상 노출. */}
+      <div
+        style={{
+          position: 'sticky',
+          bottom: 0,
+          marginTop: 16,
+          paddingTop: 12,
+          paddingBottom: 8,
+          background: 'var(--mo-bg)',
+        }}
       >
-        {submitting ? <Loader2 size={16} className="mo-spin" /> : null}
-        {submitting
-          ? '접수 중…'
-          : selected.length === 0
-            ? '품목을 선택하세요'
-            : `주문 접수 (${totalQty}개 · ₩${totalAmount.toLocaleString('ko-KR')})`}
-      </button>
+        <button
+          type="button"
+          className="mo-btn-primary"
+          onClick={handleSubmit}
+          disabled={selected.length === 0 || submitting}
+        >
+          {submitting ? <Loader2 size={16} className="mo-spin" /> : null}
+          {submitting
+            ? '전송 중…'
+            : selected.length === 0
+              ? '품목을 선택하세요'
+              : (() => {
+                  const willAddFee =
+                    totalAmount > 0 && totalAmount < DELIVERY_FEE_THRESHOLD;
+                  const displayTotal = willAddFee
+                    ? totalAmount + DELIVERY_FEE_AMOUNT
+                    : totalAmount;
+                  return `주문서전송 (${totalQty}개 · ₩${displayTotal.toLocaleString('ko-KR')})`;
+                })()}
+        </button>
+      </div>
 
       {/* 성공 모달 — 확인 클릭 시 페이지 새로고침. */}
       {showSuccessModal ? <SuccessModal /> : null}
