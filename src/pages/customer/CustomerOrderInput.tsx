@@ -8,7 +8,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ArrowRight, Loader2, Search } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Loader2, Search, Truck } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
@@ -27,7 +27,14 @@ import {
 } from '@/constants/categories';
 import { useToast } from '@/components/ui/Toast';
 import { SubmitSuccessDialog } from '@/components/feature/customer-order/SubmitSuccessDialog';
+import {
+  DirectShippingTable,
+  emptyShipping,
+  filledShippingForInsert,
+  type ShippingRow,
+} from '@/components/feature/customer-order/DirectShippingTable';
 import type { CustomerSession } from '@/hooks/useCustomerAuth';
+import type { Json } from '@/types/database';
 
 /** 재고 부족 임계값 — stock < 이 값이면 '부족' 뱃지. */
 const LOW_STOCK_THRESHOLD = 10;
@@ -91,6 +98,10 @@ export function CustomerOrderInput({
   const [category, setCategory] = useState<string>(PRODUCT_CATEGORY_DEFAULT);
   const [searchQuery, setSearchQuery] = useState('');
   const [busy, setBusy] = useState(false);
+  // 직송 정보 — 헤더 토글로 표시/숨김. 토글 off 시 shipping_info 미포함.
+  //   판정은 filledShippingForInsert(shipping).length > 0 (CustomerOrderPage 와 동일 패턴).
+  const [showDirect, setShowDirect] = useState(false);
+  const [shipping, setShipping] = useState<ShippingRow[]>([emptyShipping()]);
   // 전송 완료 다이얼로그 — 닫히면 onBack() 으로 메인 화면 복귀.
   const [submitResult, setSubmitResult] = useState<{
     show: boolean;
@@ -237,7 +248,13 @@ export function CustomerOrderInput({
         (s, it) => s + it.qty * it.supply_price,
         0,
       );
-      // 🔴 택배비 4규칙 — 직접 입력은 직송 UI 가 없어 항상 비-직송.
+      // 🔴 직송 판정 — 토글 ON + 유효행(받는사람/주소) 1개 이상.
+      //    CustomerOrderPage 와 동일: filledShippingForInsert().length > 0.
+      const filledShipping = showDirect
+        ? filledShippingForInsert(shipping, customer.customerName)
+        : [];
+      const isDirect = filledShipping.length > 0;
+      // 🔴 택배비 4규칙 — 직송이면 택배비 없음(direct=true 전달).
       //    오늘 같은 거래처 기존 주문과 합산 + 기존 택배비 유무까지 종합 판단.
       const hasDeliveryAlready = items.some(
         (it) => it.product_id === DELIVERY_FEE_PRODUCT_ID,
@@ -248,7 +265,7 @@ export function CustomerOrderInput({
             companyId: customer.companyId,
             customerId: customer.customerId,
             newOrderAmount: subtotal,
-            isDirectShipping: false,
+            isDirectShipping: isDirect,
           });
       if (decision.removeDeliveryFeeFromOrderId) {
         await removeDeliveryFeeFromOrder({
@@ -269,6 +286,7 @@ export function CustomerOrderInput({
       });
 
       // 1) customer_order_uploads — 거래처 포털 자체 이력
+      //    CustomerOrderPage 와 동일하게 직송 정보도 함께 저장(추적용).
       const { error: uploadErr } = await supabase
         .from('customer_order_uploads')
         .insert({
@@ -276,6 +294,9 @@ export function CustomerOrderInput({
           customer_id: customer.customerId,
           upload_type: 'direct',
           items,
+          shipping_info: isDirect
+            ? (filledShipping as unknown as Json)
+            : null,
           status: 'pending',
         });
       // eslint-disable-next-line no-console
@@ -283,17 +304,30 @@ export function CustomerOrderInput({
       if (uploadErr) throw uploadErr;
 
       // 2) orders 헤더
+      //    🟠 orders.shipping_info / is_direct_shipping 은 자동생성 타입 미반영
+      //       → CustomerOrderPage 와 동일하게 as unknown as ... 캐스팅.
+      const orderPayload = {
+        company_id: customer.companyId,
+        customer_id: customer.customerId,
+        order_date: new Date().toISOString(),
+        status: 'draft',
+        source: 'portal',
+        memo: '거래처 직접입력 주문',
+        shipping_info: isDirect ? (filledShipping as unknown as Json) : null,
+        is_direct_shipping: isDirect,
+        total_amount: totalAmount,
+      } as unknown as {
+        company_id: string;
+        customer_id: string;
+        order_date: string;
+        status: string;
+        source: string;
+        memo: string | null;
+        total_amount: number;
+      };
       const { data: order, error: orderErr } = await supabase
         .from('orders')
-        .insert({
-          company_id: customer.companyId,
-          customer_id: customer.customerId,
-          order_date: new Date().toISOString(),
-          status: 'draft',
-          source: 'portal',
-          memo: '거래처 직접입력 주문',
-          total_amount: totalAmount,
-        })
+        .insert(orderPayload)
         .select('id')
         .single();
       // eslint-disable-next-line no-console
@@ -375,6 +409,20 @@ export function CustomerOrderInput({
           </span>
         </div>
         <div className="flex items-center gap-3.5">
+          {/* 직송 토글 — on 시 아래 슬라이드로 DirectShippingTable 노출 */}
+          <button
+            type="button"
+            onClick={() => setShowDirect((v) => !v)}
+            disabled={busy}
+            className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[13px] transition-colors disabled:opacity-55 ${
+              showDirect
+                ? 'border-[#15803d] bg-[#dcfce7] font-semibold text-[#15803d]'
+                : 'border-[var(--p-line)] bg-[var(--p-card-bg)] text-[var(--p-ink-2)] hover:bg-[var(--p-card-bg)]'
+            }`}
+          >
+            <Truck className="h-3.5 w-3.5" />
+            직송 {showDirect ? 'ON' : 'OFF'}
+          </button>
           {/* 주문 건수 + 금액 chip */}
           <div className="flex items-center gap-2 rounded-full border border-[var(--p-card-bg)] bg-[var(--p-card-bg)] px-4 py-1.5">
             <span className="text-[12.5px] text-[var(--p-ink-2)]">
@@ -396,6 +444,37 @@ export function CustomerOrderInput({
           </button>
         </div>
       </header>
+
+      {/* ── 직송 정보 슬라이드 (헤더 토글 ON 시 노출) ── */}
+      {showDirect && (
+        <div className="shrink-0 border-b border-[var(--p-line)] bg-[var(--p-card-bg)] px-[22px] py-3">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-baseline gap-2">
+              <span className="text-[13.5px] font-semibold text-[var(--p-ink)]">
+                직송 정보
+              </span>
+              <span className="text-[11.5px] text-[var(--p-ink-3)]">
+                받는사람/주소가 1행 이상 입력되면 직송 주문으로 저장됩니다
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShipping((prev) => [...prev, emptyShipping()])}
+              disabled={busy}
+              className="rounded-md border border-[var(--p-line)] bg-[var(--p-card-bg)] px-2.5 py-1 text-[12px] text-[var(--p-ink-2)] hover:bg-[var(--p-card-bg)] disabled:opacity-55"
+            >
+              + 행 추가
+            </button>
+          </div>
+          <div className="max-h-[240px] overflow-auto">
+            <DirectShippingTable
+              rows={shipping}
+              onChange={setShipping}
+              customerName={customer.customerName}
+            />
+          </div>
+        </div>
+      )}
 
       {/* ── 본문: 사이드바 + 제품 영역 ── */}
       <div className="flex min-h-0 flex-1">
