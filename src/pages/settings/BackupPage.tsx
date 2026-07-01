@@ -148,10 +148,18 @@ async function fetchTableRows(
   }
 }
 
-async function buildAndDownloadBackup(
+interface BackupPayload {
+  json: string;
+  filename: string;
+  sizeKb: number;
+  tableCount: number;
+  now: Date;
+}
+
+async function buildBackupPayload(
   companyId: string,
   onProgress?: (done: number, total: number, current: string) => void,
-): Promise<{ filename: string; sizeKb: number; tableCount: number }> {
+): Promise<BackupPayload> {
   const total = BACKUP_TABLES.length;
   const tables: Record<string, unknown[]> = {};
 
@@ -170,9 +178,67 @@ async function buildAndDownloadBackup(
     tables,
   };
   const json = JSON.stringify(payload, null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
   const filename = `mochicraft_backup_${fmtFilenameTsKst(now)}.json`;
+  return {
+    json,
+    filename,
+    sizeKb: Math.round(new Blob([json]).size / 1024),
+    tableCount: total,
+    now,
+  };
+}
 
+/**
+ * 저장 방식 — 반환값이 'canceled' 면 사용자가 다이얼로그를 닫은 것.
+ * 'saved' 면 실제 파일 기록 완료. 실패 시 예외 던짐.
+ */
+type SaveResult = 'saved' | 'canceled';
+
+// File System Access API 최소 타입 (TypeScript lib 미포함 케이스 대비)
+interface FileSystemWritableFileStreamMin {
+  write(data: string | Blob | BufferSource): Promise<void>;
+  close(): Promise<void>;
+}
+interface FileSystemFileHandleMin {
+  createWritable(): Promise<FileSystemWritableFileStreamMin>;
+}
+interface WindowWithPicker {
+  showSaveFilePicker?: (options?: {
+    suggestedName?: string;
+    types?: Array<{ description?: string; accept: Record<string, string[]> }>;
+  }) => Promise<FileSystemFileHandleMin>;
+}
+
+function supportsSavePicker(): boolean {
+  return typeof window !== 'undefined' && 'showSaveFilePicker' in window;
+}
+
+async function saveWithPicker(json: string, filename: string): Promise<SaveResult> {
+  const w = window as unknown as WindowWithPicker;
+  if (!w.showSaveFilePicker) return 'canceled';
+  try {
+    const handle = await w.showSaveFilePicker({
+      suggestedName: filename,
+      types: [
+        {
+          description: 'JSON 백업 파일',
+          accept: { 'application/json': ['.json'] },
+        },
+      ],
+    });
+    const writable = await handle.createWritable();
+    await writable.write(json);
+    await writable.close();
+    return 'saved';
+  } catch (e) {
+    // 사용자가 다이얼로그 취소 시 AbortError — 조용히 취소로 처리
+    if (e instanceof Error && e.name === 'AbortError') return 'canceled';
+    throw e;
+  }
+}
+
+function saveWithDownload(json: string, filename: string): SaveResult {
+  const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -181,13 +247,7 @@ async function buildAndDownloadBackup(
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-
-  saveLastBackup(companyId, now);
-  return {
-    filename,
-    sizeKb: Math.round(blob.size / 1024),
-    tableCount: total,
-  };
+  return 'saved';
 }
 
 // ── 컴포넌트 ─────────────────────────────────────────────────────────
@@ -220,13 +280,34 @@ export function BackupPage() {
       setBusy(true);
       setProgress({ done: 0, total: BACKUP_TABLES.length, current: BACKUP_TABLES[0] });
       try {
-        const result = await buildAndDownloadBackup(companyId, (done, total, current) =>
+        const payload = await buildBackupPayload(companyId, (done, total, current) =>
           setProgress({ done, total, current }),
         );
-        setLastBackup(new Date());
+        // 저장 방식 결정:
+        //   · 수동 백업 + File System Access API 지원 → "다른 이름으로 저장" 다이얼로그
+        //   · 자동 백업(사용자 제스처 없음) 또는 미지원 브라우저 → 다운로드 폴더에 자동 저장
+        const usePicker = source === 'manual' && supportsSavePicker();
+        let result: SaveResult;
+        if (usePicker) {
+          result = await saveWithPicker(payload.json, payload.filename);
+        } else {
+          if (source === 'manual' && !supportsSavePicker()) {
+            showToast({
+              kind: 'info',
+              text: '이 브라우저는 저장 위치 선택을 지원하지 않아 다운로드 폴더에 저장됩니다.',
+            });
+          }
+          result = saveWithDownload(payload.json, payload.filename);
+        }
+        if (result === 'canceled') {
+          showToast({ kind: 'info', text: '백업이 취소되었습니다.' });
+          return;
+        }
+        saveLastBackup(companyId, payload.now);
+        setLastBackup(payload.now);
         showToast({
           kind: 'success',
-          text: `${source === 'auto' ? '자동 ' : ''}백업 완료: ${result.filename} (${result.sizeKb} KB · ${result.tableCount}개 테이블)`,
+          text: `${source === 'auto' ? '자동 ' : ''}백업 완료: ${payload.filename} (${payload.sizeKb} KB · ${payload.tableCount}개 테이블)`,
         });
       } catch (e) {
         showToast({
