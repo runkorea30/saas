@@ -25,19 +25,24 @@ export const fmtDateTime = (d: Date) =>
   `${fmtDate(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
 // ===== StatusBadge =========================================================
+// 🔴 신규 4단계(received/confirmed/processing/shipped) + 레거시 3개(draft/done/canceled).
+//    색상 계열: received=파랑 / confirmed=주황 / processing=보라 / shipped=초록.
 const STATUS_META: Record<
   OrderStatus,
   { label: string; dot: string; bg: string; color: string }
 > = {
-  draft: { label: '임시', dot: 'var(--ink-4)', bg: 'var(--surface-2)', color: 'var(--ink-2)' },
-  confirmed: { label: '확정', dot: 'var(--info)', bg: 'var(--info-wash)', color: 'var(--info)' },
-  shipped: { label: '출고', dot: 'var(--warning)', bg: 'var(--warning-wash)', color: 'var(--warning)' },
-  done: { label: '완료', dot: 'var(--success)', bg: 'var(--success-wash)', color: 'var(--success)' },
-  canceled: { label: '취소', dot: 'var(--danger)', bg: 'var(--danger-wash)', color: 'var(--danger)' },
+  received:   { label: '주문접수', dot: 'var(--info)',    bg: 'var(--info-wash)',    color: 'var(--info)' },
+  confirmed:  { label: '주문확인', dot: 'var(--warning)', bg: 'var(--warning-wash)', color: 'var(--warning)' },
+  processing: { label: '처리중',   dot: '#8b5cf6',        bg: '#f3ecff',             color: '#6d28d9' },
+  shipped:    { label: '발송완료', dot: 'var(--success)', bg: 'var(--success-wash)', color: 'var(--success)' },
+  // 레거시 — 기존 데이터 보존 목적, 회색 계열.
+  draft:      { label: '임시',     dot: 'var(--ink-4)',   bg: 'var(--surface-2)',    color: 'var(--ink-2)' },
+  done:       { label: '완료',     dot: 'var(--ink-4)',   bg: 'var(--surface-2)',    color: 'var(--ink-2)' },
+  canceled:   { label: '취소',     dot: 'var(--danger)',  bg: 'var(--danger-wash)',  color: 'var(--danger)' },
 };
 
 export function StatusBadge({ status }: { status: OrderStatus }) {
-  const meta = STATUS_META[status] ?? STATUS_META.draft;
+  const meta = STATUS_META[status] ?? STATUS_META.received;
   return (
     <span className="chip" style={{ background: meta.bg, color: meta.color }}>
       <span className="dot" style={{ background: meta.dot }} />

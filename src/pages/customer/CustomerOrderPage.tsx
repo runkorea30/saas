@@ -939,11 +939,14 @@ function LeftPanel({
 
         // 🟠 orders 의 shipping_info/is_direct_shipping 컬럼은 자동생성 타입에 아직 미반영
         //    → as unknown as ... 캐스팅으로 INSERT.
+        // 🔴 신규 4단계 상태 체계: 포털 파일 접수 시 'received' + received_at 기록.
+        const nowIso = new Date().toISOString();
         const orderPayload = {
           company_id: customer.companyId,
           customer_id: customer.customerId,
-          order_date: new Date().toISOString(),
-          status: 'draft',
+          order_date: nowIso,
+          status: 'received',
+          received_at: nowIso,
           source: 'portal',
           memo: message || null,
           shipping_info: isDirect ? (filledShipping as unknown as Json) : null,
@@ -1047,13 +1050,16 @@ function LeftPanel({
       //      품목 0건/총액 0원 + attachment_url 로 원본 이미지 연결.
       //      운영자가 OrderDetailPane 에서 이미지를 보며 직접 품목을 입력.
       if (!parsable && uploadedFileUrl) {
+        // 🔴 신규 4단계: 이미지/PDF 접수도 'received' + received_at 기록.
+        const imageNowIso = new Date().toISOString();
         const { data: imageOrder, error: imageOrderErr } = await supabase
           .from('orders')
           .insert({
             company_id: customer.companyId,
             customer_id: customer.customerId,
-            order_date: new Date().toISOString(),
-            status: 'draft',
+            order_date: imageNowIso,
+            status: 'received',
+            received_at: imageNowIso,
             source: 'portal',
             memo: message || null,
             attachment_url: uploadedFileUrl,

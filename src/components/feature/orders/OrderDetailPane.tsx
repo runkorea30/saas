@@ -672,6 +672,7 @@ export function OrderDetailPane({
           key={order.id}
           orderId={order.id}
           initialTrackingNumbers={normalizeTrackingNumbers(order.tracking_numbers)}
+          currentStatus={order.status}
         />
         {order.is_direct_shipping &&
           (() => {
@@ -1242,9 +1243,11 @@ function DetailEmpty() {
 function TrackingNumberSection({
   orderId,
   initialTrackingNumbers,
+  currentStatus,
 }: {
   orderId: string;
   initialTrackingNumbers: TrackingEntry[];
+  currentStatus: string;
 }) {
   const queryClient = useQueryClient();
   const initialRows: TrackingEntry[] =
@@ -1265,10 +1268,18 @@ function TrackingNumberSection({
     // Supabase 자동생성 Json 타입은 모든 키에 index signature 를 요구해 strict
     // 객체 타입과 충돌. payload 는 JSON 직렬화 가능하므로 update 인자 통째로
     // unknown 경유 캐스팅으로 통과.
+    // 🔴 신규 4단계 상태: 송장이 실제로 있고 아직 shipped 가 아니면 shipped + shipped_at 자동 기록.
+    //    이미 shipped 이면 status/shipped_at 는 건드리지 않음 (재변경 없음).
+    const shouldMarkShipped = cleaned.length > 0 && currentStatus !== 'shipped';
+    const payload: Record<string, unknown> = { tracking_numbers: cleaned };
+    if (shouldMarkShipped) {
+      payload.status = 'shipped';
+      payload.shipped_at = new Date().toISOString();
+    }
     await supabase
       .from('orders')
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .update({ tracking_numbers: cleaned } as any)
+      .update(payload as any)
       .eq('id', orderId);
     queryClient.invalidateQueries({ queryKey: ['orders'] });
     setSaving(false);

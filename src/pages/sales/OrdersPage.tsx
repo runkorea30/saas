@@ -331,15 +331,20 @@ export function OrdersPage() {
     const groups = Array.from(map.values());
     groups.sort((a, b) => a.customer.name.localeCompare(b.customer.name, 'ko'));
 
-    // 🔴 거래명세서 출력 = 주문 확정 의미 — 출력 대상 주문들을 'confirmed' 로 일괄 변경.
-    //    이미 confirmed/shipped/done/canceled 인 주문도 confirmed 로 덮어쓰는 것은
-    //    의도된 동작(재출력 시에도 최신 확정 처리 유지).
-    const selectedIds = selected.map((o) => o.id);
-    if (companyId && selectedIds.length > 0) {
+    // 🔴 신규 4단계 상태 체계: 거래명세서 출력 = 처리중(processing) 진입.
+    //    조건부 전환 — received/confirmed 인 주문만 processing 으로.
+    //    shipped 이후는 그대로 유지 (배송 완료 상태를 되돌리지 않음).
+    //    레거시 draft/done/canceled 는 건드리지 않음.
+    const processingIds = selected
+      .filter((o) => o.status === 'received' || o.status === 'confirmed')
+      .map((o) => o.id);
+    if (companyId && processingIds.length > 0) {
+      const processingAtIso = new Date().toISOString();
       await supabase
         .from('orders')
-        .update({ status: 'confirmed' })
-        .in('id', selectedIds)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .update({ status: 'processing', processing_at: processingAtIso } as any)
+        .in('id', processingIds)
         .eq('company_id', companyId);
       await queryClient.invalidateQueries({ queryKey: ['orders'] });
     }
@@ -583,6 +588,25 @@ export function OrdersPage() {
                 return;
               }
               setSelectedId(id);
+              // 🔴 신규 4단계 상태 체계: received → confirmed 자동 전환.
+              //    이미 confirmed 이상(processing/shipped)인 경우는 그대로 유지.
+              if (target?.status === 'received' && companyId) {
+                const confirmedAtIso = new Date().toISOString();
+                void supabase
+                  .from('orders')
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  .update({ status: 'confirmed', confirmed_at: confirmedAtIso } as any)
+                  .eq('id', id)
+                  .eq('company_id', companyId)
+                  .then(({ error }) => {
+                    if (error) {
+                      // eslint-disable-next-line no-console
+                      console.error('[order.autoConfirm] 실패', error);
+                      return;
+                    }
+                    void queryClient.invalidateQueries({ queryKey: ['orders'] });
+                  });
+              }
             }}
             onContextMenu={(e, orderId) =>
               setContextMenu({ x: e.clientX, y: e.clientY, orderId })

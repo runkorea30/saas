@@ -306,11 +306,14 @@ export function CustomerOrderInput({
       // 2) orders 헤더
       //    🟠 orders.shipping_info / is_direct_shipping 은 자동생성 타입 미반영
       //       → CustomerOrderPage 와 동일하게 as unknown as ... 캐스팅.
+      // 🔴 신규 4단계 상태 체계: 포털 접수 시 'received' + received_at 기록.
+      const nowIso = new Date().toISOString();
       const orderPayload = {
         company_id: customer.companyId,
         customer_id: customer.customerId,
-        order_date: new Date().toISOString(),
-        status: 'draft',
+        order_date: nowIso,
+        status: 'received',
+        received_at: nowIso,
         source: 'portal',
         memo: '거래처 직접입력 주문',
         shipping_info: isDirect ? (filledShipping as unknown as Json) : null,
