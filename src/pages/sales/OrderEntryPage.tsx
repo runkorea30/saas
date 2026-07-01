@@ -637,6 +637,23 @@ export function OrderEntryPage() {
 
     setIsSaving(true);
     try {
+      // 🔴 이미지 대기 주문(파트너/포털에서 접수) 에서 진입한 경우 원본 memo 인계.
+      //    아래에서 원본 빈 주문(sourceOrderId) 을 삭제하므로 사전에 값을 확보.
+      //    실패 시 null 로 폴백 — 저장 자체를 막지는 않음.
+      let inheritedMemo: string | null = null;
+      if (sourceOrderId) {
+        const { data: src, error: srcErr } = await supabase
+          .from('orders')
+          .select('memo')
+          .eq('id', sourceOrderId)
+          .maybeSingle();
+        if (srcErr) {
+          console.warn('[order-entry.inheritMemo] 원본 memo 조회 실패:', srcErr);
+        } else {
+          inheritedMemo = (src?.memo ?? null) || null;
+        }
+      }
+
       const { data, error } = await supabase.rpc('insert_order', {
         p_company_id: companyId,
         p_customer_id: customerId,
@@ -645,8 +662,8 @@ export function OrderEntryPage() {
         p_order_date: composeOrderTimestamp(orderDate),
         p_source: 'manual',
         p_status: 'confirmed',
-        // 이미지 대기 주문 인계(sourceOrderId 있는 경우)의 memo 보존 로직은 별도 커밋에서 추가.
-        p_memo: null,
+        // 일반 수동 주문은 null. 이미지 대기 인계 시에만 원본 memo 보존.
+        p_memo: inheritedMemo,
         p_items: itemsPayload,
       });
       if (error) throw error;
