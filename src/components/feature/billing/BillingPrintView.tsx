@@ -242,7 +242,7 @@ export function BillingPrintView({
                 style={{
                   background: '#eef2f6',
                   border: '1px solid #cdd6e0',
-                  padding: '0.8mm 3mm',
+                  padding: '0.76mm 3mm',
                   fontSize: '11pt',
                   fontWeight: 700,
                 }}
@@ -346,7 +346,7 @@ function thCenter(width: string): React.CSSProperties {
     width,
     border: '1px solid #000',
     // 🟠 종이 절약: 1.5mm → 0.8mm (~3px)
-    padding: '0.8mm 2mm',
+    padding: '0.76mm 2mm',
     textAlign: 'center',
     fontWeight: 700,
   };
@@ -354,7 +354,7 @@ function thCenter(width: string): React.CSSProperties {
 function thLeft(): React.CSSProperties {
   return {
     border: '1px solid #000',
-    padding: '0.8mm 3mm',
+    padding: '0.76mm 3mm',
     textAlign: 'left',
     fontWeight: 700,
   };
@@ -363,7 +363,7 @@ function thRight(width: string): React.CSSProperties {
   return {
     width,
     border: '1px solid #000',
-    padding: '0.8mm 3mm',
+    padding: '0.76mm 3mm',
     textAlign: 'right',
     fontWeight: 700,
   };
@@ -373,7 +373,7 @@ function td(align: 'left' | 'center' | 'right'): React.CSSProperties {
   return {
     border: '1px solid #000',
     // 🟠 종이 절약: 1.2mm → 0.6mm (~2.3px). 텍스트 붙지 않는 최소치.
-    padding: '0.6mm 2mm',
+    padding: '0.57mm 2mm',
     textAlign: align,
     fontVariantNumeric: align === 'right' ? 'tabular-nums' : 'normal',
   };
