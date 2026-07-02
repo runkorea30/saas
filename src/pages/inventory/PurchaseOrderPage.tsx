@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Download, FileSpreadsheet, RefreshCw, Save } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { downloadOrderSheetXlsx } from '@/utils/orderSheetXlsx';
 import { useCompany } from '@/hooks/useCompany';
 import {
   fetchSavedSnapshot,
@@ -431,50 +431,8 @@ export function PurchaseOrderPage() {
       return;
     }
 
-    const aoa: (string | number)[][] = [
-      ['ORDER SHEET', '', '', '', `DATE: ${dateStr}`, ''],
-      ['RUNKOREA', '', '', '', '', ''],
-      ['ZIPCODE : 16348', '', '', '', '', ''],
-      [
-        '92, Gyeongsudaero 1081beongil, Jangangu, Suwonsi, Gyeonggido, Republic of Korea',
-        '',
-        '',
-        '',
-        '',
-        '',
-      ],
-      ['Tel :  01089811434', '', '', '', '', ''],
-      ['', '', '', '', '', ''],
-      ['CODE', 'DESCRIPTION', 'UNIT', 'PRICE', 'QTY', 'AMOUNT'],
-    ];
-    for (const it of lines) {
-      aoa.push([it.code, it.name, it.unit, it.price, it.qty, it.amount]);
-    }
-    aoa.push(['TOTAL', '', '', '', '', '']);
-
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [
-      { wch: 14 },
-      { wch: 36 },
-      { wch: 8 },
-      { wch: 10 },
-      { wch: 8 },
-      { wch: 12 },
-    ];
-
-    // TOTAL 행의 F 열에 SUM 수식 설정. 데이터 시작행 = 8 (1-based).
-    const totalRowIdx = aoa.length;
-    const dataStart = 8;
-    const dataEnd = totalRowIdx - 1;
-    ws[`F${totalRowIdx}`] = {
-      t: 'n',
-      f: `SUM(F${dataStart}:F${dataEnd})`,
-    };
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'ORDER SHEET');
     const fileName = `ORDER_SHEET_${dateStr}.xlsx`;
-    XLSX.writeFile(wb, fileName);
+    await downloadOrderSheetXlsx({ lines, dateStr, fileName });
 
     // 🟠 다운로드된 발주서를 수입/매입 > 인보이스 검증의 "주문서" 슬롯에 자동 반영.
     //    company 당 1행 UPSERT (onConflict: 'company_id'). 인보이스 관련 필드는 초기화.
