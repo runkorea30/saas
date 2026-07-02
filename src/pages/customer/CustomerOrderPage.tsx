@@ -8,6 +8,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, LogOut, X } from 'lucide-react';
 import { useOrderPhotosByOrders, type OrderPhoto } from '@/hooks/queries/useOrderPhotos';
+import type { ShippingInfoRow } from '@/components/feature/orders/InvoicePrintView';
 // xlsx-js-style 은 SheetJS xlsx 의 fork — 동일 API + 셀 스타일(s) 지원.
 // parseOrderExcel(read) 과 handleDownloadOrderForm(write+style) 모두 한 import 로 처리.
 import * as XLSX from 'xlsx-js-style';
@@ -193,6 +194,8 @@ interface OrderDetail {
   memo: string | null;
   status: string;
   tracking_numbers: TrackingEntry[] | null;
+  is_direct_shipping: boolean | null;
+  shipping_info: ShippingInfoRow[] | null;
   items: OrderItemDetail[];
 }
 
@@ -213,8 +216,10 @@ function formatHM(iso: string): string {
 /**
  * 거래처 주문 + 품목 + 제품 정보 단일 select.
  *
- * 🟡 orders 에는 shipping_info 컬럼이 없고, order_items 에는 supply_price 컬럼이 없다.
- *    → 직송/추가주문 구분은 memo 텍스트 기반, 공급가는 products.supply_price 폴백.
+ * 🟡 order_items 에는 supply_price 컬럼이 없다 → 공급가는 products.supply_price 폴백.
+ * 🔴 직송 여부는 orders.is_direct_shipping(boolean) 컬럼 기준 — memo 텍스트 매칭 아님.
+ *    (과거에는 shipping_info 컬럼이 없어 memo 기반으로 판별했으나 현재는 컬럼이 존재함.
+ *    추가주문 구분(isExtraOrder)만 여전히 memo 텍스트 기반 컨벤션으로 남아있음.)
  */
 async function fetchOrdersWithItems(
   companyId: string,
@@ -226,6 +231,7 @@ async function fetchOrdersWithItems(
     .from('orders')
     .select(
       `id, order_date, total_amount, memo, status, tracking_numbers,
+       is_direct_shipping, shipping_info,
        items:order_items (
          id, quantity, unit_price, amount, is_return,
          product:products ( code, name, sell_price, grade_a, grade_b, grade_c, grade_d, grade_e )
@@ -240,13 +246,15 @@ async function fetchOrdersWithItems(
   return (data ?? []) as unknown as OrderDetail[];
 }
 
-// 주문 분류 — memo 텍스트 기반 dogfooding 컨벤션
+// 주문 분류 — memo 텍스트 기반 dogfooding 컨벤션 (추가주문만 해당).
 function isExtraOrder(memo: string | null): boolean {
   return !!memo && memo.includes('추가');
 }
 
-function isDirectShipping(memo: string | null): boolean {
-  return !!memo && memo.includes('직송');
+// 직송 여부는 orders.is_direct_shipping 컬럼을 그대로 사용 (텍스트 매칭 아님).
+// null/undefined 안전하게 boolean 으로 정규화.
+function isDirect(order: Pick<OrderDetail, 'is_direct_shipping'>): boolean {
+  return order.is_direct_shipping === true;
 }
 
 /**
@@ -2128,7 +2136,7 @@ function MonthlyDateCard({
   const totalAmount = orders.reduce((s, o) => s + calcOrderTotal(o), 0);
   const itemCount = orders.reduce((s, o) => s + o.items.length, 0);
   const hasExtra = orders.some((o) => isExtraOrder(o.memo));
-  const hasDirect = orders.some((o) => isDirectShipping(o.memo));
+  const hasDirect = orders.some((o) => isDirect(o));
 
   const regular: OrderDetail[] = [];
   const extra: OrderDetail[] = [];
@@ -2279,7 +2287,9 @@ function OrderCard({
 }) {
   const subtotal = calcOrderTotal(order);
   const extra = isExtraOrder(order.memo);
-  const direct = isDirectShipping(order.memo);
+  const direct = isDirect(order);
+  const recipientName =
+    order.shipping_info?.[0]?.name ?? order.shipping_info?.[0]?.recipient ?? null;
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   return (
@@ -2303,12 +2313,16 @@ function OrderCard({
           fontSize: baseFont,
         }}
       >
-        <Badge kind={extra ? 'extra' : 'regular'} />
-        {direct && <Badge kind="direct" />}
+        <Badge kind={direct ? 'direct' : extra ? 'extra' : 'regular'} />
         <PortalStatusBadge status={order.status} />
         {showTime && (
           <span style={{ color: 'var(--p-ink-3)', fontVariantNumeric: 'tabular-nums' }}>
             {formatHM(order.order_date)}
+          </span>
+        )}
+        {direct && recipientName && (
+          <span style={{ color: 'var(--p-ink-2)', fontWeight: 600 }}>
+            받는사람: {recipientName}
           </span>
         )}
         <span style={{ color: 'var(--p-ink-3)' }}>{order.items.length}건</span>
