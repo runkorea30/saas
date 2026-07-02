@@ -29,6 +29,11 @@ import {
 } from '@/utils/calculations';
 import { getCategoryLabel } from '@/constants/categories';
 import { sortByCategory } from '@/utils/sortProducts';
+import { FinalReviewPanel } from '@/components/feature/purchase-order/FinalReviewPanel';
+import {
+  ResizableTh,
+  useColumnWidth,
+} from '@/components/feature/purchase-order/ResizableTh';
 
 const SAVED_QUERY_KEY = 'purchase-order-saved-categories';
 
@@ -103,6 +108,18 @@ export function PurchaseOrderPage() {
   const [busy, setBusy] = useState(false);
   /** 발주 기준: '1m' = 1개월 판매량, '3m' = 3개월 판매량 (기본값 '3m') */
   const [salesBasis, setSalesBasis] = useState<'1m' | '3m'>('3m');
+  /** 3단계 최종결정 화면 표시 여부. false 면 기존 1·2단계 편집 화면. */
+  const [showFinalReview, setShowFinalReview] = useState(false);
+
+  // 메인 테이블 컬럼 폭 (localStorage 영속). 순서: 코드/제품명/발주수량/재고/1M/3M/단위/합계.
+  const [wCode, setWCode] = useColumnWidth('code', 100);
+  const [wName, setWName] = useColumnWidth('name', 220);
+  const [wQty, setWQty] = useColumnWidth('qty', 110);
+  const [wStock, setWStock] = useColumnWidth('stock', 90);
+  const [wSales1m, setWSales1m] = useColumnWidth('sales1m', 100);
+  const [wSales3m, setWSales3m] = useColumnWidth('sales3m', 100);
+  const [wUnit, setWUnit] = useColumnWidth('unit', 70);
+  const [wTotal, setWTotal] = useColumnWidth('total', 100);
 
   const filteredProducts = useMemo(() => {
     const base =
@@ -252,6 +269,8 @@ export function PurchaseOrderPage() {
           .map((p) => ({
             product_id: p.id,
             quantity: orderQty.get(p.id)!,
+            // 🔴 2단계 저장 시점 = 3단계 "복구" 기준값. 저장할 때마다 갱신.
+            original_quantity: orderQty.get(p.id)!,
             unit_price_usd:
               p.unit_price_usd != null ? Number(p.unit_price_usd) : null,
           }));
@@ -312,6 +331,7 @@ export function PurchaseOrderPage() {
               company_id: companyId,
               product_id: it.product_id,
               quantity: it.quantity,
+              original_quantity: it.original_quantity,
               unit_price_usd: it.unit_price_usd,
             })),
           );
@@ -563,6 +583,17 @@ export function PurchaseOrderPage() {
               </button>
               <button
                 type="button"
+                onClick={() => setShowFinalReview(true)}
+                disabled={savedItemCount === 0}
+                className="btn-base"
+                style={{ height: 32, fontSize: 12.5 }}
+                title="저장된 전체 발주서에서 발주수량 입력 품목만 모아 최종 조정"
+              >
+                <StepBadge>3단계</StepBadge>
+                최종결정
+              </button>
+              <button
+                type="button"
                 onClick={handleDownloadExcel}
                 disabled={savedCategories.size === 0 || busy}
                 className="btn-base"
@@ -570,7 +601,7 @@ export function PurchaseOrderPage() {
                 title="저장된 카테고리 품목만 ORDER SHEET 양식으로 다운로드"
               >
                 <Download size={13} />
-                <StepBadge>3단계</StepBadge>
+                <StepBadge>4단계</StepBadge>
                 엑셀 다운로드
               </button>
               <span
@@ -596,6 +627,24 @@ export function PurchaseOrderPage() {
           </div>
         </header>
 
+        {showFinalReview && (
+          <FinalReviewPanel
+            companyId={companyId}
+            products={products.map((p) => ({
+              id: p.id,
+              code: p.code,
+              name: p.name,
+              unit: p.unit,
+            }))}
+            stockMap={stockMap}
+            salesMap={salesMap}
+            onBack={() => setShowFinalReview(false)}
+            variant="desktop"
+          />
+        )}
+
+        {!showFinalReview && (
+        <>
         {/* 카테고리 필터 바 */}
         <div
           style={{
@@ -679,22 +728,45 @@ export function PurchaseOrderPage() {
                     borderBottom: '1px solid var(--line)',
                   }}
                 >
-                  <Th>코드</Th>
-                  <Th align="left">제품명</Th>
-                  <Th align="right">수입원가($)</Th>
-                  <Th align="center">단위</Th>
-                  <Th align="right">판매량(3개월)</Th>
-                  <Th align="right">판매량(1개월)</Th>
-                  <Th align="right">재고수량</Th>
-                  <Th align="right">발주수량(DZ)</Th>
-                  <Th align="right">합계($)</Th>
+                  <ResizableTh width={wCode} onResize={setWCode}>
+                    코드
+                  </ResizableTh>
+                  <ResizableTh width={wName} align="left" onResize={setWName}>
+                    제품명
+                  </ResizableTh>
+                  <ResizableTh width={wQty} align="right" onResize={setWQty}>
+                    발주수량(DZ)
+                  </ResizableTh>
+                  <ResizableTh width={wStock} align="right" onResize={setWStock}>
+                    재고수량
+                  </ResizableTh>
+                  <ResizableTh
+                    width={wSales1m}
+                    align="right"
+                    onResize={setWSales1m}
+                  >
+                    판매량(1개월)
+                  </ResizableTh>
+                  <ResizableTh
+                    width={wSales3m}
+                    align="right"
+                    onResize={setWSales3m}
+                  >
+                    판매량(3개월)
+                  </ResizableTh>
+                  <ResizableTh width={wUnit} onResize={setWUnit}>
+                    단위
+                  </ResizableTh>
+                  <ResizableTh width={wTotal} align="right" onResize={setWTotal}>
+                    합계($)
+                  </ResizableTh>
                 </tr>
               </thead>
               <tbody>
                 {isLoading && (
                   <tr>
                     <td
-                      colSpan={9}
+                      colSpan={8}
                       style={{
                         padding: 40,
                         textAlign: 'center',
@@ -708,7 +780,7 @@ export function PurchaseOrderPage() {
                 {!isLoading && filteredProducts.length === 0 && (
                   <tr>
                     <td
-                      colSpan={9}
+                      colSpan={8}
                       style={{
                         padding: 40,
                         textAlign: 'center',
@@ -734,26 +806,13 @@ export function PurchaseOrderPage() {
                         key={p.id}
                         style={{ borderBottom: '1px solid var(--line)' }}
                       >
-                        <Td>
+                        <Td width={wCode}>
                           <span className="num">{p.code}</span>
                         </Td>
-                        <Td align="left">{p.name}</Td>
-                        <Td align="right" muted={p.unit_price_usd == null}>
-                          {p.unit_price_usd != null ? formatUsd(usd) : '—'}
+                        <Td align="left" width={wName}>
+                          {p.name}
                         </Td>
-                        <Td align="center" muted>
-                          {p.unit}
-                        </Td>
-                        <Td align="right" muted>
-                          {qty3m.toLocaleString('ko-KR')}
-                        </Td>
-                        <Td align="right" muted>
-                          {qty1m.toLocaleString('ko-KR')}
-                        </Td>
-                        <Td align="right" muted>
-                          {stock.toLocaleString('ko-KR')}
-                        </Td>
-                        <Td align="right">
+                        <Td align="right" width={wQty}>
                           <input
                             type="number"
                             min={0}
@@ -776,7 +835,19 @@ export function PurchaseOrderPage() {
                             }}
                           />
                         </Td>
-                        <Td align="right">
+                        <Td align="right" muted width={wStock}>
+                          {stock.toLocaleString('ko-KR')}
+                        </Td>
+                        <Td align="right" muted width={wSales1m}>
+                          {qty1m.toLocaleString('ko-KR')}
+                        </Td>
+                        <Td align="right" muted width={wSales3m}>
+                          {qty3m.toLocaleString('ko-KR')}
+                        </Td>
+                        <Td align="center" muted width={wUnit}>
+                          {p.unit}
+                        </Td>
+                        <Td align="right" width={wTotal}>
                           {qty > 0 ? (
                             <span
                               className="num"
@@ -818,6 +889,8 @@ export function PurchaseOrderPage() {
             </div>
           )}
         </div>
+        </>
+        )}
       </main>
     </div>
   );
@@ -990,38 +1063,17 @@ function SummaryItem({
   );
 }
 
-function Th({
-  children,
-  align = 'center',
-}: {
-  children: React.ReactNode;
-  align?: 'left' | 'center' | 'right';
-}) {
-  return (
-    <th
-      style={{
-        padding: '10px 12px',
-        fontSize: 12,
-        fontWeight: 600,
-        color: 'var(--ink-2)',
-        textAlign: align,
-        whiteSpace: 'nowrap',
-        borderRight: '1px solid var(--line)',
-      }}
-    >
-      {children}
-    </th>
-  );
-}
 
 function Td({
   children,
   align = 'center',
   muted,
+  width,
 }: {
   children: React.ReactNode;
   align?: 'left' | 'center' | 'right';
   muted?: boolean;
+  width?: number;
 }) {
   return (
     <td
@@ -1031,8 +1083,11 @@ function Td({
         color: muted ? 'var(--ink-3)' : 'var(--ink)',
         fontVariantNumeric: 'tabular-nums',
         whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
         borderRight: '1px solid var(--line)',
         background: muted ? 'var(--surface-2, #fafafa)' : 'var(--surface)',
+        ...(width != null ? { width, maxWidth: width } : {}),
       }}
     >
       {children}

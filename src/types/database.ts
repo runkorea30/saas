@@ -1780,6 +1780,7 @@ export type Database = {
           company_id: string
           created_at: string
           id: string
+          original_quantity: number | null
           product_id: string
           purchase_order_id: string
           quantity: number
@@ -1790,6 +1791,7 @@ export type Database = {
           company_id: string
           created_at?: string
           id?: string
+          original_quantity?: number | null
           product_id: string
           purchase_order_id: string
           quantity?: number
@@ -1800,6 +1802,7 @@ export type Database = {
           company_id?: string
           created_at?: string
           id?: string
+          original_quantity?: number | null
           product_id?: string
           purchase_order_id?: string
           quantity?: number

@@ -31,6 +31,7 @@ import {
 import { getCategoryLabel } from '@/constants/categories';
 import { sortByCategory } from '@/utils/sortProducts';
 import { RefreshButton } from '../components/RefreshButton';
+import { FinalReviewPanel } from '@/components/feature/purchase-order/FinalReviewPanel';
 
 const SAVED_QUERY_KEY = 'purchase-order-saved-categories';
 
@@ -87,6 +88,8 @@ export function PurchaseOrderPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [salesBasis, setSalesBasis] = useState<'1m' | '3m'>('3m');
+  /** 3단계 최종결정 화면 표시 여부. false 면 기존 1·2단계 편집 화면. */
+  const [showFinalReview, setShowFinalReview] = useState(false);
   const [threshold, setThreshold] = useState<number>(4000);
   const [thresholdInput, setThresholdInput] = useState<string>('4000');
 
@@ -208,6 +211,8 @@ export function PurchaseOrderPage() {
           .map((p) => ({
             product_id: p.id,
             quantity: orderQty.get(p.id)!,
+            // 🔴 2단계 저장 시점 = 3단계 "복구" 기준값. 저장할 때마다 갱신.
+            original_quantity: orderQty.get(p.id)!,
             unit_price_usd:
               p.unit_price_usd != null ? Number(p.unit_price_usd) : null,
           }));
@@ -262,6 +267,7 @@ export function PurchaseOrderPage() {
               company_id: companyId,
               product_id: it.product_id,
               quantity: it.quantity,
+              original_quantity: it.original_quantity,
               unit_price_usd: it.unit_price_usd,
             })),
           );
@@ -645,7 +651,12 @@ export function PurchaseOrderPage() {
             disabled={filledCount === 0 || busy}
           />
           <ActionBtn
-            label="3. 엑셀"
+            label="3. 최종결정"
+            onClick={() => setShowFinalReview(true)}
+            disabled={savedItemCount === 0}
+          />
+          <ActionBtn
+            label="4. 엑셀"
             onClick={handleDownloadExcel}
             disabled={savedCategories.size === 0 || busy}
           />
@@ -653,6 +664,26 @@ export function PurchaseOrderPage() {
         </div>
       </header>
 
+      {showFinalReview && (
+        <div style={{ padding: '10px 16px 16px' }}>
+          <FinalReviewPanel
+            companyId={companyId}
+            products={products.map((p) => ({
+              id: p.id,
+              code: p.code,
+              name: p.name,
+              unit: p.unit,
+            }))}
+            stockMap={stockMap}
+            salesMap={salesMap}
+            onBack={() => setShowFinalReview(false)}
+            variant="mobile"
+          />
+        </div>
+      )}
+
+      {!showFinalReview && (
+      <>
       {/* 카테고리 필터 바 — 가로 스크롤 */}
       <div
         style={{
@@ -744,22 +775,19 @@ export function PurchaseOrderPage() {
                   <th style={{ ...thStyle, minWidth: 150, textAlign: 'left' }}>
                     제품명
                   </th>
-                  <th style={{ ...thStyle, textAlign: 'right', minWidth: 70 }}>
-                    원가($)
+                  <th style={{ ...thStyle, textAlign: 'right', minWidth: 80 }}>
+                    발주(DZ)
                   </th>
-                  <th style={{ ...thStyle, minWidth: 50 }}>단위</th>
                   <th style={{ ...thStyle, textAlign: 'right', minWidth: 60 }}>
-                    3M
+                    재고
                   </th>
                   <th style={{ ...thStyle, textAlign: 'right', minWidth: 60 }}>
                     1M
                   </th>
                   <th style={{ ...thStyle, textAlign: 'right', minWidth: 60 }}>
-                    재고
+                    3M
                   </th>
-                  <th style={{ ...thStyle, textAlign: 'right', minWidth: 80 }}>
-                    발주(DZ)
-                  </th>
+                  <th style={{ ...thStyle, minWidth: 50 }}>단위</th>
                   <th style={{ ...thStyle, textAlign: 'right', minWidth: 70 }}>
                     합계($)
                   </th>
@@ -768,14 +796,14 @@ export function PurchaseOrderPage() {
               <tbody>
                 {isLoading && (
                   <tr>
-                    <td colSpan={9} style={emptyTdStyle}>
+                    <td colSpan={8} style={emptyTdStyle}>
                       불러오는 중…
                     </td>
                   </tr>
                 )}
                 {!isLoading && filteredProducts.length === 0 && (
                   <tr>
-                    <td colSpan={9} style={emptyTdStyle}>
+                    <td colSpan={8} style={emptyTdStyle}>
                       표시할 제품이 없습니다.
                     </td>
                   </tr>
@@ -810,48 +838,6 @@ export function PurchaseOrderPage() {
                         >
                           {p.name}
                         </td>
-                        <td
-                          style={{
-                            ...tdStyle,
-                            textAlign: 'right',
-                            color:
-                              p.unit_price_usd == null
-                                ? 'var(--m-text-secondary)'
-                                : 'var(--m-text)',
-                          }}
-                        >
-                          {p.unit_price_usd != null ? formatUsd(usd) : '—'}
-                        </td>
-                        <td style={{ ...tdStyle, color: 'var(--m-text-secondary)' }}>
-                          {p.unit_order || p.unit}
-                        </td>
-                        <td
-                          style={{
-                            ...tdStyle,
-                            textAlign: 'right',
-                            color: 'var(--m-text-secondary)',
-                          }}
-                        >
-                          {qty3m.toLocaleString('ko-KR')}
-                        </td>
-                        <td
-                          style={{
-                            ...tdStyle,
-                            textAlign: 'right',
-                            color: 'var(--m-text-secondary)',
-                          }}
-                        >
-                          {qty1m.toLocaleString('ko-KR')}
-                        </td>
-                        <td
-                          style={{
-                            ...tdStyle,
-                            textAlign: 'right',
-                            color: 'var(--m-text-secondary)',
-                          }}
-                        >
-                          {stock.toLocaleString('ko-KR')}
-                        </td>
                         <td style={{ ...tdStyle, textAlign: 'right' }}>
                           <input
                             type="number"
@@ -874,6 +860,36 @@ export function PurchaseOrderPage() {
                               outline: 'none',
                             }}
                           />
+                        </td>
+                        <td
+                          style={{
+                            ...tdStyle,
+                            textAlign: 'right',
+                            color: 'var(--m-text-secondary)',
+                          }}
+                        >
+                          {stock.toLocaleString('ko-KR')}
+                        </td>
+                        <td
+                          style={{
+                            ...tdStyle,
+                            textAlign: 'right',
+                            color: 'var(--m-text-secondary)',
+                          }}
+                        >
+                          {qty1m.toLocaleString('ko-KR')}
+                        </td>
+                        <td
+                          style={{
+                            ...tdStyle,
+                            textAlign: 'right',
+                            color: 'var(--m-text-secondary)',
+                          }}
+                        >
+                          {qty3m.toLocaleString('ko-KR')}
+                        </td>
+                        <td style={{ ...tdStyle, color: 'var(--m-text-secondary)' }}>
+                          {p.unit_order || p.unit}
                         </td>
                         <td
                           style={{
@@ -908,6 +924,8 @@ export function PurchaseOrderPage() {
           ${formatUsd(totalUsd)}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
