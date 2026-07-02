@@ -1,8 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
 
-const v1 = createClient(process.env.V1_SUPABASE_URL, process.env.V1_SERVICE_KEY)
+// 🔴 신규 secret key(sb_secret_...) 를 서버 전용 환경변수로 사용.
+//    레거시 service_role JWT (V1_SERVICE_KEY / OPS_SERVICE_KEY) 는 disable 예정.
+const v1 = createClient(process.env.V1_SUPABASE_URL, process.env.V1_SECRET_KEY)
 const OPS_URL = process.env.OPS_SUPABASE_URL
-const OPS_KEY = process.env.OPS_SERVICE_KEY
+const OPS_KEY = process.env.OPS_SECRET_KEY
 
 // OPS REST 직접 호출 (스키마 헤더 포함)
 async function opsGet(table, params = '') {
