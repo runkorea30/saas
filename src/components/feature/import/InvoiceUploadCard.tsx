@@ -268,13 +268,38 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
   const handleCompare = async () => {
     if (!orderFile || !invoiceFile) return;
     setError(null);
-    setComparison(null);
     setParsing(true);
     try {
-      const [orderRows, invoice] = await Promise.all([
-        parseOrderSheet(orderFile),
-        parseInvoicePDF(invoiceFile),
-      ]);
+      // 주문서 소스 결정.
+      //  - 실제 File 이면 파싱 (사용자가 직접 업로드한 경우)
+      //  - File 이 아니면 (Task 3 발주서 자동입고 · DB 복원 케이스) 이미 파싱된
+      //    comparison.orderRows 를 그대로 재사용. 이 경로에서는 orderFile 이
+      //    { name: string } 형태의 표시용 스텁이라 .arrayBuffer() 가 없다.
+      let orderRows: OrderSheetRow[];
+      if (orderFile instanceof File) {
+        orderRows = await parseOrderSheet(orderFile);
+      } else if (comparison && comparison.orderRows.length > 0) {
+        orderRows = comparison.orderRows;
+      } else {
+        throw new Error(
+          '주문서 데이터가 없습니다. 주문서를 다시 업로드하거나 발주서를 다시 다운로드해 주세요.',
+        );
+      }
+
+      // 인보이스도 동일한 분기: File 이면 파싱, 아니면 DB 복원된 invoiceRows 재사용.
+      let invoice: InvoiceParsed;
+      if (invoiceFile instanceof File) {
+        invoice = await parseInvoicePDF(invoiceFile);
+      } else if (comparison && comparison.invoiceRows.length > 0) {
+        invoice = {
+          invoice_no: comparison.invoiceNo,
+          invoice_date: comparison.invoiceDate,
+          rows: comparison.invoiceRows,
+        };
+      } else {
+        throw new Error('인보이스 데이터가 없습니다. 인보이스를 다시 업로드해 주세요.');
+      }
+
       const rows = compareOrderInvoice(orderRows, invoice, productNameByCode, productCategoryByCode);
       setComparison({
         rows,
