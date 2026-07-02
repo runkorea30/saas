@@ -33,11 +33,11 @@ const PRIMARY_TABS: TabDef[] = [
   { path: '/mobile/finance', icon: <IconTrend size={NAV_ICON_SIZE} />, label: '재무' },
 ];
 
-const MORE_PATHS = ['/mobile/import', '/mobile/purchase', '/mobile/products', '/mobile/audit'];
+const MORE_PATHS = ['/mobile/purchase', '/mobile/import', '/mobile/products', '/mobile/audit'];
 
 const MORE_ITEMS: TabDef[] = [
-  { path: '/mobile/import', icon: <IconTruck />, label: '수입/매입' },
   { path: '/mobile/purchase', icon: <IconDoc />, label: '발주서' },
+  { path: '/mobile/import', icon: <IconTruck />, label: '수입/매입' },
   { path: '/mobile/audit', icon: <IconBox />, label: '재고실사' },
   { path: '/mobile/products', icon: <IconTag />, label: '제품리스트' },
 ];
