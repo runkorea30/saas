@@ -1,9 +1,12 @@
 /**
  * 발주서 "3단계 최종결정" 화면 전용 훅.
  *
- * 이번 달 draft 발주서(모든 카테고리 통합) 중 quantity > 0 인 아이템을
- * purchase_order_items 원본 그대로(id, purchase_order_id, product_id, quantity,
- * original_quantity, unit_price_usd) 조회한다.
+ * 이번 달 draft 발주서(모든 카테고리 통합)의 아이템을 purchase_order_items 원본
+ * 그대로(id, purchase_order_id, product_id, quantity, original_quantity,
+ * unit_price_usd) 조회한다.
+ * 2단계 저장 시점에 quantity > 0 이었던 품목만 애초에 insert 되므로 화면에는
+ * "발주된 이력이 있는 품목"만 나타나며, 이후 사용자가 최종결정에서 0 으로 바꿔도
+ * 행이 유지되도록 quantity 필터는 걸지 않는다.
  *
  * 🔴 CLAUDE.md §1: company_id 필터 필수.
  * 🔴 CLAUDE.md §5: fetchAllRows 경유 (품목 많을 때 페이지네이션 누락 방지).
@@ -47,6 +50,10 @@ async function fetchFinalReviewItems(
   if (orderRows.length === 0) return [];
   const poIds = orderRows.map((r) => r.id);
 
+  // 그 발주서들의 아이템 전체. (quantity=0 도 포함 — 최종결정 화면에서 수량을
+  // 0 으로 바꿔도 행이 사라지지 않고 남아있어야 하기 때문. 애초에 이 테이블에는
+  // 2단계 저장 시점에 quantity>0 이었던 품목만 insert 되므로 여기서 0 을 걸러내지
+  // 않아도 "한 번도 발주 안 한 품목" 이 섞여 들어올 일은 없다.)
   const itemRows = await fetchAllRows<{
     id: string;
     purchase_order_id: string;
@@ -61,8 +68,7 @@ async function fetchFinalReviewItems(
         'id, purchase_order_id, product_id, quantity, original_quantity, unit_price_usd',
       )
       .eq('company_id', companyId)
-      .in('purchase_order_id', poIds)
-      .gt('quantity', 0),
+      .in('purchase_order_id', poIds),
   );
 
   return itemRows.map((r) => ({
