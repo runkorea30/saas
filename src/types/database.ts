@@ -2084,6 +2084,9 @@ export type Database = {
       }
       inspection_certificates: {
         Row: {
+          application_file_name: string | null
+          application_file_url: string | null
+          application_uploaded_at: string | null
           company_id: string
           created_at: string | null
           hs_no: string | null
@@ -2096,6 +2099,9 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          application_file_name?: string | null
+          application_file_url?: string | null
+          application_uploaded_at?: string | null
           company_id: string
           created_at?: string | null
           hs_no?: string | null
@@ -2108,6 +2114,9 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          application_file_name?: string | null
+          application_file_url?: string | null
+          application_uploaded_at?: string | null
           company_id?: string
           created_at?: string | null
           hs_no?: string | null

@@ -8,7 +8,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, Download, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
@@ -18,7 +18,16 @@ type InspectionUpdate =
   Database['mochicraft_demo']['Tables']['inspection_certificates']['Update'];
 
 const INSPECTION_SELECT =
-  'id, product_name, hs_no, inspection_no, inspection_valid_until, import_req_no, import_valid_until, created_at';
+  'id, product_name, hs_no, inspection_no, inspection_valid_until, import_req_no, import_valid_until, application_file_url, application_file_name, application_uploaded_at, created_at';
+
+const ALLOWED_FILE_TYPES = [
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+];
+const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
 interface InspectionCert {
   id: string;
@@ -28,6 +37,9 @@ interface InspectionCert {
   inspection_valid_until: string | null;
   import_req_no: string | null;
   import_valid_until: string | null;
+  application_file_url: string | null;
+  application_file_name: string | null;
+  application_uploaded_at: string | null;
   created_at: string | null;
 }
 
@@ -200,6 +212,98 @@ export function InspectionCertTab({ companyId }: Props) {
     }
   };
 
+  const handleUpload = async (record: InspectionCert, file: File) => {
+    if (!companyId) return;
+    if (file.size > MAX_FILE_SIZE) {
+      showToast({ kind: 'error', text: '파일 크기는 최대 20MB입니다.' });
+      return;
+    }
+    if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+      showToast({ kind: 'error', text: 'Excel, PDF, Word 파일만 업로드 가능합니다.' });
+      return;
+    }
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? 'file';
+    const safeName = `${Date.now()}.${ext}`;
+    const filePath = `inspection-applications/${companyId}/${record.id}/${safeName}`;
+    try {
+      if (record.application_file_url) {
+        await supabase.storage.from('documents').remove([record.application_file_url]);
+      }
+      const { error: uploadError } = await supabase.storage
+        .from('documents')
+        .upload(filePath, file, { contentType: file.type, upsert: true });
+      if (uploadError) {
+        const msg = /bucket|not found|does not exist/i.test(uploadError.message)
+          ? '파일 저장소가 준비되지 않았습니다. 관리자에게 문의하세요.'
+          : `업로드 실패: ${uploadError.message}`;
+        showToast({ kind: 'error', text: msg });
+        return;
+      }
+      const { error: updateError } = await supabase
+        .from('inspection_certificates')
+        .update({
+          application_file_url: filePath,
+          application_file_name: file.name,
+          application_uploaded_at: new Date().toISOString(),
+        } as InspectionUpdate)
+        .eq('id', record.id)
+        .eq('company_id', companyId);
+      if (updateError) throw updateError;
+      showToast({ kind: 'success', text: '업로드 완료' });
+      await queryClient.invalidateQueries({ queryKey });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '업로드 실패';
+      showToast({ kind: 'error', text: msg });
+    }
+  };
+
+  const handleDownload = async (record: InspectionCert) => {
+    if (!record.application_file_url || !record.application_file_name) return;
+    try {
+      const { data, error } = await supabase.storage
+        .from('documents')
+        .download(record.application_file_url);
+      if (error || !data) {
+        showToast({ kind: 'error', text: '다운로드 실패' });
+        return;
+      }
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = record.application_file_name;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '다운로드 실패';
+      showToast({ kind: 'error', text: msg });
+    }
+  };
+
+  const handleDeleteFile = async (record: InspectionCert) => {
+    if (!companyId) return;
+    if (!window.confirm('신청서 파일을 삭제하시겠습니까?')) return;
+    try {
+      if (record.application_file_url) {
+        await supabase.storage.from('documents').remove([record.application_file_url]);
+      }
+      const { error } = await supabase
+        .from('inspection_certificates')
+        .update({
+          application_file_url: null,
+          application_file_name: null,
+          application_uploaded_at: null,
+        } as InspectionUpdate)
+        .eq('id', record.id)
+        .eq('company_id', companyId);
+      if (error) throw error;
+      showToast({ kind: 'success', text: '파일 삭제 완료' });
+      await queryClient.invalidateQueries({ queryKey });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '삭제 실패';
+      showToast({ kind: 'error', text: msg });
+    }
+  };
+
   const handleDelete = async () => {
     if (!companyId || checkedIds.size === 0) return;
     if (!window.confirm(`선택된 ${checkedIds.size}건을 삭제하시겠습니까?`))
@@ -338,6 +442,7 @@ export function InspectionCertTab({ companyId }: Props) {
                   <th style={thStyle('center', 130)}>검사유효기간</th>
                   <th style={thStyle('left', 180)}>수입요건번호</th>
                   <th style={thStyle('center', 130)}>수입유효기간</th>
+                  <th style={thStyle('left', 200)}>신청서</th>
                 </tr>
               </thead>
               <tbody>
@@ -424,6 +529,14 @@ export function InspectionCertTab({ companyId }: Props) {
                         startEdit={startEdit}
                         saveEdit={saveEdit}
                         cancelEdit={cancelEdit}
+                      />
+                    </td>
+                    <td style={cellTdStyle('left')}>
+                      <ApplicationFileCell
+                        record={row}
+                        onUpload={handleUpload}
+                        onDownload={handleDownload}
+                        onDelete={handleDeleteFile}
                       />
                     </td>
                   </tr>
@@ -558,6 +671,110 @@ function EditableDateCell({
       {value || '—'}
     </div>
   );
+}
+
+interface ApplicationFileCellProps {
+  record: InspectionCert;
+  onUpload: (record: InspectionCert, file: File) => void | Promise<void>;
+  onDownload: (record: InspectionCert) => void | Promise<void>;
+  onDelete: (record: InspectionCert) => void | Promise<void>;
+}
+
+function ApplicationFileCell({
+  record,
+  onUpload,
+  onDownload,
+  onDelete,
+}: ApplicationFileCellProps) {
+  const [hover, setHover] = useState(false);
+
+  if (record.application_file_url && record.application_file_name) {
+    return (
+      <div
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+      >
+        <span
+          title={record.application_file_name}
+          style={{
+            fontSize: 12,
+            maxWidth: 120,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            color: 'var(--ink-2)',
+            flex: 1,
+          }}
+        >
+          {record.application_file_name}
+        </span>
+        <button
+          type="button"
+          onClick={() => onDownload(record)}
+          title="다운로드"
+          style={iconBtnStyle('var(--ink-2)')}
+        >
+          <Download size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={() => onDelete(record)}
+          title="삭제"
+          style={{
+            ...iconBtnStyle('var(--danger)'),
+            visibility: hover ? 'visible' : 'hidden',
+          }}
+        >
+          <X size={14} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <label style={{ cursor: 'pointer', display: 'inline-block' }}>
+      <input
+        type="file"
+        accept=".xlsx,.xls,.pdf,.doc,.docx"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) onUpload(record, file);
+          e.target.value = '';
+        }}
+      />
+      <span
+        style={{
+          fontSize: 12,
+          padding: '3px 10px',
+          border: '1px solid var(--line-strong)',
+          borderRadius: 4,
+          color: 'var(--ink-2)',
+          background: 'var(--surface)',
+          cursor: 'pointer',
+        }}
+      >
+        + 업로드
+      </span>
+    </label>
+  );
+}
+
+function iconBtnStyle(color: string): React.CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 24,
+    height: 24,
+    background: 'transparent',
+    border: 'none',
+    borderRadius: 4,
+    color,
+    cursor: 'pointer',
+    padding: 0,
+  };
 }
 
 function EmptyRow({ text }: { text: string }) {
