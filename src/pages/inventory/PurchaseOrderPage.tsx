@@ -760,6 +760,8 @@ export function PurchaseOrderPage() {
                               textAlign: 'right',
                               fontFamily: 'var(--font-num)',
                               fontVariantNumeric: 'tabular-nums',
+                              background: 'var(--surface)',
+                              color: 'var(--ink)',
                             }}
                           />
                         </Td>
