@@ -1272,6 +1272,9 @@ interface ImportNoticeShipment {
   orderDate: string | null;
   shipDate: string | null;
   customsDate: string | null;
+  /** 도착예정일 (companies.import_notice_date, date 타입 → ISO 문자열 'YYYY-MM-DD').
+   *  해상운송(sea)에는 대응 컬럼이 없어 항상 null. */
+  arrivalDate: string | null;
   arrivalText: string | null;
 }
 
@@ -1311,7 +1314,7 @@ function ImportNoticeCard({
       const { data, error } = await supabase
         .from('companies')
         .select(
-          'import_notice_status, import_notice_products, import_notice_order_date, import_notice_ship_date, import_notice_customs_date, import_notice_arrival_text, import_notice_sea_status, import_notice_sea_products, import_notice_sea_order_date, import_notice_sea_ship_date, import_notice_sea_customs_date, import_notice_sea_arrival_text',
+          'import_notice_status, import_notice_products, import_notice_order_date, import_notice_ship_date, import_notice_customs_date, import_notice_arrival_text, import_notice_date, import_notice_sea_status, import_notice_sea_products, import_notice_sea_order_date, import_notice_sea_ship_date, import_notice_sea_customs_date, import_notice_sea_arrival_text',
         )
         .eq('id', companyId)
         .maybeSingle();
@@ -1359,6 +1362,7 @@ function ImportNoticeCard({
           orderDate: data.import_notice_order_date ?? null,
           shipDate: data.import_notice_ship_date ?? null,
           customsDate: data.import_notice_customs_date ?? null,
+          arrivalDate: formatArrivalDate(data.import_notice_date),
           arrivalText: data.import_notice_arrival_text ?? null,
         },
         sea: {
@@ -1367,6 +1371,7 @@ function ImportNoticeCard({
           orderDate: data.import_notice_sea_order_date ?? null,
           shipDate: data.import_notice_sea_ship_date ?? null,
           customsDate: data.import_notice_sea_customs_date ?? null,
+          arrivalDate: null, // 해상운송은 대응 컬럼 없음
           arrivalText: data.import_notice_sea_arrival_text ?? null,
         },
       };
@@ -1597,6 +1602,16 @@ function ImportNoticeCard({
   );
 }
 
+/** companies.import_notice_date ('YYYY-MM-DD') → '7월2일' 형태로 변환. 파싱 실패 시 원본 그대로. */
+function formatArrivalDate(raw: string | null): string | null {
+  if (!raw) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!m) return raw;
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  return `${month}월${day}일`;
+}
+
 /** companies.import_notice_products / sea_products jsonb → {code,name} 배열로 안전 추출. */
 function pickNoticeProducts(raw: unknown): { code: string; name: string }[] {
   if (!Array.isArray(raw)) return [];
@@ -1619,7 +1634,7 @@ function ImportStepper({ shipment }: { shipment: ImportNoticeShipment }) {
     shipment.orderDate,
     shipment.shipDate,
     shipment.customsDate,
-    null,
+    shipment.arrivalDate,
   ];
   return (
     <div
