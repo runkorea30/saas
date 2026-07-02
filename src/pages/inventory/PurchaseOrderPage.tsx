@@ -13,7 +13,7 @@
  *  - "초기화" → 이번 달 모든 draft 발주서 삭제 + orderQty 리셋
  *  - "엑셀" → savedCategories 의 품목만 ORDER SHEET 양식으로 다운로드
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Download, FileSpreadsheet, RefreshCw, Save } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -68,6 +68,7 @@ export function PurchaseOrderPage() {
     savedCategories,
     savedItemCount,
     savedTotalUsd,
+    savedQtyMap,
     categories,
     isLoading,
     error,
@@ -82,6 +83,16 @@ export function PurchaseOrderPage() {
 
   /** product_id → 발주수량 (EA). 0/없음 = 빈칸. */
   const [orderQty, setOrderQty] = useState<Map<string, number>>(new Map());
+  // 🔴 페이지 진입 시 이번 달 저장된 발주수량(savedQtyMap)으로 1회만 초기화.
+  //    OPS/모바일이 같은 DB를 읽으므로, 어느 쪽에서 저장했든 다시 열면 여기 반영됨.
+  //    이후 사용자가 입력을 시작하면 다시 덮어쓰지 않음(untouched 1회 로드 패턴).
+  const [qtyLoadedFromSaved, setQtyLoadedFromSaved] = useState(false);
+  useEffect(() => {
+    if (qtyLoadedFromSaved) return;
+    if (savedQtyMap.size === 0) return;
+    setOrderQty(new Map(savedQtyMap));
+    setQtyLoadedFromSaved(true);
+  }, [savedQtyMap, qtyLoadedFromSaved]);
   /**
    * 선택된 카테고리 (단일 선택).
    * - `null` : 전체

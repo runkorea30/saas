@@ -14,7 +14,7 @@
  * 🔴 CLAUDE.md §2: 계산은 calculations.ts 의 calcSalesQty3m / calcSalesQty1m / calcOrderQty.
  * 🔴 CLAUDE.md §5: usePurchaseOrder (fetchAllRows 경유) 재사용.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
 import { useCompany } from '@/hooks/useCompany';
@@ -63,6 +63,7 @@ export function PurchaseOrderPage() {
     savedCategories,
     savedItemCount,
     savedTotalUsd,
+    savedQtyMap,
     categories,
     isLoading,
     error,
@@ -73,6 +74,16 @@ export function PurchaseOrderPage() {
   const month = now.getMonth() + 1;
 
   const [orderQty, setOrderQty] = useState<Map<string, number>>(new Map());
+  // 🔴 페이지 진입 시 이번 달 저장된 발주수량(savedQtyMap)으로 1회만 초기화.
+  //    OPS/모바일이 같은 DB를 읽으므로, 어느 쪽에서 저장했든 다시 열면 여기 반영됨.
+  //    이후 사용자가 입력을 시작하면 다시 덮어쓰지 않음(untouched 1회 로드 패턴).
+  const [qtyLoadedFromSaved, setQtyLoadedFromSaved] = useState(false);
+  useEffect(() => {
+    if (qtyLoadedFromSaved) return;
+    if (savedQtyMap.size === 0) return;
+    setOrderQty(new Map(savedQtyMap));
+    setQtyLoadedFromSaved(true);
+  }, [savedQtyMap, qtyLoadedFromSaved]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [salesBasis, setSalesBasis] = useState<'1m' | '3m'>('3m');

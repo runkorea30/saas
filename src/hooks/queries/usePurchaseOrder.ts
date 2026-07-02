@@ -76,12 +76,17 @@ export interface SavedSnapshot {
   totalUsd: number;
   /** 저장된 발주서 아이템 중 quantity > 0 인 행 개수. */
   itemCount: number;
+  /** product_id → 저장된 발주수량. OPS/모바일 페이지 진입 시 입력칸 초기값으로 사용. */
+  qtyMap: Map<string, number>;
 }
 
 /**
- * 이번 달 draft 발주서 + 그 아이템 카운트 + total_amount 합산 스냅샷.
+ * 이번 달 draft 발주서 + 그 아이템 카운트 + total_amount 합산 + product_id 별
+ * 저장된 수량 맵.
  * 🔴 상단 KPI (발주 품목 / 총합계 USD / 저장된 분류) 는 모두 이 함수 결과에서 산출 —
  *    사용자가 입력 중인 미저장 수량은 카운트되지 않는다.
+ * 🔴 qtyMap 은 OPS/모바일 두 발주서 페이지가 진입 시 orderQty 초기값을 채우는 데
+ *    공통으로 사용 — 이 값이 두 페이지 간 "동일 데이터 조회"의 핵심.
  */
 async function fetchSavedSnapshot(companyId: string): Promise<SavedSnapshot> {
   const now = new Date();
@@ -111,21 +116,29 @@ async function fetchSavedSnapshot(companyId: string): Promise<SavedSnapshot> {
     totalUsd += Number(r.total_amount ?? 0);
   }
 
-  // 2) 저장된 아이템 중 quantity > 0 카운트 — 발주 품목 수.
+  // 2) 저장된 아이템 — product_id/quantity 전체 조회 (카운트 + 초기값 맵 둘 다 여기서 산출).
   let itemCount = 0;
+  const qtyMap = new Map<string, number>();
   if (orderRows.length > 0) {
     const ids = orderRows.map((r) => r.id);
-    const { count, error } = await supabase
-      .from('purchase_order_items')
-      .select('id', { count: 'exact', head: true })
-      .eq('company_id', companyId)
-      .in('purchase_order_id', ids)
-      .gt('quantity', 0);
-    if (error) throw error;
-    itemCount = count ?? 0;
+    const itemRows = await fetchAllRows<{
+      product_id: string;
+      quantity: number;
+    }>(() =>
+      supabase
+        .from('purchase_order_items')
+        .select('product_id, quantity')
+        .eq('company_id', companyId)
+        .in('purchase_order_id', ids)
+        .gt('quantity', 0),
+    );
+    for (const row of itemRows) {
+      qtyMap.set(row.product_id, (qtyMap.get(row.product_id) ?? 0) + row.quantity);
+    }
+    itemCount = itemRows.length;
   }
 
-  return { categories, totalUsd, itemCount };
+  return { categories, totalUsd, itemCount, qtyMap };
 }
 
 export interface UsePurchaseOrderResult {
@@ -140,6 +153,8 @@ export interface UsePurchaseOrderResult {
   savedItemCount: number;
   /** 🔴 저장된 발주서들의 total_amount 합 (USD) — 상단 KPI "총합계 USD" 용. */
   savedTotalUsd: number;
+  /** product_id → 저장된 발주수량. 페이지 진입 시 orderQty 초기값으로 사용. */
+  savedQtyMap: Map<string, number>;
   categories: string[];
   isLoading: boolean;
   error: Error | null;
@@ -192,6 +207,7 @@ export function usePurchaseOrder(
     savedCategories: saved?.categories ?? new Set(),
     savedItemCount: saved?.itemCount ?? 0,
     savedTotalUsd: saved?.totalUsd ?? 0,
+    savedQtyMap: saved?.qtyMap ?? new Map(),
     categories,
     isLoading:
       productsQuery.isLoading ||
