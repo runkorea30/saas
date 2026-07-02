@@ -773,21 +773,6 @@ export function ImportReceivingPage() {
                 </button>
               );
             })}
-            <button
-              type="button"
-              onClick={() => setActiveStatus('')}
-              style={{
-                padding: '6px 12px',
-                fontSize: 12,
-                borderRadius: 6,
-                border: `1px solid ${!activeStatus ? '#9CA3AF' : 'var(--line-strong)'}`,
-                background: !activeStatus ? '#E5E7EB' : 'var(--surface)',
-                color: !activeStatus ? '#4B5563' : 'var(--ink-3)',
-                cursor: 'pointer',
-              }}
-            >
-              안내 숨기기
-            </button>
           </div>
 
           {/* 상태별 자유 텍스트 — 거래처 포털 카드에 스텝퍼 날짜/헤더 문구로 표시됨. */}
