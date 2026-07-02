@@ -1,12 +1,13 @@
 /**
- * 인보이스 PDF 파싱 — Claude API (Sonnet 4.6) 호출.
+ * 인보이스 PDF 파싱 — Vercel Serverless 프록시 `/api/analyze-invoice` 를 통해
+ * Claude API (Sonnet 4.6) 호출.
  *
- * 🔴 보안: `VITE_ANTHROPIC_API_KEY` 는 클라이언트 번들에 노출됨.
- *    `anthropic-dangerous-direct-browser-access` 헤더로 CORS 우회 허용.
- *    프로덕션 전환 시 Supabase Edge Function 으로 이전 권장 (SESSION_HANDOFF 참고).
- * 🟠 모델: `claude-sonnet-4-6` (최신 Sonnet — 문서 처리 + 구조화 JSON 출력 강점).
- * 🟡 응답 형식: 마크다운 ```json ``` 래퍼 제거 후 JSON.parse.
- *    예외 시 원문을 throw 메시지에 포함 (디버깅 편의).
+ * 🔴 보안: 이전 버전은 브라우저에서 직접 Anthropic API 를 호출하며 `VITE_ANTHROPIC_API_KEY`
+ *    를 클라이언트 번들에 노출했다. `VITE_` 접두사가 붙은 값은 Vite 빌드 시 정적 자산에
+ *    그대로 실려나가 도구창/스크래핑 봇에 그대로 유출된다. 이제는 서버리스 함수에서만
+ *    `ANTHROPIC_API_KEY` (VITE_ 접두사 없음) 를 읽어 호출한다.
+ * 🟠 프롬프트/모델 상수는 서버(`api/analyze-invoice.ts`) 에 있음.
+ * 🟡 응답 형식: 서버는 Anthropic 응답 원문을 그대로 프록시. JSON 추출·정규화는 여기서 유지.
  */
 
 export interface InvoiceParsedRow {
@@ -26,30 +27,7 @@ export interface InvoiceParsed {
   rows: InvoiceParsedRow[];
 }
 
-const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
-const MODEL = 'claude-sonnet-4-6';
-const ANTHROPIC_VERSION = '2023-06-01';
-
-const PROMPT = `이 인보이스 PDF에서 품목 데이터를 추출해 JSON 객체 1개만 반환하세요.
-
-형식:
-{
-  "invoice_no": "81252",
-  "invoice_date": "2026-05-12",
-  "rows": [
-    {"item_code":"72001001","description":"Leather Paint Black 1 oz.","unit":"DZ","qty_shipped":48,"price":21.06,"amount":1010.88}
-  ]
-}
-
-규칙:
-- item_code: 하이픈 모두 제거 (720-01-001 → 72001001)
-- unit: QTY SHPD 옆 U/M 컬럼값 (DZ 또는 EA). 알 수 없으면 "DZ".
-- qty_shipped: QTY SHPD 컬럼 숫자 (정수)
-- QTY BO(백오더) 행은 qty_shipped=0 으로 포함
-- price/amount: 숫자 (통화기호/콤마 제거)
-- invoice_date: DATE 필드를 YYYY-MM-DD 형식으로
-
-⚠️ 중요: 마크다운 코드블록(\`\`\`), 설명 텍스트, 서문, 후기 일절 없이 { 로 시작해서 } 로 끝나는 순수 JSON 객체만 응답하세요. 모든 품목을 빠짐없이 포함하세요 (페이지가 여러 장이어도 끝까지).`;
+const ANALYZE_ENDPOINT = '/api/analyze-invoice';
 
 interface AnthropicTextBlock {
   type: 'text';
@@ -61,48 +39,24 @@ interface AnthropicResponseShape {
 }
 
 export async function parseInvoicePDF(file: File): Promise<InvoiceParsed> {
-  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      '환경변수 VITE_ANTHROPIC_API_KEY 가 설정되지 않았습니다. .env 에 키를 추가해 주세요.',
-    );
-  }
   const base64 = await fileToBase64(file);
 
-  const res = await fetch(ANTHROPIC_ENDPOINT, {
+  const res = await fetch(ANALYZE_ENDPOINT, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': ANTHROPIC_VERSION,
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      // 8페이지/100품목 인보이스 응답을 위한 여유. (Sonnet 4.6 max output 64K 내)
-      max_tokens: 8192,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'document',
-              source: {
-                type: 'base64',
-                media_type: 'application/pdf',
-                data: base64,
-              },
-            },
-            { type: 'text', text: PROMPT },
-          ],
-        },
-      ],
-    }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pdfBase64: base64 }),
   });
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(`Claude API 오류 (${res.status}): ${errText.slice(0, 500)}`);
+    // 서버 프록시 함수는 JSON `{ error }` 를 반환하지만 Anthropic 원문(비-JSON) 이
+    // 그대로 나올 수도 있으므로 그냥 문자열로 보여준다.
+    let msg = errText.slice(0, 500);
+    try {
+      const parsed = JSON.parse(errText) as { error?: string };
+      if (parsed.error) msg = parsed.error;
+    } catch { /* ignore */ }
+    throw new Error(`인보이스 분석 오류 (${res.status}): ${msg}`);
   }
 
   const data = (await res.json()) as AnthropicResponseShape;

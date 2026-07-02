@@ -4,8 +4,8 @@
  * 흐름: 주문서(엑셀) + 인보이스(PDF) 업로드 → [비교 시작] → 4상태 분류 결과 표 →
  *       [입고처리로 이관] 으로 부모의 rowInputs/header 교체 + DB transfer_rows 저장.
  *
- * 🔴 Claude API 키는 클라이언트 노출 (VITE_ANTHROPIC_API_KEY) — 내부 도구 한정.
- *    Phase 3 에서 Supabase Edge Function 으로 이전 권장.
+ * 🔴 Claude API 호출은 Vercel Serverless 함수(`api/analyze-invoice.ts`) 를 거친다.
+ *    브라우저 번들에는 키가 전혀 실리지 않음 (서버 전용 `ANTHROPIC_API_KEY`).
  * 🟠 검수/USD단가/환율/저장은 모두 부모 페이지의 기존 14컬럼 테이블에 위임.
  *    이 카드는 "파싱 + 비교 + 이관(transfer_rows 저장)" 만 담당.
  * 🟡 BO(백오더): 인보이스에 qty_shipped=0 으로 나오거나, 주문서에만 있는 항목.
