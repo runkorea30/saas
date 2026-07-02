@@ -551,14 +551,24 @@ export function calcSalesQty1m(qty3m: number): number {
 
 /**
  * 발주서 추천 발주수량.
- * - unit 이 'DZ'(대소문자 무관) 면 round(qty3m / 12) DZ (소수점 첫째 자리 반올림)
- * - 그 외(EA 등) 면 qty3m 그대로
+ * - 주문할 수량 = 판매량(기준) − 현재재고 (음수면 0)
+ * - unit 이 'DZ'(대소문자 무관) 면 round(주문할 수량 / 12) DZ (소수점 첫째 자리 반올림)
+ * - 그 외(EA 등) 면 주문할 수량 그대로
+ *
+ * 🔴 버그수정 이력: 과거엔 stock 파라미터가 없어 재고 차감 없이 qty3m/1m을
+ *    그대로 12로 나눴다. 예: 판매량(3개월) 672, 재고 87 → 올바른 값은
+ *    round((672-87)/12)=49DZ 인데 이전엔 round(672/12)=56DZ 로 잘못 계산됨.
  */
-export function calcOrderQty(qty3m: number, unit: string): number {
+export function calcOrderQty(
+  baseQty: number,
+  stock: number,
+  unit: string,
+): number {
+  const needQty = Math.max(0, baseQty - stock);
   if (unit.toUpperCase() === 'DZ') {
-    return Math.round(qty3m / 12);
+    return Math.round(needQty / 12);
   }
-  return qty3m;
+  return needQty;
 }
 
 // ───────────────────────────────────────────────────────────

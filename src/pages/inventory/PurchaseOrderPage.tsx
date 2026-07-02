@@ -6,7 +6,7 @@
  * 🔴 CLAUDE.md §5: 모든 목록 조회는 fetchAllRows 경유 (usePurchaseOrder 내부).
  *
  * 핵심 동작:
- *  - "발주서 생성" → 전 제품에 대해 calcOrderQty(qty3m, unit) 자동 입력
+ *  - "발주서 생성" → 전 제품에 대해 calcOrderQty(baseQty, stock, unit) 자동 입력
  *  - "현재 카테고리 저장" → 선택된(혹은 전체) 카테고리별로 purchase_orders + items upsert
  *      · po_number = `PO-{YYYY}-{MM}-{카테고리}` (같은 번호 있으면 DELETE 후 INSERT)
  *      · template_id = 카테고리명 (저장 여부 추적용)
@@ -169,8 +169,9 @@ export function PurchaseOrderPage() {
       const qty3m = calcSalesQty3m(qty6mExcl);
       // salesBasis 에 따라 기준 수량 결정 (1m = 3m / 3)
       const baseQty = salesBasis === '1m' ? calcSalesQty1m(qty3m) : qty3m;
-      // 🟠 unit_order 우선 — 없으면 unit 로 폴백. DZ 면 calcOrderQty 가 /12.
-      const orderQ = calcOrderQty(baseQty, p.unit_order || p.unit);
+      // 🟠 unit_order 우선 — 없으면 unit 로 폴백. DZ 면 calcOrderQty 가 재고 차감 후 /12.
+      const stock = stockMap.get(p.id) ?? 0;
+      const orderQ = calcOrderQty(baseQty, stock, p.unit_order || p.unit);
       if (orderQ > 0) next.set(p.id, orderQ);
     }
     setOrderQty(next);

@@ -175,7 +175,8 @@ export function PurchaseOrderPage() {
       const qty6mExcl = salesMap.get(p.id) ?? 0;
       const qty3m = calcSalesQty3m(qty6mExcl);
       const baseQty = salesBasis === '1m' ? calcSalesQty1m(qty3m) : qty3m;
-      const orderQ = calcOrderQty(baseQty, p.unit_order || p.unit);
+      const stock = stockMap.get(p.id) ?? 0;
+      const orderQ = calcOrderQty(baseQty, stock, p.unit_order || p.unit);
       if (orderQ > 0) next.set(p.id, orderQ);
     }
     setOrderQty(next);

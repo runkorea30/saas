@@ -2,8 +2,11 @@
  * 발주 필요 금액 실시간 추정 — TopNav 우측 고정 위젯용.
  *
  * 🔴 계산식은 발주서 페이지 "1단계 발주서 생성" + 푸터 totalUsd 와 완전 일치:
- *    Σ calcOrderQty(baseQty, unit_order || unit) × unit_price_usd
- *    (재고 차감 없음 — 추천 발주수량 그대로 곱함)
+ *    Σ calcOrderQty(baseQty, stock, unit_order || unit) × unit_price_usd
+ *    (재고 차감 포함 — calcOrderQty 내부에서 max(0, baseQty-stock) 처리.
+ *    🔴 버그수정 이력: 과거엔 재고 차감이 아예 없었으나, 발주서 페이지
+ *    쪽 계산식이 재고 차감하도록 고쳐지면서 "완전 일치" 원칙에 따라
+ *    이 위젯도 함께 수정함.)
  *
  * 🔴 company_id 는 useCompany() 에서만.
  * 🔴 calcOrderQty / calcSalesQty1m / calcSalesQty3m 은 calculations.ts 경유.
@@ -33,7 +36,7 @@ export function useOrderNeedEstimate(
   basis: OrderBasis,
   excludedCategories: ReadonlySet<string>,
 ): OrderNeedEstimate {
-  const { products, salesMap, categories, isLoading } =
+  const { products, salesMap, stockMap, categories, isLoading } =
     usePurchaseOrder(companyId);
 
   const estimate = useMemo(() => {
@@ -51,7 +54,8 @@ export function useOrderNeedEstimate(
       const qty6m = salesMap.get(p.id) ?? 0;
       const qty3m = calcSalesQty3m(qty6m);
       const baseQty = basis === '1m' ? calcSalesQty1m(qty3m) : qty3m;
-      const needDz = calcOrderQty(baseQty, p.unit_order || p.unit);
+      const stock = stockMap.get(p.id) ?? 0;
+      const needDz = calcOrderQty(baseQty, stock, p.unit_order || p.unit);
       if (needDz <= 0) continue;
 
       totalUsd += needDz * Number(p.unit_price_usd);
@@ -62,7 +66,7 @@ export function useOrderNeedEstimate(
       estimatedUsd: parseFloat(totalUsd.toFixed(2)),
       needCount,
     };
-  }, [products, salesMap, basis, excludedCategories, isLoading]);
+  }, [products, salesMap, stockMap, basis, excludedCategories, isLoading]);
 
   return { ...estimate, categories, isLoading };
 }
