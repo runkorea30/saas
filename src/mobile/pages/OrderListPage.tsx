@@ -385,6 +385,13 @@ function OrderGroupCard({
   // single 모드에서 어느 행이 선택되었는지 — 행 단위 border 강조용.
   const selectedSingleOrderId =
     viewSel?.kind === 'single' ? viewSel.orderId : null;
+  // 🟠 그룹 내 사진 첨부 대상 — 사용자가 그룹 내 행을 탭해 선택했으면 그 주문,
+  //    아직 아무 행도 선택하지 않았으면 기존과 동일하게 첫 주문(first)으로 폴백.
+  //    (버그수정: 이전에는 무조건 first 로 고정되어 있었음)
+  const targetOrder =
+    group.find((o) => o.id === selectedSingleOrderId) ?? first;
+  const targetIdx = group.findIndex((o) => o.id === targetOrder.id);
+  const targetLabel = targetIdx > 0 ? `추가${targetIdx}` : '최초';
 
   if (group.length === 1) {
     return (
@@ -621,111 +628,128 @@ function OrderGroupCard({
       {/* 묶음 전체 송장 통합 표시 */}
       <TrackingNumberStrip entries={trackingEntries} />
 
-      {/* 사진 — 묶음 내 모든 주문의 사진 통합. 모달은 본주문 ID 기준으로 진입. */}
+      {/* 사진 — 묶음 내 모든 주문의 사진 통합 표시. 촬영/추가는 현재 선택된 행
+          (targetOrder) 기준으로 진입. 그룹 내 행을 탭하면 대상이 바뀐다. */}
       <div
         style={{
           marginTop: 4,
           paddingTop: 8,
           borderTop: '1px solid var(--m-border)',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
+          flexDirection: 'column',
+          gap: 4,
         }}
       >
-        {hasPhoto ? (
-          <div
+        <span
+          style={{
+            fontSize: 10,
+            color: 'var(--m-text-secondary)',
+          }}
+        >
+          촬영대상: {targetLabel}
+        </span>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+          }}
+        >
+          {hasPhoto ? (
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenPhoto(targetOrder.id, targetOrder.customer?.id ?? null);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                cursor: 'pointer',
+                flex: 1,
+                minWidth: 0,
+              }}
+            >
+              {thumbs.map((p) => (
+                <div
+                  key={p.id}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 6,
+                    overflow: 'hidden',
+                    background: 'var(--m-border)',
+                    flex: '0 0 auto',
+                  }}
+                >
+                  <img
+                    src={p.storage_url}
+                    alt="출고사진"
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      display: 'block',
+                    }}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.visibility = 'hidden';
+                    }}
+                  />
+                </div>
+              ))}
+              {extra > 0 && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: 'var(--m-text-secondary)',
+                    marginLeft: 2,
+                  }}
+                >
+                  +{extra}
+                </span>
+              )}
+            </div>
+          ) : (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: 11,
+                color: 'var(--m-text-secondary)',
+              }}
+            >
+              <Camera size={12} />
+              <span>사진 없음</span>
+            </span>
+          )}
+          <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
-              onOpenPhoto(first.id, first.customer?.id ?? null);
+              onOpenPhoto(targetOrder.id, targetOrder.customer?.id ?? null);
             }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              cursor: 'pointer',
-              flex: 1,
-              minWidth: 0,
-            }}
-          >
-            {thumbs.map((p) => (
-              <div
-                key={p.id}
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 6,
-                  overflow: 'hidden',
-                  background: 'var(--m-border)',
-                  flex: '0 0 auto',
-                }}
-              >
-                <img
-                  src={p.storage_url}
-                  alt="출고사진"
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover',
-                    display: 'block',
-                  }}
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.visibility = 'hidden';
-                  }}
-                />
-              </div>
-            ))}
-            {extra > 0 && (
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: 'var(--m-text-secondary)',
-                  marginLeft: 2,
-                }}
-              >
-                +{extra}
-              </span>
-            )}
-          </div>
-        ) : (
-          <span
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: 4,
               fontSize: 11,
-              color: 'var(--m-text-secondary)',
+              fontWeight: 600,
+              padding: '4px 10px',
+              borderRadius: 999,
+              border: 0,
+              cursor: 'pointer',
+              background: hasPhoto ? 'var(--m-border)' : 'var(--m-primary)',
+              color: hasPhoto ? 'var(--m-text)' : '#ffffff',
+              flex: '0 0 auto',
             }}
           >
             <Camera size={12} />
-            <span>사진 없음</span>
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpenPhoto(first.id, first.customer?.id ?? null);
-          }}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            fontSize: 11,
-            fontWeight: 600,
-            padding: '4px 10px',
-            borderRadius: 999,
-            border: 0,
-            cursor: 'pointer',
-            background: hasPhoto ? 'var(--m-border)' : 'var(--m-primary)',
-            color: hasPhoto ? 'var(--m-text)' : '#ffffff',
-            flex: '0 0 auto',
-          }}
-        >
-          <Camera size={12} />
-          <span>{hasPhoto ? '사진 보기/추가' : '출고 촬영'}</span>
-        </button>
+            <span>{hasPhoto ? '사진 보기/추가' : '출고 촬영'}</span>
+          </button>
+        </div>
       </div>
     </div>
   );
