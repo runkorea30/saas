@@ -1037,7 +1037,10 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
                                 border: 'none',
                                 borderBottom: `1px solid var(--warning)`,
                                 borderRadius: 3,
-                                background: focusedId === r.id ? 'var(--accent-wash, #EFF6FF)' : 'var(--warning-wash)',
+                                // 🟡 focused 시 배경을 accent-wash(라이트 톤) 로 바꾸면 다크 테마의
+                                //    var(--ink) (밝은 회백색) 텍스트가 흰 배경에 흰 글씨로 안 보이는 문제.
+                                //    배경은 warning-wash 로 고정 유지하고 focus 표시는 outline 으로만.
+                                background: 'var(--warning-wash)',
                                 color: 'var(--ink)',
                                 fontSize: 12.5,
                                 outline: focusedId === r.id ? '2px solid var(--accent, #2563eb)' : 'none',
@@ -1078,7 +1081,10 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
                                 codeEdited ? 'var(--warning)' : 'var(--line)'
                               }`,
                               borderRadius: 3,
-                              background: focusedId === r.id ? 'var(--accent-wash, #EFF6FF)' : 'transparent',
+                              // 🟡 focused 시 밝은 accent-wash 배경으로 바꾸면 다크 테마의 var(--ink)
+                              //    (밝은 회백색) 텍스트가 흰 배경에 흰 글씨로 안 보인다. 배경은 투명
+                              //    유지하고 focus 표시는 outline 으로.
+                              background: 'transparent',
                               color: focusedId === r.id ? 'var(--ink)' : 'var(--ink-2)',
                               fontSize: 12.5,
                               outline: focusedId === r.id ? '2px solid var(--accent, #2563eb)' : 'none',
