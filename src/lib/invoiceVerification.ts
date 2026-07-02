@@ -42,6 +42,9 @@ export async function resetInvoiceVerificationForNewOrder(params: {
       invoice_rows: [] as unknown as Json,
       order_file_name: orderFileName,
       invoice_file_name: null,
+      // 🟠 인보이스 Storage 경로도 초기화. 이전 세션에 업로드된 PDF 파일 실체는
+      //    orphan 으로 남지만 dev 단계 수용 · 필요 시 별도 정리 작업으로.
+      invoice_file_path: null,
       last_tab: 'all',
       transfer_rows: [] as unknown as Json,
       transfer_saved_at: null,

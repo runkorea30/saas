@@ -1324,6 +1324,8 @@ export type Database = {
           invoice_rows: Json
           order_file_name: string | null
           invoice_file_name: string | null
+          /** Storage(documents 버킷) 경로. base64 아님 — 실제 PDF 파일 참조. */
+          invoice_file_path: string | null
           last_tab: string
           transfer_rows: Json
           transfer_saved_at: string | null
@@ -1340,6 +1342,7 @@ export type Database = {
           invoice_rows?: Json
           order_file_name?: string | null
           invoice_file_name?: string | null
+          invoice_file_path?: string | null
           last_tab?: string
           transfer_rows?: Json
           transfer_saved_at?: string | null
@@ -1356,6 +1359,7 @@ export type Database = {
           invoice_rows?: Json
           order_file_name?: string | null
           invoice_file_name?: string | null
+          invoice_file_path?: string | null
           last_tab?: string
           transfer_rows?: Json
           transfer_saved_at?: string | null

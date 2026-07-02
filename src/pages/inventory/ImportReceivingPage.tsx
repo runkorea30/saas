@@ -126,6 +126,62 @@ export function ImportReceivingPage() {
   const [noticeSeaCustomsDate, setNoticeSeaCustomsDate] = useState('');
   const [noticeSeaArrivalText, setNoticeSeaArrivalText] = useState('');
 
+  // 안내 설정에 자동 첨부된 인보이스 PDF (항공/해상 별). document_files 테이블에서 조회.
+  //  category:
+  //   - 'import_notice_invoice_air' → 항공(페덱스) 슬롯
+  //   - 'import_notice_invoice_sea' → 해상 슬롯
+  //  InvoiceUploadCard 의 "입고처리로 이관" 흐름에서 자동 upsert 됨.
+  type NoticeInvoiceFile = {
+    file_name: string;
+    file_path: string;
+    file_size: number | null;
+    uploaded_at: string | null;
+  };
+  const [noticeInvoiceAir, setNoticeInvoiceAir] = useState<NoticeInvoiceFile | null>(null);
+  const [noticeInvoiceSea, setNoticeInvoiceSea] = useState<NoticeInvoiceFile | null>(null);
+
+  // 안내 설정 탭 진입 시 첨부된 인보이스 PDF 정보 조회.
+  //  사용자 흐름: 인보이스 검증 → 이관 → activeTab 자동으로 receiving 이동 → 사용자가
+  //  나중에 안내 설정 탭 클릭 시 이 useEffect 가 트리거되어 최신 첨부 반영.
+  useEffect(() => {
+    if (!companyId) return;
+    if (activeTab !== 'portal') return;
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase
+        .from('document_files')
+        .select('category, file_name, file_path, file_size, uploaded_at')
+        .eq('company_id', companyId)
+        .in('category', ['import_notice_invoice_air', 'import_notice_invoice_sea']);
+      if (cancelled) return;
+      const air = data?.find((d) => d.category === 'import_notice_invoice_air') ?? null;
+      const sea = data?.find((d) => d.category === 'import_notice_invoice_sea') ?? null;
+      setNoticeInvoiceAir(
+        air
+          ? {
+              file_name: air.file_name,
+              file_path: air.file_path,
+              file_size: air.file_size,
+              uploaded_at: air.uploaded_at,
+            }
+          : null,
+      );
+      setNoticeInvoiceSea(
+        sea
+          ? {
+              file_name: sea.file_name,
+              file_path: sea.file_path,
+              file_size: sea.file_size,
+              uploaded_at: sea.uploaded_at,
+            }
+          : null,
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, activeTab]);
+
   // 인보이스 검증 → 입고처리 이관본 복원 (companyId 로드 시 1회).
   // rowInputs 가 초기 빈 상태일 때만 덮어씀 — 사용자가 이미 편집 중이면 보존.
   const [transferLoaded, setTransferLoaded] = useState(false);
@@ -749,6 +805,60 @@ export function ImportReceivingPage() {
               );
             })}
           </div>
+
+          {/* 첨부된 인보이스 PDF (자동 반영) — 항공/해상 각 슬롯. 인보이스 검증 카드의
+              "입고처리로 이관" 클릭 시 document_files 에 자동 upsert 됨. */}
+          {(() => {
+            const rec = isSea ? noticeInvoiceSea : noticeInvoiceAir;
+            const publicUrl = rec
+              ? supabase.storage
+                  .from('documents')
+                  .getPublicUrl(rec.file_path).data.publicUrl
+              : null;
+            return (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '10px 12px',
+                  marginBottom: 14,
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 6,
+                  fontSize: 12.5,
+                }}
+              >
+                <span style={{ color: 'var(--ink-3)', flexShrink: 0 }}>인보이스 PDF</span>
+                {rec && publicUrl ? (
+                  <>
+                    <a
+                      href={publicUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: 'var(--brand)', fontWeight: 500 }}
+                    >
+                      {rec.file_name}
+                    </a>
+                    {rec.file_size != null && (
+                      <span style={{ color: 'var(--ink-3)', fontSize: 11.5 }}>
+                        ({Math.max(1, Math.round(rec.file_size / 1024))}KB)
+                      </span>
+                    )}
+                    {rec.uploaded_at && (
+                      <span style={{ color: 'var(--ink-3)', fontSize: 11.5, marginLeft: 'auto' }}>
+                        {new Date(rec.uploaded_at).toLocaleDateString('ko-KR')} 첨부
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span style={{ color: 'var(--ink-3)' }}>
+                    아직 첨부된 인보이스가 없습니다. 인보이스 검증에서 "입고처리로 이관" 시 자동으로 반영됩니다.
+                  </span>
+                )}
+              </div>
+            );
+          })()}
 
           {/* 상태 선택 (현재 탭 기준) */}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>

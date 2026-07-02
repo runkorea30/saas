@@ -110,9 +110,120 @@ const STATUS_META: Record<
 
 // ───────────────────────────────────────────────────────────
 
+const INVOICE_STORAGE_BUCKET = 'documents';
+
+/**
+ * 인보이스 PDF 를 Storage 에 업로드하고 그 경로를 반환한다.
+ * 경로 컨벤션: `{companyId}/invoice-verifications/{timestamp}-{fileNameSafe}.pdf`
+ *  - timestamp 로 유일성 확보
+ *  - filename 에 한글/공백 있어도 안전하도록 별도 정규화
+ */
+async function uploadInvoicePdf(
+  companyId: string,
+  file: File,
+): Promise<string> {
+  const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]+/g, '_');
+  const path = `${companyId}/invoice-verifications/${Date.now()}-${safeName}`;
+  const { error } = await supabase.storage
+    .from(INVOICE_STORAGE_BUCKET)
+    .upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: 'application/pdf',
+    });
+  if (error) throw error;
+  return path;
+}
+
+/** 기존 Storage 경로의 파일을 조용히 삭제 (실패해도 흐름 안 막음). */
+async function removeInvoicePdfSilently(path: string): Promise<void> {
+  try {
+    await supabase.storage.from(INVOICE_STORAGE_BUCKET).remove([path]);
+  } catch {
+    /* 이미 없어졌거나 권한 문제여도 UI 방해하지 않음 */
+  }
+}
+
+/** 항공/해상 안내 설정의 인보이스 첨부 category 값. */
+type NoticeInvoiceCategory =
+  | 'import_notice_invoice_air'
+  | 'import_notice_invoice_sea';
+
+function noticeCategoryFor(mode: 'air' | 'sea'): NoticeInvoiceCategory {
+  return mode === 'sea' ? 'import_notice_invoice_sea' : 'import_notice_invoice_air';
+}
+
+/**
+ * 입고처리 이관 시 호출: 현재 인보이스 PDF 를 거래처 안내 설정에 첨부.
+ *  1) 원본 인보이스 파일(sourcePath) 을 안내용 별도 경로로 Storage 복사
+ *     (원본은 세션 리셋 시 삭제될 수 있어 안내용은 독립 라이프사이클 필요)
+ *  2) 같은 (company_id, category) 의 기존 document_files 레코드가 있으면 그 Storage 파일 삭제 + DB 레코드 삭제
+ *  3) 새 레코드 INSERT
+ *
+ * category: 'import_notice_invoice_air' | 'import_notice_invoice_sea'
+ */
+async function attachInvoiceToNotice(params: {
+  companyId: string;
+  mode: 'air' | 'sea';
+  sourcePath: string;
+  fileName: string;
+  fileSize?: number | null;
+  mimeType?: string | null;
+}): Promise<void> {
+  const { companyId, mode, sourcePath, fileName, fileSize, mimeType } = params;
+  const category = noticeCategoryFor(mode);
+  const destPath = `${companyId}/import-notice-invoices/${mode}/${Date.now()}-${fileName.replace(/[^a-zA-Z0-9.\-_]+/g, '_')}`;
+
+  // 1) 안내용 경로로 복사 (원본은 세션 관리 대상이라 별도로 유지).
+  const { error: copyError } = await supabase.storage
+    .from(INVOICE_STORAGE_BUCKET)
+    .copy(sourcePath, destPath);
+  if (copyError) throw copyError;
+
+  // 2) 기존 안내 첨부 조회 → Storage 파일 삭제 → DB 레코드 삭제 (덮어쓰기 정책).
+  const { data: existing } = await supabase
+    .from('document_files')
+    .select('id, file_path')
+    .eq('company_id', companyId)
+    .eq('category', category);
+  if (existing && existing.length > 0) {
+    const oldPaths = existing.map((r) => r.file_path).filter(Boolean);
+    if (oldPaths.length > 0) {
+      await supabase.storage.from(INVOICE_STORAGE_BUCKET).remove(oldPaths).catch(() => undefined);
+    }
+    await supabase
+      .from('document_files')
+      .delete()
+      .eq('company_id', companyId)
+      .eq('category', category);
+  }
+
+  // 3) 새 레코드 INSERT.
+  const { error: insertError } = await supabase.from('document_files').insert({
+    company_id: companyId,
+    category,
+    file_name: fileName,
+    file_path: destPath,
+    file_size: fileSize ?? null,
+    mime_type: mimeType ?? 'application/pdf',
+  });
+  if (insertError) throw insertError;
+}
+
 export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Props) {
   const [orderFile, setOrderFile] = useState<File | null>(null);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
+  /**
+   * Storage 에 업로드된 인보이스 PDF 의 경로 (documents 버킷).
+   * DB(`invoice_verifications.invoice_file_path`) 와 동기화. "입고처리로 이관" 시
+   * 거래처 안내 설정으로 이 경로를 복사·연결하는 데 사용.
+   */
+  const [invoiceFilePath, setInvoiceFilePath] = useState<string | null>(null);
+  /**
+   * 입고처리 이관 시 이 인보이스 PDF 를 거래처 안내 설정의 어느 슬롯(항공/해상) 에
+   * 첨부할지. 이관 버튼 옆 라디오로 선택. 기본은 페덱스=항공.
+   */
+  const [shippingMode, setShippingMode] = useState<'air' | 'sea'>('air');
   const [parsing, setParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [comparison, setComparison] = useState<{
@@ -170,6 +281,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     currentTab: string,
     orderFileName?: string,
     invoiceFileName?: string,
+    invoiceFilePathArg?: string | null,
   ) => {
     if (!companyId) return;
     setDbSaving(true);
@@ -186,6 +298,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
             invoice_rows: data.invoiceRows as unknown as Json,
             order_file_name: orderFileName ?? null,
             invoice_file_name: invoiceFileName ?? null,
+            invoice_file_path: invoiceFilePathArg ?? null,
             last_tab: currentTab,
             updated_at: new Date().toISOString(),
           },
@@ -221,6 +334,8 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
         // 파일명 복원 (File 객체 자체는 복원 불가 — 표시 목적)
         if (data.order_file_name) setOrderFile({ name: data.order_file_name } as File);
         if (data.invoice_file_name) setInvoiceFile({ name: data.invoice_file_name } as File);
+        // Storage 경로 복원 — 입고처리로 이관 시 참조.
+        setInvoiceFilePath(data.invoice_file_path ?? null);
       });
   }, [companyId, dbLoaded]);
 
@@ -261,7 +376,13 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       return;
     }
     if (!comparison || !companyId) return;
-    void saveToDb(comparison, tab, orderFile?.name, invoiceFile?.name);
+    void saveToDb(
+      comparison,
+      tab,
+      orderFile?.name,
+      invoiceFile?.name,
+      invoiceFilePath,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comparison, tab]);
 
@@ -289,7 +410,22 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       // 인보이스도 동일한 분기: File 이면 파싱, 아니면 DB 복원된 invoiceRows 재사용.
       let invoice: InvoiceParsed;
       if (invoiceFile instanceof File) {
-        invoice = await parseInvoicePDF(invoiceFile);
+        // 파싱 (Claude 프록시) 과 Storage 업로드를 병렬로 수행.
+        //  Storage 업로드는 나중에 "입고처리로 이관" 시 거래처 안내 설정으로
+        //  실제 PDF 를 넘겨주기 위해 필요. 이전 세션의 파일이 있으면 새 파일 업로드 성공
+        //  후 별도로 삭제 (성공 순서 보장 · 실패 시에도 새 파일이 잃어지지 않도록).
+        const previousPath = invoiceFilePath;
+        const [parsedInvoice, uploadedPath] = await Promise.all([
+          parseInvoicePDF(invoiceFile),
+          companyId ? uploadInvoicePdf(companyId, invoiceFile) : Promise.resolve<string | null>(null),
+        ]);
+        invoice = parsedInvoice;
+        if (uploadedPath) {
+          setInvoiceFilePath(uploadedPath);
+          if (previousPath && previousPath !== uploadedPath) {
+            void removeInvoicePdfSilently(previousPath);
+          }
+        }
       } else if (comparison && comparison.invoiceRows.length > 0) {
         invoice = {
           invoice_no: comparison.invoiceNo,
@@ -569,6 +705,33 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
           console.error('[transfer_rows.save]', error);
         }
       })();
+
+      // 🟠 인보이스 PDF 가 실제로 Storage 에 업로드된 상태라면(invoiceFilePath 존재)
+      //    거래처 안내 설정(항공/해상) 에 자동 첨부. 원본은 세션과 함께 남기고
+      //    안내용 별도 경로로 복사 → document_files 에 UPSERT (기존 것은 덮어쓰기).
+      if (invoiceFilePath && invoiceFile && invoiceFile.name) {
+        const fileName = invoiceFile.name;
+        const fileSize = invoiceFile instanceof File ? invoiceFile.size : null;
+        const mimeType = invoiceFile instanceof File ? invoiceFile.type : 'application/pdf';
+        void (async () => {
+          try {
+            await attachInvoiceToNotice({
+              companyId,
+              mode: shippingMode,
+              sourcePath: invoiceFilePath,
+              fileName,
+              fileSize,
+              mimeType,
+            });
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.error('[attachInvoiceToNotice]', e);
+            setError(
+              `거래처 안내 설정에 인보이스 첨부 실패: ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+        })();
+      }
     }
     onFill(rows, {
       invoiceNumber: comparison.invoiceNo,
@@ -584,6 +747,11 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     setComparison(null);
     setError(null);
     setTab('all');
+    // 세션 리셋 시 세션 소유의 Storage 원본 인보이스 파일도 함께 삭제.
+    // 이미 안내 설정 쪽으로 이관됐다면 그건 별도 경로로 복사돼 있어 영향 없음.
+    const orphanedPath = invoiceFilePath;
+    setInvoiceFilePath(null);
+    if (orphanedPath) void removeInvoicePdfSilently(orphanedPath);
     if (companyId) {
       // 🔴 PostgrestBuilder thenable — await 로 실행 보장.
       void (async () => {
@@ -1327,34 +1495,68 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
             >
               + 행 추가
             </button>
-            <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              type="button"
-              className="btn-base"
-              onClick={handleReset}
-              style={{ height: 32, fontSize: 12.5 }}
-            >
-              취소
-            </button>
-            <button
-              type="button"
-              className="btn-base primary"
-              onClick={handleFill}
-              disabled={
-                comparison.rows.filter(
-                  (r) => r.status !== 'order_only' && r.invoiceQty > 0,
-                ).length === 0
-              }
-              style={{ height: 32, fontSize: 12.5 }}
-            >
-              입고처리로 이관 (
-              {
-                comparison.rows.filter(
-                  (r) => r.status !== 'order_only' && r.invoiceQty > 0,
-                ).length
-              }
-              건)
-            </button>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              {/* 인보이스 PDF 를 안내 설정 어느 슬롯에 붙일지 라디오. 실제 파일이 없어도
+                  라디오는 노출 (사용자가 실수 방지용으로 늘 선택하는 습관). */}
+              <div
+                role="radiogroup"
+                aria-label="배송 방식"
+                style={{
+                  display: 'flex',
+                  gap: 12,
+                  alignItems: 'center',
+                  fontSize: 12,
+                  color: 'var(--ink-2)',
+                }}
+              >
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="ship-mode"
+                    value="air"
+                    checked={shippingMode === 'air'}
+                    onChange={() => setShippingMode('air')}
+                  />
+                  <span>항공(페덱스)</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="ship-mode"
+                    value="sea"
+                    checked={shippingMode === 'sea'}
+                    onChange={() => setShippingMode('sea')}
+                  />
+                  <span>해상</span>
+                </label>
+              </div>
+              <button
+                type="button"
+                className="btn-base"
+                onClick={handleReset}
+                style={{ height: 32, fontSize: 12.5 }}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                className="btn-base primary"
+                onClick={handleFill}
+                disabled={
+                  comparison.rows.filter(
+                    (r) => r.status !== 'order_only' && r.invoiceQty > 0,
+                  ).length === 0
+                }
+                style={{ height: 32, fontSize: 12.5 }}
+              >
+                입고처리로 이관 (
+                {
+                  comparison.rows.filter(
+                    (r) => r.status !== 'order_only' && r.invoiceQty > 0,
+                  ).length
+                }
+                건)
+              </button>
             </div>
           </div>
         </>
