@@ -22,6 +22,8 @@ import {
   fetchSavedSnapshot,
   usePurchaseOrder,
 } from '@/hooks/queries/usePurchaseOrder';
+import { resetInvoiceVerificationForNewOrder } from '@/lib/invoiceVerification';
+import type { OrderSheetRow } from '@/utils/orderSheetParser';
 import { useOrderNeedEstimate } from '@/hooks/queries/useOrderNeedEstimate';
 import { usePurchaseOrderExcluded } from '@/hooks/usePurchaseOrderExcluded';
 import { useToast } from '@/components/ui/Toast';
@@ -436,7 +438,35 @@ export function PurchaseOrderPage() {
     };
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'ORDER SHEET');
-    XLSX.writeFile(wb, `ORDER_SHEET_${dateStr}.xlsx`);
+    const fileName = `ORDER_SHEET_${dateStr}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+
+    // 🟠 다운로드된 발주서를 수입/매입 > 인보이스 검증의 "주문서" 슬롯에 자동 반영.
+    //    company 당 1행 UPSERT. 인보이스 관련 필드는 초기화.
+    const orderRows: OrderSheetRow[] = lines.map((l) => ({
+      code: l.code,
+      description: l.name,
+      unit: l.unit === 'EA' ? 'EA' : 'DZ',
+      price: typeof l.price === 'number' ? l.price : 0,
+      qty: l.qty,
+      amount: l.amount,
+    }));
+    try {
+      await resetInvoiceVerificationForNewOrder({
+        companyId,
+        orderRows,
+        orderFileName: fileName,
+      });
+      showToast({
+        kind: 'success',
+        text: '엑셀 다운로드 완료 · 인보이스 검증에 반영됨',
+      });
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: `엑셀 다운로드는 완료됐지만 인보이스 검증 반영 실패: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
   };
 
   const handleCategoryClick = (cat: string) => setSelectedCategory(cat);
