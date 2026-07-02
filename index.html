@@ -5,14 +5,18 @@
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-    <!-- PWA — /mobile 라우트에서 홈화면 추가 지원 -->
-    <link rel="manifest" href="/manifest.json" />
-    <link rel="apple-touch-icon" href="/icon.svg" />
-    <meta name="theme-color" content="#6B1F2A" />
+    <!-- PWA — 모든 라우트 공통 캐퍼빌리티 태그 -->
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="OPS" />
+
+    <!-- JS 차단 환경 폴백 — OPS 기본 브랜딩 -->
+    <noscript>
+      <link rel="manifest" href="/manifest.json" />
+      <link rel="apple-touch-icon" href="/icon.svg" />
+      <meta name="theme-color" content="#6B1F2A" />
+      <meta name="apple-mobile-web-app-title" content="OPS" />
+    </noscript>
 
     <!-- 폰트 로딩: Pretendard Variable (한글) + Inter Tight (숫자/영문) + Fraunces (디스플레이 세리프) -->
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
@@ -32,31 +36,60 @@
     <title>MochiCraft OPS</title>
 
     <!--
-      테마 FOUC 방지 — React 마운트 이전에 localStorage 캐시 값을 즉시
-      <html> 의 attribute 로 반영. 라우트별 분기:
+      테마 FOUC 방지 + PWA 경로별 브랜딩 — React 마운트 이전에 즉시 반영.
+      테마 분기:
         /customer-order   → data-portal-theme (라이트 / 다크그레이 2종, 기본 다크그레이)
+        /mobile, /mobile-order → 자체 토큰 사용, data-theme 미지정
         그 외 OPS         → data-theme        (라이트 / dark-true/gray/sepia, 기본 라이트)
-        /mobile/*         → 둘 다 설정 안 함 (모바일은 자체 토큰 + 라이트 강제)
-      훅(useTheme / usePortalTheme) 마운트 후 서버 값으로 한 번 더 동기화.
+      PWA 분기:
+        /mobile-order → manifest-mobile-order.json + icon-angelus.svg + "Angelus 주문"
+        그 외         → manifest.json + icon.svg + "OPS"
     -->
     <script>
       (function () {
         try {
           var path = window.location.pathname;
           var isPortal = path === '/customer-order';
-          var isMobile = path.indexOf('/mobile') === 0;
+          var isMobileOrder = path.indexOf('/mobile-order') === 0;
+          var isMobile = !isMobileOrder && path.indexOf('/mobile') === 0;
+
           if (isPortal) {
             var pt = localStorage.getItem('mc.portal.theme');
             var portalTheme = pt === 'light' ? 'light' : 'dark-gray';
             document.documentElement.setAttribute('data-portal-theme', portalTheme);
-          } else if (!isMobile) {
+          } else if (!isMobile && !isMobileOrder) {
             var t = localStorage.getItem('mc.theme');
             if (t === 'dark-true' || t === 'dark-gray' || t === 'dark-sepia') {
               document.documentElement.setAttribute('data-theme', t);
             }
           }
+
+          var head = document.head;
+          var manifest = document.createElement('link');
+          manifest.rel = 'manifest';
+          manifest.href = isMobileOrder ? '/manifest-mobile-order.json' : '/manifest.json';
+          head.appendChild(manifest);
+
+          var touchIcon = document.createElement('link');
+          touchIcon.rel = 'apple-touch-icon';
+          touchIcon.href = isMobileOrder ? '/icon-angelus.svg' : '/icon.svg';
+          head.appendChild(touchIcon);
+
+          var appleTitle = document.createElement('meta');
+          appleTitle.name = 'apple-mobile-web-app-title';
+          appleTitle.content = isMobileOrder ? 'Angelus 주문' : 'OPS';
+          head.appendChild(appleTitle);
+
+          var themeColor = document.createElement('meta');
+          themeColor.name = 'theme-color';
+          themeColor.content = isMobileOrder ? '#0f0f0f' : '#6B1F2A';
+          head.appendChild(themeColor);
+
+          if (isMobileOrder) {
+            document.title = 'Angelus 주문';
+          }
         } catch (e) {
-          /* localStorage 차단 환경 — 기본 라이트로 폴백 */
+          /* localStorage 차단 환경 — noscript 폴백 사용 */
         }
       })();
     </script>
