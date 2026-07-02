@@ -1003,20 +1003,28 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
                               }
                               className="num"
                               style={{
+                                // 🔴 정상 동작하는 수량/단가 인풋과 완전히 동일한 배경/글자색 조합
+                                //    (--surface + --ink) 사용. 이 조합은 모든 테마(라이트/다크/커피)
+                                //    에서 대비 확보됨:
+                                //     - 라이트: #FDFAF4 배경 + #23201C 글자
+                                //     - 다크:   #1A1A1A 배경 + #E8E8E6 글자
+                                //     - 커피:   #3A3A38 배경 + #F1EFE8 글자
+                                //    focused 시에도 accent-wash(밝은 파랑 #EFF6FF 고정) 로 바꾸지
+                                //    않는다 — 다크 테마에서 흰 배경/흰 글자 충돌 재발 방지.
+                                //    포커스 표시는 border color 변경(warning → accent) 으로만.
                                 width: '100%',
-                                height: 24,
-                                padding: '0 4px',
-                                border: 'none',
-                                borderBottom: `1px solid var(--warning)`,
-                                borderRadius: 3,
-                                // 🟡 focused 시 배경을 accent-wash(라이트 톤) 로 바꾸면 다크 테마의
-                                //    var(--ink) (밝은 회백색) 텍스트가 흰 배경에 흰 글씨로 안 보이는 문제.
-                                //    배경은 warning-wash 로 고정 유지하고 focus 표시는 outline 으로만.
-                                background: 'var(--warning-wash)',
+                                height: 26,
+                                padding: '0 6px',
+                                border: `1px solid ${
+                                  focusedId === r.id
+                                    ? 'var(--accent, #2563eb)'
+                                    : 'var(--warning)'
+                                }`,
+                                borderRadius: 4,
+                                background: 'var(--surface)',
                                 color: 'var(--ink)',
                                 fontSize: 12.5,
-                                outline: focusedId === r.id ? '2px solid var(--accent, #2563eb)' : 'none',
-                                outlineOffset: 1,
+                                outline: 'none',
                               }}
                             />
                             <div style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 2, lineHeight: 1.3 }}>
@@ -1045,22 +1053,23 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
                             }
                             className="num"
                             style={{
+                              // 🔴 수량/단가 인풋과 동일한 --surface/--ink 조합. 모든 테마에서 대비 확보.
+                              //    focused 시 배경은 그대로 두고 border color 만 accent 로 표시.
                               width: '100%',
-                              height: 24,
-                              padding: '0 4px',
-                              border: 'none',
-                              borderBottom: `1px ${codeEdited ? 'solid' : 'dashed'} ${
-                                codeEdited ? 'var(--warning)' : 'var(--line)'
+                              height: 26,
+                              padding: '0 6px',
+                              border: `1px solid ${
+                                focusedId === r.id
+                                  ? 'var(--accent, #2563eb)'
+                                  : codeEdited
+                                    ? 'var(--warning)'
+                                    : 'var(--line)'
                               }`,
-                              borderRadius: 3,
-                              // 🟡 focused 시 밝은 accent-wash 배경으로 바꾸면 다크 테마의 var(--ink)
-                              //    (밝은 회백색) 텍스트가 흰 배경에 흰 글씨로 안 보인다. 배경은 투명
-                              //    유지하고 focus 표시는 outline 으로.
-                              background: 'transparent',
-                              color: focusedId === r.id ? 'var(--ink)' : 'var(--ink-2)',
+                              borderRadius: 4,
+                              background: 'var(--surface)',
+                              color: 'var(--ink)',
                               fontSize: 12.5,
-                              outline: focusedId === r.id ? '2px solid var(--accent, #2563eb)' : 'none',
-                              outlineOffset: 1,
+                              outline: 'none',
                             }}
                           />
                         )}
