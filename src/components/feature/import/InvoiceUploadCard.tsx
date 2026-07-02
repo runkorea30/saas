@@ -527,45 +527,10 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     });
   };
 
-  // 주문서 코드 셀 입력 변경 (order_only 행 전용) — 화면 즉시 반영
-  const handleOrderCodeChange = (rowId: string, rawCode: string) => {
-    setComparison((prev) => {
-      if (!prev) return prev;
-      const nextRows = prev.rows.map((row) =>
-        row.id === rowId ? { ...row, orderCode: rawCode } : row,
-      );
-      return { ...prev, rows: nextRows };
-    });
-  };
-
-  // 주문서 코드 셀 blur — 인보이스 행과 병합 시도.
-  //  handleCodeBlur 와 동일하게 전체 재매칭으로 처리. 편집된 orderCode 가 어느
-  //  invoice_only 행의 code 와 정확히 일치하면 compareOrderInvoice 가 두 행을
-  //  하나로 합쳐 준다. 매칭 상대가 없으면 order_only 그대로 유지.
-  const handleOrderCodeBlur = (rowId: string, rawNewCode: string) => {
-    setComparison((prev) => {
-      if (!prev) return prev;
-      const newCode = rawNewCode.trim();
-      const editedRows = prev.rows.map((row) =>
-        row.id === rowId ? { ...row, orderCode: newCode } : row,
-      );
-      const rebuilt = rebuildComparisonFromEdits(
-        {
-          rows: editedRows,
-          invoiceNo: prev.invoiceNo,
-          invoiceDate: prev.invoiceDate,
-        },
-        productNameByCode,
-        productCategoryByCode,
-      );
-      return {
-        ...prev,
-        rows: rebuilt.rows,
-        orderRows: rebuilt.orderRows,
-        invoiceRows: rebuilt.invoiceRows,
-      };
-    });
-  };
+  // 주문서 코드 셀 편집 핸들러는 UI 방향 정정(invoice_only 쪽 힌트) 이후 참조처가 사라져
+  // 삭제. 로직적으로는 handleCodeChange/handleCodeBlur 가 code 필드를 통해 양방향 편집을
+  // 모두 처리한다. rebuildComparisonFromEdits 의 fallback 이 order_only 행에서 code 편집
+  // 시 편집 값을 orderRows 로 흘려보내는 안전망 역할.
 
   const visibleRows = useMemo(() => {
     if (!comparison) return [];
@@ -1013,22 +978,29 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
                                 : undefined,
                         }}
                       >
-                        {r.status === 'order_only' ? (
+                        {/* 인보이스만 행: 인보이스 PDF 파싱 시 코드가 잘리는 경우가 있어
+                            (예: 72204000soft → 72204000S) 사용자가 여기서 주문서의 원본 코드로
+                            바로잡도록 힌트 UI 표시. blur 시 rebuildComparisonFromEdits 로 재매칭. */}
+                        {r.status === 'invoice_only' ? (
                           <div>
                             <input
                               type="text"
-                              value={r.orderCode}
-                              onChange={(e) => handleOrderCodeChange(r.id, e.target.value)}
+                              value={r.code}
+                              onChange={(e) => handleCodeChange(r.id, e.target.value)}
                               onBlur={(e) => {
-                                handleOrderCodeBlur(r.id, e.target.value);
+                                handleCodeBlur(r.id, e.target.value);
                                 setFocusedId(null);
                               }}
                               onFocus={(e) => {
                                 e.currentTarget.select();
                                 setFocusedId(r.id);
                               }}
-                              placeholder="인보이스 코드 입력 후 Enter"
-                              title="인보이스의 제품코드를 입력하면 해당 행과 자동 병합됩니다"
+                              placeholder="주문서 코드 입력 후 Enter"
+                              title={
+                                codeEdited
+                                  ? `원본 코드: ${r.originalCode}`
+                                  : '주문서의 제품코드를 입력하면 해당 행과 자동 병합됩니다'
+                              }
                               className="num"
                               style={{
                                 width: '100%',
@@ -1048,7 +1020,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
                               }}
                             />
                             <div style={{ fontSize: 10, color: 'var(--ink-3)', marginTop: 2, lineHeight: 1.3 }}>
-                              ↑ 인보이스 코드로 수정
+                              ↑ 주문서 코드로 수정
                             </div>
                           </div>
                         ) : (
@@ -1564,17 +1536,23 @@ function rebuildComparisonFromEdits(
   const revisedInvoiceRows: InvoiceParsedRow[] = [];
 
   for (const row of edited.rows) {
-    // 주문 데이터 존재: invoice_only 가 아니고 orderCode 가 채워진 상태.
-    if (row.status !== 'invoice_only' && row.orderCode) {
-      const price = row.orderPrice ?? 0;
-      revisedOrderRows.push({
-        code: row.orderCode,
-        description: row.description,
-        unit: row.unit,
-        qty: row.orderQty,
-        price,
-        amount: Number((price * row.orderQty).toFixed(2)),
-      });
+    // 주문 데이터 존재: invoice_only 가 아닌 경우.
+    // order_only 행에서 사용자가 (인보이스 코드 셀 힌트가 없는 상태로) 좌측 코드 셀을
+    // 직접 편집한 경우엔 편집이 code 필드에 들어가고 orderCode 는 원본 그대로 남을 수
+    // 있어, orderCode 가 비어있거나 편집이 code 쪽에 있는 경우 code 를 fallback 으로.
+    if (row.status !== 'invoice_only') {
+      const orderCode = row.orderCode || row.code;
+      if (orderCode) {
+        const price = row.orderPrice ?? 0;
+        revisedOrderRows.push({
+          code: orderCode,
+          description: row.description,
+          unit: row.unit,
+          qty: row.orderQty,
+          price,
+          amount: Number((price * row.orderQty).toFixed(2)),
+        });
+      }
     }
     // 인보이스 데이터 존재: order_only 가 아니고 code 가 채워진 상태.
     if (row.status !== 'order_only' && row.code) {
