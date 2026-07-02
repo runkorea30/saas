@@ -497,71 +497,33 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     });
   };
 
-  // 코드 셀 blur — 새 코드로 OPS / 주문서 / 인보이스 재매칭 후 상태 재계산.
+  // 코드 셀 blur — 사용자 편집 반영 후 전체 재매칭.
+  //  기존엔 편집된 행만 국소적으로 다시 매칭했으나, 이 방식으로는
+  //  invoice_only 행에서 code 를 order_only 행의 orderCode 와 일치하도록 고쳐도
+  //  두 행이 하나로 합쳐지지 않았다. rebuildComparisonFromEdits 로 orderRows /
+  //  invoiceRows 를 재구성해 처음부터 다시 매칭하면 병합 · 상태 재판정이 자동 처리됨.
   const handleCodeBlur = (rowId: string, rawNewCode: string) => {
     setComparison((prev) => {
       if (!prev) return prev;
-      const nextRows = prev.rows.map((row) => {
-        if (row.id !== rowId) return row;
-        const newCode = rawNewCode.trim();
-        const normNew = normalizeCode(newCode);
-        const normCur = normalizeCode(row.code);
-
-        // 정규화 형태가 동일하면 재매칭 스킵 (사용자 수량 편집 보존).
-        if (normNew === normCur) {
-          return newCode !== row.code ? { ...row, code: newCode } : row;
-        }
-
-        const matchedOrder = prev.orderRows.find(
-          (r) => normalizeCode(r.code) === normNew,
-        );
-        const matchedInvoice = prev.invoiceRows.find(
-          (r) => normalizeCode(r.item_code) === normNew,
-        );
-        const opsName = productNameByCode.get(normNew);
-        const isInOps = opsName !== undefined;
-
-        const newOrderQty = matchedOrder?.qty ?? 0;
-        const newOrderPrice = matchedOrder?.price;
-        const newInvoiceQty = matchedInvoice?.qty_shipped ?? 0;
-        const newInvoicePrice = matchedInvoice?.price ?? 0;
-        const newAmount = matchedInvoice?.amount ?? 0;
-        const newUnit = (matchedOrder?.unit ??
-          matchedInvoice?.unit ??
-          row.unit) as 'DZ' | 'EA';
-        const newDesc =
-          opsName ||
-          matchedInvoice?.description ||
-          matchedOrder?.description ||
-          '';
-
-        return {
-          ...row,
-          code: newCode,
-          orderCode: matchedOrder?.code ?? '',
-          description: newDesc,
-          unit: newUnit,
-          orderQty: newOrderQty,
-          originalOrderQty: newOrderQty,
-          invoiceQty: newInvoiceQty,
-          originalInvoiceQty: newInvoiceQty, // 새 매칭 기준 baseline 으로 리셋
-          orderPrice: newOrderPrice,
-          originalOrderPrice: newOrderPrice,
-          invoicePrice: newInvoicePrice,
-          originalInvoicePrice: newInvoicePrice,
-          amount: newAmount,
-          isInOps,
-          category: productCategoryByCode.get(normNew) ?? '',
-          status: calcStatus(
-            newOrderQty,
-            newInvoiceQty,
-            newInvoicePrice,
-            newOrderPrice,
-            isInOps,
-          ),
-        };
-      });
-      return { ...prev, rows: nextRows };
+      const newCode = rawNewCode.trim();
+      const editedRows = prev.rows.map((row) =>
+        row.id === rowId ? { ...row, code: newCode } : row,
+      );
+      const rebuilt = rebuildComparisonFromEdits(
+        {
+          rows: editedRows,
+          invoiceNo: prev.invoiceNo,
+          invoiceDate: prev.invoiceDate,
+        },
+        productNameByCode,
+        productCategoryByCode,
+      );
+      return {
+        ...prev,
+        rows: rebuilt.rows,
+        orderRows: rebuilt.orderRows,
+        invoiceRows: rebuilt.invoiceRows,
+      };
     });
   };
 
@@ -576,61 +538,32 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     });
   };
 
-  // 주문서 코드 셀 blur — 인보이스 행과 병합 시도
+  // 주문서 코드 셀 blur — 인보이스 행과 병합 시도.
+  //  handleCodeBlur 와 동일하게 전체 재매칭으로 처리. 편집된 orderCode 가 어느
+  //  invoice_only 행의 code 와 정확히 일치하면 compareOrderInvoice 가 두 행을
+  //  하나로 합쳐 준다. 매칭 상대가 없으면 order_only 그대로 유지.
   const handleOrderCodeBlur = (rowId: string, rawNewCode: string) => {
     setComparison((prev) => {
       if (!prev) return prev;
-
       const newCode = rawNewCode.trim();
-      const normNew = normalizeCode(newCode);
-
-      const editedRow = prev.rows.find((r) => r.id === rowId);
-      if (!editedRow) return prev;
-
-      // 정규화 변화 없으면 스킵
-      if (normNew === normalizeCode(editedRow.orderCode)) {
-        return editedRow.orderCode !== newCode
-          ? { ...prev, rows: prev.rows.map((r) => r.id === rowId ? { ...r, orderCode: newCode } : r) }
-          : prev;
-      }
-
-      // 입력 코드와 일치하는 기존 행 탐색 (자기 자신 제외)
-      const targetRow = prev.rows.find(
-        (r) => r.id !== rowId && normalizeCode(r.code) === normNew,
+      const editedRows = prev.rows.map((row) =>
+        row.id === rowId ? { ...row, orderCode: newCode } : row,
       );
-
-      if (targetRow) {
-        // 병합: targetRow 에 editedRow 의 주문 데이터 이식하고 editedRow 삭제
-        const mergedOrderQty = editedRow.orderQty;
-        const mergedOrderPrice = editedRow.orderPrice;
-        const mergedRows = prev.rows
-          .filter((r) => r.id !== rowId)
-          .map((r) => {
-            if (r.id !== targetRow.id) return r;
-            return {
-              ...r,
-              orderQty: mergedOrderQty,
-              originalOrderQty: mergedOrderQty,
-              orderPrice: mergedOrderPrice,
-              originalOrderPrice: mergedOrderPrice,
-              orderCode: newCode,
-              status: calcStatus(
-                mergedOrderQty,
-                r.invoiceQty,
-                r.invoicePrice,
-                mergedOrderPrice,
-                r.isInOps,
-              ),
-            };
-          });
-        return { ...prev, rows: mergedRows };
-      }
-
-      // 매칭 행 없음 — orderCode 만 업데이트
-      const nextRows = prev.rows.map((r) =>
-        r.id === rowId ? { ...r, orderCode: newCode } : r,
+      const rebuilt = rebuildComparisonFromEdits(
+        {
+          rows: editedRows,
+          invoiceNo: prev.invoiceNo,
+          invoiceDate: prev.invoiceDate,
+        },
+        productNameByCode,
+        productCategoryByCode,
       );
-      return { ...prev, rows: nextRows };
+      return {
+        ...prev,
+        rows: rebuilt.rows,
+        orderRows: rebuilt.orderRows,
+        invoiceRows: rebuilt.invoiceRows,
+      };
     });
   };
 
@@ -1597,6 +1530,72 @@ function makeId(): string {
 // ───────────────────────────────────────────────────────────
 // 비교 로직
 // ───────────────────────────────────────────────────────────
+
+/**
+ * 사용자 인라인 편집(코드/수량/단가)이 반영된 rows 로부터
+ * orderRows / invoiceRows 데이터 세트를 재구성하고, compareOrderInvoice 를
+ * 처음부터 다시 실행해 매칭·상태를 재계산한다.
+ *
+ * - order_only 행에서 orderCode 를 인보이스 코드와 일치하게 편집 → 병합
+ * - invoice_only 행에서 code 를 주문 코드와 일치하게 편집 → 병합
+ * - 코드는 같아도 수량/단가 다르면 qty_diff / amount_diff 자동 표시
+ * - 매칭 상대가 없으면 그대로 order_only / invoice_only 유지 (에러 아님)
+ */
+function rebuildComparisonFromEdits(
+  edited: {
+    rows: ComparisonRow[];
+    invoiceNo: string;
+    invoiceDate: string;
+  },
+  productNameByCode: ReadonlyMap<string, string>,
+  productCategoryByCode: ReadonlyMap<string, string>,
+): {
+  rows: ComparisonRow[];
+  orderRows: OrderSheetRow[];
+  invoiceRows: InvoiceParsedRow[];
+} {
+  const revisedOrderRows: OrderSheetRow[] = [];
+  const revisedInvoiceRows: InvoiceParsedRow[] = [];
+
+  for (const row of edited.rows) {
+    // 주문 데이터 존재: invoice_only 가 아니고 orderCode 가 채워진 상태.
+    if (row.status !== 'invoice_only' && row.orderCode) {
+      const price = row.orderPrice ?? 0;
+      revisedOrderRows.push({
+        code: row.orderCode,
+        description: row.description,
+        unit: row.unit,
+        qty: row.orderQty,
+        price,
+        amount: Number((price * row.orderQty).toFixed(2)),
+      });
+    }
+    // 인보이스 데이터 존재: order_only 가 아니고 code 가 채워진 상태.
+    if (row.status !== 'order_only' && row.code) {
+      revisedInvoiceRows.push({
+        item_code: row.code,
+        description: row.description,
+        unit: row.unit,
+        qty_shipped: row.invoiceQty,
+        price: row.invoicePrice,
+        amount: row.amount,
+      });
+    }
+  }
+
+  const invoice: InvoiceParsed = {
+    invoice_no: edited.invoiceNo,
+    invoice_date: edited.invoiceDate,
+    rows: revisedInvoiceRows,
+  };
+  const rows = compareOrderInvoice(
+    revisedOrderRows,
+    invoice,
+    productNameByCode,
+    productCategoryByCode,
+  );
+  return { rows, orderRows: revisedOrderRows, invoiceRows: revisedInvoiceRows };
+}
 
 function compareOrderInvoice(
   orders: OrderSheetRow[],
