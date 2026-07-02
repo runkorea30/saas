@@ -18,7 +18,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Download, FileSpreadsheet, RefreshCw, Save } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useCompany } from '@/hooks/useCompany';
-import { usePurchaseOrder } from '@/hooks/queries/usePurchaseOrder';
+import {
+  fetchSavedSnapshot,
+  usePurchaseOrder,
+} from '@/hooks/queries/usePurchaseOrder';
 import { usePurchaseOrderExcluded } from '@/hooks/usePurchaseOrderExcluded';
 import { useToast } from '@/components/ui/Toast';
 import { supabase } from '@/lib/supabase';
@@ -364,12 +367,33 @@ export function PurchaseOrderPage() {
     }
   };
 
-  /** 엑셀 다운로드 — savedCategories 의 품목만 ORDER SHEET 양식으로. */
-  const handleDownloadExcel = () => {
+  /**
+   * 엑셀 다운로드 — savedCategories 의 품목만 ORDER SHEET 양식으로.
+   *
+   * 🔴 수량은 반드시 DB (`purchase_order_items.quantity`) 에서 재조회한다.
+   *    이유: 3단계 최종결정에서 조정한 수량은 DB 에는 즉시 반영되지만
+   *    1-2단계 orderQty 로컬 state 에는 반영되지 않기 때문.
+   *    로컬 state 를 그대로 쓰면 조정 전 옛 값이 다운로드된다.
+   */
+  const handleDownloadExcel = async () => {
+    if (!companyId) return;
     if (savedCategories.size === 0) {
       showToast({ kind: 'error', text: '저장된 카테고리가 없습니다.' });
       return;
     }
+
+    let latestQtyMap: Map<string, number>;
+    try {
+      const snapshot = await fetchSavedSnapshot(companyId);
+      latestQtyMap = snapshot.qtyMap;
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: e instanceof Error ? e.message : '수량 조회 실패',
+      });
+      return;
+    }
+
     const dateStr = formatDateStr(now);
 
     // 카테고리 정렬 순서 유지 (categories 는 이미 정렬됨).
@@ -385,7 +409,7 @@ export function PurchaseOrderPage() {
     for (const cat of orderedCats) {
       for (const p of products) {
         if (p.category !== cat) continue;
-        const qty = orderQty.get(p.id) ?? 0;
+        const qty = latestQtyMap.get(p.id) ?? 0;
         if (qty <= 0) continue;
         const price = p.unit_price_usd != null ? Number(p.unit_price_usd) : 0;
         // 미국 공급사 발주서 — 영문명/발주단위 우선, 없으면 한글명/판매단위로 폴백.

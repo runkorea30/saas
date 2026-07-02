@@ -18,7 +18,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
 import { useCompany } from '@/hooks/useCompany';
-import { usePurchaseOrder } from '@/hooks/queries/usePurchaseOrder';
+import {
+  fetchSavedSnapshot,
+  usePurchaseOrder,
+} from '@/hooks/queries/usePurchaseOrder';
 import { useOrderNeedEstimate } from '@/hooks/queries/useOrderNeedEstimate';
 import { usePurchaseOrderExcluded } from '@/hooks/usePurchaseOrderExcluded';
 import { useToast } from '@/components/ui/Toast';
@@ -343,11 +346,28 @@ export function PurchaseOrderPage() {
   };
 
   // ───── 액션 4: 엑셀 다운로드 ─────
-  const handleDownloadExcel = () => {
+  // 🔴 수량은 반드시 DB (`purchase_order_items.quantity`) 에서 재조회한다.
+  //    3단계 최종결정 조정값은 DB 에만 반영되고 1-2단계 orderQty 에는 반영되지 않으므로
+  //    로컬 state 를 그대로 쓰면 조정 전 옛 값이 다운로드된다.
+  const handleDownloadExcel = async () => {
+    if (!companyId) return;
     if (savedCategories.size === 0) {
       showToast({ kind: 'error', text: '저장된 카테고리가 없습니다.' });
       return;
     }
+
+    let latestQtyMap: Map<string, number>;
+    try {
+      const snapshot = await fetchSavedSnapshot(companyId);
+      latestQtyMap = snapshot.qtyMap;
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: e instanceof Error ? e.message : '수량 조회 실패',
+      });
+      return;
+    }
+
     const dateStr = formatDateStr(now);
     const orderedCats = categories.filter((c) => savedCategories.has(c));
     const lines: Array<{
@@ -361,7 +381,7 @@ export function PurchaseOrderPage() {
     for (const cat of orderedCats) {
       for (const p of products) {
         if (p.category !== cat) continue;
-        const qty = orderQty.get(p.id) ?? 0;
+        const qty = latestQtyMap.get(p.id) ?? 0;
         if (qty <= 0) continue;
         const price = p.unit_price_usd != null ? Number(p.unit_price_usd) : 0;
         lines.push({

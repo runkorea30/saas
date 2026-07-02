@@ -87,8 +87,14 @@ export interface SavedSnapshot {
  *    사용자가 입력 중인 미저장 수량은 카운트되지 않는다.
  * 🔴 qtyMap 은 OPS/모바일 두 발주서 페이지가 진입 시 orderQty 초기값을 채우는 데
  *    공통으로 사용 — 이 값이 두 페이지 간 "동일 데이터 조회"의 핵심.
+ *
+ * 🟠 엑셀 다운로드 시점에도 이 함수를 캐시 우회로 직접 호출한다.
+ *    3단계 최종결정 화면에서 조정한 수량은 purchase_order_items.quantity 에 즉시 반영되지만
+ *    1-2단계 orderQty 로컬 state 에는 반영되지 않기 때문에, 다운로드는 반드시 DB 값을 봐야 한다.
  */
-async function fetchSavedSnapshot(companyId: string): Promise<SavedSnapshot> {
+export async function fetchSavedSnapshot(
+  companyId: string,
+): Promise<SavedSnapshot> {
   const now = new Date();
   const currentMonthStart = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
