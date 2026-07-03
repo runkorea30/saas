@@ -1,15 +1,19 @@
 /**
- * 문서관리 페이지 — 5개 탭으로 구성.
- *  - 수입면장 / 엔젤러스인보이스 / 화학물질관련 / 기타서류: 파일 업로드 + 목록
+ * 문서관리 페이지 — 5개 탭.
  *  - 시험검사번호: DB 테이블 CRUD
+ *  - 엔젤러스인보이스: 자동 수집 + 그룹/타임라인 UI (별도 컴포넌트)
+ *  - 수입면장 / 화학물질관련 / 기타서류: 공용 파일 업로드/목록 탭
  *
  * 🔴 CLAUDE.md §1: company_id 는 useCompany() 훅에서만 획득.
- * 🟠 파일은 base64 로 인코딩 후 document_files.file_path 에 저장 (Storage 버킷 미사용).
+ * 🟠 페덱스/엔젤러스 이메일은 Vercel Cron 이 15분 주기로 자동 수집.
+ *    페이지 하단의 "자동 수집 로그"에서 최근 처리 이력 확인.
  */
 import { useState } from 'react';
 import { useCompany } from '@/hooks/useCompany';
 import { DocumentFilesTab } from '@/components/feature/documents/DocumentFilesTab';
+import { AngelusInvoiceTab } from '@/components/feature/documents/AngelusInvoiceTab';
 import { InspectionCertTab } from '@/components/feature/documents/InspectionCertTab';
+import { EmailIngestLogView } from '@/components/feature/documents/EmailIngestLogView';
 
 export type DocFileCategory =
   | 'import_declaration'
@@ -27,9 +31,14 @@ const TAB_LIST: { key: DocTab; label: string }[] = [
   { key: 'other', label: '기타서류' },
 ];
 
+const AUTO_INGEST_TABS = new Set<DocTab>([
+  'angelus_invoice',
+  'import_declaration',
+]);
+
 export function DocumentsPage() {
   const { companyId } = useCompany();
-  const [activeTab, setActiveTab] = useState<DocTab>('import_declaration');
+  const [activeTab, setActiveTab] = useState<DocTab>('inspection');
 
   return (
     <div className="max-w-[1400px] mx-auto px-6 py-6">
@@ -53,8 +62,14 @@ export function DocumentsPage() {
 
       {activeTab === 'inspection' ? (
         <InspectionCertTab companyId={companyId} />
+      ) : activeTab === 'angelus_invoice' ? (
+        <AngelusInvoiceTab companyId={companyId} />
       ) : (
         <DocumentFilesTab companyId={companyId} category={activeTab} />
+      )}
+
+      {AUTO_INGEST_TABS.has(activeTab) && (
+        <EmailIngestLogView companyId={companyId} />
       )}
     </div>
   );

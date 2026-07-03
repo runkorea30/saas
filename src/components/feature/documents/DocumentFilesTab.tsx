@@ -1,13 +1,15 @@
 /**
- * 문서 파일 업로드/목록 탭 — 수입면장/엔젤러스인보이스/화학물질관련/기타서류 공용.
+ * 문서 파일 업로드/목록 탭 — 수입면장/화학물질관련/기타서류 공용.
+ * 엔젤러스 인보이스는 그룹/타임라인 UI 가 필요해 별도 컴포넌트 사용.
  *
  * 🔴 CLAUDE.md §1: company_id 필터 필수.
- * 🟠 파일은 base64 data URI 형태로 `document_files.file_path` 컬럼에 저장.
- *    목록 조회 시 base64 본문은 제외(SELECT_LIST) — 다운로드 시점에 행 단위로 별도 조회.
+ * 🟠 수동 업로드(source='manual'): 파일은 base64 data URI 로 `file_path` 에 저장.
+ * 🟠 자동 수집(source='email_auto'): Storage `documents` 버킷에 업로드, `file_path` 는 버킷 경로.
+ *    다운로드 시 file_path 가 "data:" 로 시작하면 base64, 아니면 Storage.download 사용.
  */
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, FileUp, Loader2, Trash2 } from 'lucide-react';
+import { Download, FileUp, Loader2, Trash2, Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
@@ -22,9 +24,10 @@ const CATEGORY_LABELS: Record<DocFileCategory, string> = {
 };
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const STORAGE_BUCKET = 'documents';
 
 const SELECT_LIST =
-  'id, file_name, file_size, mime_type, memo, uploaded_at, created_at';
+  'id, file_name, file_size, mime_type, memo, uploaded_at, created_at, source, email_from, email_received_at, extracted_doc_no, extracted_doc_date, extracted_metadata, file_path';
 
 interface DocumentFileRow {
   id: string;
@@ -34,6 +37,13 @@ interface DocumentFileRow {
   memo: string | null;
   uploaded_at: string | null;
   created_at: string | null;
+  source: string | null;
+  email_from: string | null;
+  email_received_at: string | null;
+  extracted_doc_no: string | null;
+  extracted_doc_date: string | null;
+  extracted_metadata: unknown;
+  file_path: string;
 }
 
 interface Props {
@@ -96,6 +106,7 @@ export function DocumentFilesTab({ companyId, category }: Props) {
         mime_type: file.type || null,
         memo: memo.trim() || null,
         uploaded_at: new Date().toISOString(),
+        source: 'manual',
       });
 
       if (error) throw error;
@@ -116,19 +127,35 @@ export function DocumentFilesTab({ companyId, category }: Props) {
     try {
       const { data, error } = await supabase
         .from('document_files')
-        .select('file_path, file_name')
+        .select('file_path, file_name, source')
         .eq('id', row.id)
         .eq('company_id', companyId)
         .single();
       if (error) throw error;
       if (!data?.file_path) throw new Error('파일 데이터 없음');
 
+      if (data.file_path.startsWith('data:')) {
+        const a = document.createElement('a');
+        a.href = data.file_path;
+        a.download = data.file_name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        return;
+      }
+
+      const { data: blob, error: dlErr } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .download(data.file_path);
+      if (dlErr || !blob) throw new Error(dlErr?.message ?? '다운로드 실패');
+      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = data.file_path;
+      a.href = url;
       a.download = data.file_name;
       document.body.appendChild(a);
       a.click();
       a.remove();
+      URL.revokeObjectURL(url);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '다운로드 실패';
       showToast({ kind: 'error', text: msg });
@@ -139,6 +166,14 @@ export function DocumentFilesTab({ companyId, category }: Props) {
     if (!deleteTarget || !companyId) return;
     setBusyDelete(true);
     try {
+      if (
+        deleteTarget.source === 'email_auto' &&
+        !deleteTarget.file_path.startsWith('data:')
+      ) {
+        await supabase.storage
+          .from(STORAGE_BUCKET)
+          .remove([deleteTarget.file_path]);
+      }
       const { error } = await supabase
         .from('document_files')
         .delete()
@@ -155,6 +190,8 @@ export function DocumentFilesTab({ companyId, category }: Props) {
       setBusyDelete(false);
     }
   };
+
+  const showMetaColumns = category === 'import_declaration';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -258,71 +295,146 @@ export function DocumentFilesTab({ companyId, category }: Props) {
                 }}
               >
                 <th style={thStyle('left')}>파일명</th>
-                <th style={thStyle('right', 100)}>크기</th>
-                <th style={thStyle('left', 240)}>메모</th>
-                <th style={thStyle('left', 140)}>업로드일</th>
+                {showMetaColumns && (
+                  <>
+                    <th style={thStyle('left', 140)}>신고번호</th>
+                    <th style={thStyle('left', 110)}>신고일자</th>
+                    <th style={thStyle('center', 70)}>운송</th>
+                  </>
+                )}
+                <th style={thStyle('right', 90)}>크기</th>
+                <th style={thStyle('left', 200)}>메모/발신</th>
+                <th style={thStyle('left', 140)}>
+                  {showMetaColumns ? '수신일시' : '업로드일'}
+                </th>
                 <th style={thStyle('center', 140)}>작업</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
-                <tr
-                  key={row.id}
-                  style={{ borderBottom: '1px solid var(--line)' }}
-                >
-                  <td style={tdStyle('left')}>{row.file_name}</td>
-                  <td
-                    style={{
-                      ...tdStyle('right'),
-                      fontVariantNumeric: 'tabular-nums',
-                      color: 'var(--ink-2)',
-                    }}
+              {rows.map((row) => {
+                const isAuto = row.source === 'email_auto';
+                const meta =
+                  (row.extracted_metadata as {
+                    transport_type?: string | null;
+                    mawb_hawb?: string | null;
+                  } | null) ?? null;
+                return (
+                  <tr
+                    key={row.id}
+                    style={{ borderBottom: '1px solid var(--line)' }}
                   >
-                    {fmtSize(row.file_size)}
-                  </td>
-                  <td style={{ ...tdStyle('left'), color: 'var(--ink-2)' }}>
-                    {row.memo ?? '—'}
-                  </td>
-                  <td style={{ ...tdStyle('left'), color: 'var(--ink-2)' }}>
-                    {fmtDate(row.uploaded_at ?? row.created_at)}
-                  </td>
-                  <td style={tdStyle('center')}>
-                    <div
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleDownload(row)}
-                        title="다운로드"
-                        className="btn-base"
-                        style={{ height: 28, padding: '0 10px', fontSize: 12 }}
-                      >
-                        <Download size={12} />
-                        다운로드
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeleteTarget(row)}
-                        title="삭제"
-                        className="btn-base"
+                    <td style={tdStyle('left')}>
+                      <div
                         style={{
-                          height: 28,
-                          padding: '0 10px',
-                          fontSize: 12,
-                          color: 'var(--danger)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
                         }}
                       >
-                        <Trash2 size={12} />
-                        삭제
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                        {isAuto && (
+                          <Sparkles
+                            size={12}
+                            style={{ color: 'var(--accent, #6b7cff)' }}
+                          />
+                        )}
+                        <span>{row.file_name}</span>
+                      </div>
+                    </td>
+                    {showMetaColumns && (
+                      <>
+                        <td
+                          style={{
+                            ...tdStyle('left'),
+                            color: 'var(--ink-2)',
+                            fontVariantNumeric: 'tabular-nums',
+                          }}
+                        >
+                          {row.extracted_doc_no ?? '—'}
+                        </td>
+                        <td
+                          style={{
+                            ...tdStyle('left'),
+                            color: 'var(--ink-2)',
+                            fontVariantNumeric: 'tabular-nums',
+                          }}
+                        >
+                          {row.extracted_doc_date ?? '—'}
+                        </td>
+                        <td
+                          style={{
+                            ...tdStyle('center'),
+                            color: 'var(--ink-2)',
+                          }}
+                        >
+                          {renderTransport(meta?.transport_type ?? null)}
+                        </td>
+                      </>
+                    )}
+                    <td
+                      style={{
+                        ...tdStyle('right'),
+                        fontVariantNumeric: 'tabular-nums',
+                        color: 'var(--ink-2)',
+                      }}
+                    >
+                      {fmtSize(row.file_size)}
+                    </td>
+                    <td style={{ ...tdStyle('left'), color: 'var(--ink-2)' }}>
+                      {isAuto
+                        ? (row.email_from ?? '자동 수집')
+                        : (row.memo ?? '—')}
+                    </td>
+                    <td style={{ ...tdStyle('left'), color: 'var(--ink-2)' }}>
+                      {fmtDateTime(
+                        isAuto
+                          ? (row.email_received_at ??
+                              row.uploaded_at ??
+                              row.created_at)
+                          : (row.uploaded_at ?? row.created_at),
+                      )}
+                    </td>
+                    <td style={tdStyle('center')}>
+                      <div
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => handleDownload(row)}
+                          title="다운로드"
+                          className="btn-base"
+                          style={{
+                            height: 28,
+                            padding: '0 10px',
+                            fontSize: 12,
+                          }}
+                        >
+                          <Download size={12} />
+                          다운로드
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteTarget(row)}
+                          title="삭제"
+                          className="btn-base"
+                          style={{
+                            height: 28,
+                            padding: '0 10px',
+                            fontSize: 12,
+                            color: 'var(--danger)',
+                          }}
+                        >
+                          <Trash2 size={12} />
+                          삭제
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -348,6 +460,12 @@ export function DocumentFilesTab({ companyId, category }: Props) {
   );
 }
 
+function renderTransport(t: string | null): string {
+  if (t === 'air') return '항공';
+  if (t === 'sea') return '해상';
+  return '—';
+}
+
 function fmtSize(bytes: number | null): string {
   if (bytes == null) return '—';
   if (bytes < 1024) return `${bytes} B`;
@@ -355,14 +473,16 @@ function fmtSize(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-function fmtDate(iso: string | null): string {
+function fmtDateTime(iso: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
   const kst = new Date(d.getTime() + 9 * 3600_000);
   const y = kst.getUTCFullYear();
   const m = String(kst.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(kst.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
+  const hh = String(kst.getUTCHours()).padStart(2, '0');
+  const mm = String(kst.getUTCMinutes()).padStart(2, '0');
+  return `${y}-${m}-${dd} ${hh}:${mm}`;
 }
 
 function thStyle(
