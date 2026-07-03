@@ -66,13 +66,29 @@ type CompanyRow = NonNullable<Awaited<ReturnType<typeof fetchFirstCompany>>['dat
 
 function normalizeProductsJson(raw: unknown): ImportNoticeProduct[] {
   if (!Array.isArray(raw)) return [];
-  return (raw as unknown as ImportNoticeProduct[]).filter(
-    (p): p is ImportNoticeProduct =>
+  //  DB(jsonb) 에 두 가지 shape 이 혼재:
+  //   1) {code, name} 객체 배열 — 현재 프론트가 저장하는 형태
+  //   2) 문자열 배열 ["72001001", ...] — v1→OPS 이관 초기 데이터 / 다른 경로에서
+  //      code 만 저장돼 들어온 레거시. 필터로 전부 걸러버리면 사용자에게
+  //      "0개" 로 표시돼 데이터 소실로 오해됨.
+  //   → 문자열은 {code: str, name: str} 로 감싸 살려낸다. 정식 이름은 사용자가
+  //      "저장" 하는 순간 현재 state 로 덮여 자연 치유됨.
+  const out: ImportNoticeProduct[] = [];
+  for (const p of raw as unknown[]) {
+    if (typeof p === 'string' && p.trim()) {
+      out.push({ code: p, name: p });
+      continue;
+    }
+    if (
       !!p &&
       typeof p === 'object' &&
-      typeof p.code === 'string' &&
-      typeof p.name === 'string',
-  );
+      typeof (p as { code?: unknown }).code === 'string' &&
+      typeof (p as { name?: unknown }).name === 'string'
+    ) {
+      out.push(p as ImportNoticeProduct);
+    }
+  }
+  return out;
 }
 
 function normalizeCompany(row: CompanyRow | null): Company | null {

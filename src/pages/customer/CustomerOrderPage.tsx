@@ -1612,18 +1612,33 @@ function formatArrivalDate(raw: string | null): string | null {
   return `${month}월${day}일`;
 }
 
-/** companies.import_notice_products / sea_products jsonb → {code,name} 배열로 안전 추출. */
+/** companies.import_notice_products / sea_products jsonb → {code,name} 배열로 안전 추출.
+ *  두 shape 지원:
+ *   - {code, name} 객체 배열 (신규 저장 shape)
+ *   - 문자열 배열 (레거시 저장 shape) → {code: s, name: s} 로 감싸 살림
+ *  이름은 상단 productBy Code 맵에서 후속 매핑됨. 그대로 걸러버리면 안내가 텅 빔.
+ */
 function pickNoticeProducts(raw: unknown): { code: string; name: string }[] {
   if (!Array.isArray(raw)) return [];
-  return (raw as unknown as { code?: unknown; name?: unknown }[])
-    .filter(
-      (p): p is { code: string; name: string } =>
-        !!p &&
-        typeof p === 'object' &&
-        typeof p.code === 'string' &&
-        typeof p.name === 'string',
-    )
-    .map((p) => ({ code: p.code, name: p.name }));
+  const out: { code: string; name: string }[] = [];
+  for (const p of raw as unknown[]) {
+    if (typeof p === 'string' && p.trim()) {
+      out.push({ code: p, name: p });
+      continue;
+    }
+    if (
+      !!p &&
+      typeof p === 'object' &&
+      typeof (p as { code?: unknown }).code === 'string' &&
+      typeof (p as { name?: unknown }).name === 'string'
+    ) {
+      out.push({
+        code: (p as { code: string }).code,
+        name: (p as { name: string }).name,
+      });
+    }
+  }
+  return out;
 }
 
 function ImportStepper({ shipment }: { shipment: ImportNoticeShipment }) {
