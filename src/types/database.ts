@@ -2044,36 +2044,66 @@ export type Database = {
           category: string
           company_id: string
           created_at: string | null
+          doc_subtype: string | null
+          email_from: string | null
+          email_message_id: string | null
+          email_received_at: string | null
+          extracted_doc_date: string | null
+          extracted_doc_no: string | null
+          extracted_metadata: Json | null
           file_name: string
           file_path: string
           file_size: number | null
           id: string
           memo: string | null
           mime_type: string | null
+          related_po_reference: string | null
+          source: string | null
+          subtype_confirmed: boolean | null
           uploaded_at: string | null
         }
         Insert: {
           category: string
           company_id: string
           created_at?: string | null
+          doc_subtype?: string | null
+          email_from?: string | null
+          email_message_id?: string | null
+          email_received_at?: string | null
+          extracted_doc_date?: string | null
+          extracted_doc_no?: string | null
+          extracted_metadata?: Json | null
           file_name: string
           file_path: string
           file_size?: number | null
           id?: string
           memo?: string | null
           mime_type?: string | null
+          related_po_reference?: string | null
+          source?: string | null
+          subtype_confirmed?: boolean | null
           uploaded_at?: string | null
         }
         Update: {
           category?: string
           company_id?: string
           created_at?: string | null
+          doc_subtype?: string | null
+          email_from?: string | null
+          email_message_id?: string | null
+          email_received_at?: string | null
+          extracted_doc_date?: string | null
+          extracted_doc_no?: string | null
+          extracted_metadata?: Json | null
           file_name?: string
           file_path?: string
           file_size?: number | null
           id?: string
           memo?: string | null
           mime_type?: string | null
+          related_po_reference?: string | null
+          source?: string | null
+          subtype_confirmed?: boolean | null
           uploaded_at?: string | null
         }
         Relationships: [
@@ -2085,6 +2115,48 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      email_ingest_log: {
+        Row: {
+          company_id: string
+          document_file_id: string | null
+          error_message: string | null
+          id: string
+          matched_category: string | null
+          message_id: string
+          processed_at: string | null
+          received_at: string | null
+          sender: string | null
+          status: string
+          subject: string | null
+        }
+        Insert: {
+          company_id: string
+          document_file_id?: string | null
+          error_message?: string | null
+          id?: string
+          matched_category?: string | null
+          message_id: string
+          processed_at?: string | null
+          received_at?: string | null
+          sender?: string | null
+          status?: string
+          subject?: string | null
+        }
+        Update: {
+          company_id?: string
+          document_file_id?: string | null
+          error_message?: string | null
+          id?: string
+          matched_category?: string | null
+          message_id?: string
+          processed_at?: string | null
+          received_at?: string | null
+          sender?: string | null
+          status?: string
+          subject?: string | null
+        }
+        Relationships: []
       }
       inspection_certificates: {
         Row: {
