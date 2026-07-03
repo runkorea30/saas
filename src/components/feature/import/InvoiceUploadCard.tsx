@@ -12,6 +12,7 @@
  *    "입고처리로 이관" 시 BO 행은 제외 — 실입고 0 인 행을 만들지 않음.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { FileSpreadsheet, FileText, X } from 'lucide-react';
 import {
   parseOrderSheet,
@@ -215,6 +216,7 @@ async function attachInvoiceToNotice(params: {
 
 export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Props) {
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const [orderFile, setOrderFile] = useState<File | null>(null);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   /**
@@ -796,6 +798,11 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
               kind: 'error',
               text: `거래처 안내 태그 동기화 실패: ${rpcErr.message}`,
             });
+          } else {
+            // useCompany() 는 staleTime: Infinity 라 자동 refetch 없음.
+            //  RPC 성공 시에만 무효화해 안내 설정 화면이 새로고침 없이 즉시 최신 태그 표시.
+            //  실패/스킵 시엔 무효화하지 않아 사용자에게 성공 오해 유발 방지.
+            void queryClient.invalidateQueries({ queryKey: ['current-company'] });
           }
         }
       } catch (e) {
