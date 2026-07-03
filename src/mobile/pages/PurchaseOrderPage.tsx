@@ -795,8 +795,8 @@ export function PurchaseOrderPage() {
                   <th
                     style={{
                       ...thStyle,
-                      minWidth: 106,
-                      maxWidth: 154,
+                      minWidth: 117,
+                      maxWidth: 169,
                       textAlign: 'left',
                     }}
                   >
@@ -866,7 +866,7 @@ export function PurchaseOrderPage() {
                           style={{
                             ...tdStyle,
                             textAlign: 'left',
-                            maxWidth: 154,
+                            maxWidth: 169,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                           }}
