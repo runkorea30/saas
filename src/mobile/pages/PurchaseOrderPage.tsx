@@ -782,10 +782,24 @@ export function PurchaseOrderPage() {
             <table style={tableStyle}>
               <thead>
                 <tr style={theadRowStyle}>
-                  <th style={{ ...thStyle, ...stickyLeftStyle, minWidth: 64 }}>
+                  <th
+                    style={{
+                      ...thStyle,
+                      ...stickyLeftStyle,
+                      minWidth: 60,
+                      maxWidth: 60,
+                    }}
+                  >
                     코드
                   </th>
-                  <th style={{ ...thStyle, minWidth: 96, maxWidth: 140, textAlign: 'left' }}>
+                  <th
+                    style={{
+                      ...thStyle,
+                      minWidth: 106,
+                      maxWidth: 154,
+                      textAlign: 'left',
+                    }}
+                  >
                     제품명
                   </th>
                   <th style={{ ...thStyle, textAlign: 'right', minWidth: 80 }}>
@@ -840,6 +854,9 @@ export function PurchaseOrderPage() {
                             background: 'var(--m-surface)',
                             fontFamily: 'Inter Tight, system-ui, sans-serif',
                             textAlign: 'left',
+                            maxWidth: 60,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
                           }}
                           title={p.code}
                         >
@@ -849,7 +866,7 @@ export function PurchaseOrderPage() {
                           style={{
                             ...tdStyle,
                             textAlign: 'left',
-                            maxWidth: 140,
+                            maxWidth: 154,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                           }}
