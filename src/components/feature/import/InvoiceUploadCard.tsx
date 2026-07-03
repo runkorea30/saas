@@ -24,6 +24,7 @@ import {
 } from '@/utils/invoiceParser';
 import type { ImportRowInput, ImportInvoiceHeader } from '@/types/import';
 import { supabase } from '@/lib/supabase';
+import { useToast } from '@/components/ui/Toast';
 import type { Json } from '@/types/database';
 
 // 주문서/인보이스/OPS 제품 코드 간 매칭용 정규화.
@@ -211,6 +212,7 @@ async function attachInvoiceToNotice(params: {
 }
 
 export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Props) {
+  const { showToast } = useToast();
   const [orderFile, setOrderFile] = useState<File | null>(null);
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   /**
@@ -225,6 +227,10 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
    */
   const [shippingMode, setShippingMode] = useState<'air' | 'sea'>('air');
   const [parsing, setParsing] = useState(false);
+  // 이관 버튼 클릭 후 document_files INSERT 가 커밋될 때까지 대기 중인지.
+  //  이 값이 true 인 동안 버튼 비활성 + '이관 중...' 표시 → 사용자가 안내 탭으로
+  //  일찍 이동해 stale 조회를 하는 일을 방지.
+  const [attaching, setAttaching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [comparison, setComparison] = useState<{
     rows: ComparisonRow[];
@@ -674,7 +680,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     return comparison.rows.filter((r) => r.status === tab);
   }, [comparison, tab]);
 
-  const handleFill = () => {
+  const handleFill = async () => {
     if (!comparison) return;
     // '주문서만' 행 제외 — 실제로 입고할 수 있는 행만.
     const fillable = comparison.rows.filter(
@@ -709,28 +715,38 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       // 🟠 인보이스 PDF 가 실제로 Storage 에 업로드된 상태라면(invoiceFilePath 존재)
       //    거래처 안내 설정(항공/해상) 에 자동 첨부. 원본은 세션과 함께 남기고
       //    안내용 별도 경로로 복사 → document_files 에 UPSERT (기존 것은 덮어쓰기).
+      //
+      //    🔴 반드시 onFill 전에 await — onFill 이 부모의 activeTab 을 'receiving' 으로
+      //    바꾸면서 안내 탭의 document_files 조회 useEffect 가 이미 fire 되어 지나갔을 수 있어,
+      //    fire-and-forget 로 넘기면 사용자가 안내 탭을 봤을 때 아직 INSERT 가 안 된 상태로
+      //    "아직 첨부된 인보이스가 없습니다" 로 보이는 타이밍 레이스가 생긴다.
       if (invoiceFilePath && invoiceFile && invoiceFile.name) {
         const fileName = invoiceFile.name;
         const fileSize = invoiceFile instanceof File ? invoiceFile.size : null;
         const mimeType = invoiceFile instanceof File ? invoiceFile.type : 'application/pdf';
-        void (async () => {
-          try {
-            await attachInvoiceToNotice({
-              companyId,
-              mode: shippingMode,
-              sourcePath: invoiceFilePath,
-              fileName,
-              fileSize,
-              mimeType,
-            });
-          } catch (e) {
-            // eslint-disable-next-line no-console
-            console.error('[attachInvoiceToNotice]', e);
-            setError(
-              `거래처 안내 설정에 인보이스 첨부 실패: ${e instanceof Error ? e.message : String(e)}`,
-            );
-          }
-        })();
+        setAttaching(true);
+        try {
+          await attachInvoiceToNotice({
+            companyId,
+            mode: shippingMode,
+            sourcePath: invoiceFilePath,
+            fileName,
+            fileSize,
+            mimeType,
+          });
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.error('[attachInvoiceToNotice]', e);
+          // onFill 이 곧바로 activeTab='receiving' 으로 전환해 InvoiceUploadCard 가 언마운트되므로
+          // setError 는 사용자에게 도달하지 않는다. 전역 토스트로 알린다.
+          showToast({
+            kind: 'error',
+            text: `거래처 안내 설정에 인보이스 첨부 실패: ${e instanceof Error ? e.message : String(e)}`,
+          });
+          // 첨부 실패해도 사용자가 입고 처리 폼으로 이동은 계속할 수 있게 onFill 은 그대로 진행.
+        } finally {
+          setAttaching(false);
+        }
       }
     }
     onFill(rows, {
@@ -1541,21 +1557,20 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
               <button
                 type="button"
                 className="btn-base primary"
-                onClick={handleFill}
+                onClick={() => void handleFill()}
                 disabled={
+                  attaching ||
                   comparison.rows.filter(
                     (r) => r.status !== 'order_only' && r.invoiceQty > 0,
                   ).length === 0
                 }
                 style={{ height: 32, fontSize: 12.5 }}
               >
-                입고처리로 이관 (
-                {
-                  comparison.rows.filter(
-                    (r) => r.status !== 'order_only' && r.invoiceQty > 0,
-                  ).length
-                }
-                건)
+                {attaching
+                  ? '이관 중…'
+                  : `입고처리로 이관 (${comparison.rows.filter(
+                      (r) => r.status !== 'order_only' && r.invoiceQty > 0,
+                    ).length}건)`}
               </button>
             </div>
           </div>

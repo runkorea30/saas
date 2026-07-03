@@ -139,6 +139,9 @@ export function ImportReceivingPage() {
   };
   const [noticeInvoiceAir, setNoticeInvoiceAir] = useState<NoticeInvoiceFile | null>(null);
   const [noticeInvoiceSea, setNoticeInvoiceSea] = useState<NoticeInvoiceFile | null>(null);
+  // 안내 첨부 인보이스 재조회 트리거. 이관 완료 시 부모 onFill 콜백에서 +1 하여
+  //  사용자가 이미 portal 탭에 있어 activeTab 이 안 바뀌는 경우에도 useEffect 재실행.
+  const [noticeInvoiceReloadKey, setNoticeInvoiceReloadKey] = useState(0);
 
   // 안내 설정 탭 진입 시 첨부된 인보이스 PDF 정보 조회.
   //  사용자 흐름: 인보이스 검증 → 이관 → activeTab 자동으로 receiving 이동 → 사용자가
@@ -180,7 +183,7 @@ export function ImportReceivingPage() {
     return () => {
       cancelled = true;
     };
-  }, [companyId, activeTab]);
+  }, [companyId, activeTab, noticeInvoiceReloadKey]);
 
   // 인보이스 검증 → 입고처리 이관본 복원 (companyId 로드 시 1회).
   // rowInputs 가 초기 빈 상태일 때만 덮어씀 — 사용자가 이미 편집 중이면 보존.
@@ -664,6 +667,8 @@ export function ImportReceivingPage() {
               setRowInputs(rows.length > 0 ? rows : [createEmptyRow()]);
               setHeader((h) => ({ ...h, ...headerPatch }));
               setActiveTab('receiving');
+              // portal 탭이 이미 열려있어 activeTab 변화가 없어도 재조회되도록 강제 트리거.
+              setNoticeInvoiceReloadKey((k) => k + 1);
               showToast({
                 kind: 'success',
                 text: `${rows.length}개 행이 입력 폼에 채워졌습니다. [입고 처리] 탭에서 검수 후 [입고확정] 을 눌러 주세요.`,
