@@ -42,8 +42,9 @@
         /mobile, /mobile-order → 자체 토큰 사용, data-theme 미지정
         그 외 OPS         → data-theme        (라이트 / dark-true/gray/sepia, 기본 라이트)
       PWA 분기:
-        /mobile-order → manifest-mobile-order.json + icon-angelus.svg + "Angelus 주문"
-        그 외         → manifest.json + icon.svg + "OPS"
+        /customer-order → manifest-customer-order.json + icon-angelus.svg + "런코리아"
+        /mobile-order   → manifest-mobile-order.json   + icon-angelus.svg + "Angelus 주문"
+        그 외           → manifest.json                + icon.svg         + "OPS"
     -->
     <script>
       (function () {
@@ -64,29 +65,47 @@
             }
           }
 
+          var manifestHref = '/manifest.json';
+          var iconHref = '/icon.svg';
+          var appTitle = 'OPS';
+          var themeColorVal = '#6B1F2A';
+          if (isPortal) {
+            manifestHref = '/manifest-customer-order.json';
+            iconHref = '/icon-angelus.svg';
+            appTitle = '런코리아';
+            themeColorVal = '#0f0f0f';
+          } else if (isMobileOrder) {
+            manifestHref = '/manifest-mobile-order.json';
+            iconHref = '/icon-angelus.svg';
+            appTitle = 'Angelus 주문';
+            themeColorVal = '#0f0f0f';
+          }
+
           var head = document.head;
           var manifest = document.createElement('link');
           manifest.rel = 'manifest';
-          manifest.href = isMobileOrder ? '/manifest-mobile-order.json' : '/manifest.json';
+          manifest.href = manifestHref;
           head.appendChild(manifest);
 
           var touchIcon = document.createElement('link');
           touchIcon.rel = 'apple-touch-icon';
-          touchIcon.href = isMobileOrder ? '/icon-angelus.svg' : '/icon.svg';
+          touchIcon.href = iconHref;
           head.appendChild(touchIcon);
 
           var appleTitle = document.createElement('meta');
           appleTitle.name = 'apple-mobile-web-app-title';
-          appleTitle.content = isMobileOrder ? 'Angelus 주문' : 'OPS';
+          appleTitle.content = appTitle;
           head.appendChild(appleTitle);
 
           var themeColor = document.createElement('meta');
           themeColor.name = 'theme-color';
-          themeColor.content = isMobileOrder ? '#0f0f0f' : '#6B1F2A';
+          themeColor.content = themeColorVal;
           head.appendChild(themeColor);
 
           if (isMobileOrder) {
             document.title = 'Angelus 주문';
+          } else if (isPortal) {
+            document.title = '런코리아 파트너 포털';
           }
         } catch (e) {
           /* localStorage 차단 환경 — noscript 폴백 사용 */

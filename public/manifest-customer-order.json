@@ -1,0 +1,20 @@
+{
+  "name": "런코리아 파트너 포털",
+  "short_name": "런코리아",
+  "description": "런코리아 파트너 주문/공지 포털",
+  "start_url": "/customer-order",
+  "scope": "/customer-order",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f0f0f",
+  "theme_color": "#0f0f0f",
+  "lang": "ko",
+  "icons": [
+    {
+      "src": "/icon-angelus.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
