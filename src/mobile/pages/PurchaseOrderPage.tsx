@@ -527,6 +527,7 @@ export function PurchaseOrderPage() {
                   if (Number.isFinite(n) && n >= 0) setThreshold(n);
                 }}
                 onClick={(e) => e.stopPropagation()}
+                onFocus={(e) => e.currentTarget.select()}
                 style={{
                   width: 60,
                   height: 18,
@@ -881,6 +882,7 @@ export function PurchaseOrderPage() {
                             step={1}
                             value={qty === 0 ? '' : qty}
                             onChange={(e) => updateQty(p.id, e.target.value)}
+                            onFocus={(e) => e.currentTarget.select()}
                             placeholder="0"
                             style={{
                               width: 64,

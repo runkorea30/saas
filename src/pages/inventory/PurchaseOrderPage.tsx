@@ -832,6 +832,7 @@ export function PurchaseOrderPage() {
                             step={1}
                             value={qty === 0 ? '' : qty}
                             onChange={(e) => updateQty(p.id, e.target.value)}
+                            onFocus={(e) => e.currentTarget.select()}
                             placeholder="0"
                             style={{
                               width: 80,

@@ -240,6 +240,7 @@ export function FinalReviewPanel({
                         value={qty === 0 ? '' : qty}
                         onChange={(e) => handleChange(item.id, e.target.value)}
                         onBlur={() => handleBlur(item)}
+                        onFocus={(e) => e.currentTarget.select()}
                         disabled={saving}
                         style={{
                           width: 72,
