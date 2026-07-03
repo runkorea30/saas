@@ -38,6 +38,7 @@ function normalizeCode(code: string | number | null | undefined): string {
 
 export type CompareStatus =
   | 'match'         // 일치 — 코드·수량·단가 모두 동일
+  | 'match_prefix'  // 일치(코드보정) — 인보이스 코드가 주문서 코드의 유일한 접두사라 자동 보정
   | 'qty_diff'      // 수량불일치 — 코드는 같은데 수량 다름
   | 'amount_diff'   // 금액불일치 — 코드·수량 같지만 단가 다름
   | 'order_only'    // 주문서만 — 주문 있고 인보이스에 없음 (구 backorder)
@@ -102,6 +103,7 @@ const STATUS_META: Record<
   { label: string; color: string; bg: string }
 > = {
   match:        { label: '일치',       color: 'var(--success)', bg: 'var(--success-wash)' },
+  match_prefix: { label: '일치(코드보정)', color: 'var(--success)', bg: 'var(--success-wash)' },
   qty_diff:     { label: '수량불일치', color: 'var(--warning)', bg: 'var(--warning-wash)' },
   amount_diff:  { label: '금액불일치', color: '#C8590E',         bg: '#FAE3D2' },
   order_only:   { label: '주문서만',   color: 'var(--danger)',  bg: 'var(--danger-wash)' },
@@ -473,6 +475,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       orderTotal: 0,
       diffTotal: 0,
       match: 0,
+      match_prefix: 0,
       qty_diff: 0,
       amount_diff: 0,
       order_only: 0,
@@ -688,7 +691,9 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     );
     const rows: ImportRowInput[] = fillable.map((r) => ({
       id: makeId(),
-      sourceCode: r.code,
+      // 접두사 자동 보정된 행은 주문서(긴) 코드를 소스로 넘겨 입고처리 매칭 보장.
+      // orderCode 가 있으면 그걸, 없으면 인보이스 원본 code.
+      sourceCode: r.orderCode || r.code,
       quantity: r.invoiceQty,
       unit: r.unit,
       adjustedQuantity: r.unit === 'DZ' ? r.invoiceQty * 12 : r.invoiceQty,
@@ -1449,6 +1454,11 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
                         <div style={{ display: 'flex', justifyContent: 'center' }}>
                           <span
                             className="chip"
+                            title={
+                              r.status === 'match_prefix'
+                                ? `PDF 파싱 코드 "${r.originalCode}" 가 주문서 "${r.orderCode}" 의 접두사라 자동 보정되었습니다.`
+                                : undefined
+                            }
                             style={{
                               color: meta.color,
                               background: meta.bg,
@@ -1811,19 +1821,51 @@ function compareOrderInvoice(
 ): ComparisonRow[] {
   // 정규화된 코드 → 주문 행. (대소문자/공백/하이픈 차이로 매칭 누락되던 문제 해결)
   const orderByCode = new Map<string, OrderSheetRow>();
-  for (const o of orders) orderByCode.set(normalizeCode(o.code), o);
+  const orderEntries: Array<{ norm: string; row: OrderSheetRow }> = [];
+  for (const o of orders) {
+    const norm = normalizeCode(o.code);
+    orderByCode.set(norm, o);
+    orderEntries.push({ norm, row: o });
+  }
 
   const seen = new Set<string>();
   const out: ComparisonRow[] = [];
 
+  // 접두사 자동 매칭 최소 길이 — PDF 파싱에서 뒷글자가 잘리는 경우 대응.
+  // 짧은 코드 오매칭 방지용 하한. 실제 유니크 조건이 더 강한 안전장치.
+  const PREFIX_MIN_LEN = 4;
+
   // 인보이스 기준 1차 패스
   for (const inv of invoice.rows) {
     const normInv = normalizeCode(inv.item_code);
-    const ord = orderByCode.get(normInv);
-    seen.add(normInv);
+    let ord = orderByCode.get(normInv);
+    let prefixMatched = false;
+    let matchedNorm = normInv;
+
+    // 완전 일치 실패 시 접두사 fallback:
+    //  - 인보이스 코드가 주문서 코드의 접두사이고 (인보이스가 더 짧음)
+    //  - 아직 소비되지 않은 주문서 후보가 정확히 1개일 때만
+    //  - 최소 길이 하한(PREFIX_MIN_LEN) 이상
+    //  - 예: PDF 파싱 "72204000s" ← 주문서 "72204000soft"
+    if (!ord && normInv.length >= PREFIX_MIN_LEN) {
+      const candidates = orderEntries.filter(
+        (e) =>
+          !seen.has(e.norm) &&
+          e.norm.length > normInv.length &&
+          e.norm.startsWith(normInv),
+      );
+      if (candidates.length === 1) {
+        ord = candidates[0].row;
+        matchedNorm = candidates[0].norm;
+        prefixMatched = true;
+      }
+    }
+    seen.add(matchedNorm);
 
     // OPS 한글 제품명 우선, 없으면 인보이스/주문서 영문명.
-    const opsName = productNameByCode.get(normInv);
+    // 접두사 매칭 시엔 주문서(긴) 코드 기준으로 lookup — 인보이스(짧은) 코드는 OPS 에 없을 것.
+    const opsLookupCode = prefixMatched ? matchedNorm : normInv;
+    const opsName = productNameByCode.get(opsLookupCode);
     const isInOps = opsName !== undefined;
     const desc = opsName || inv.description || ord?.description || '';
 
@@ -1831,6 +1873,11 @@ function compareOrderInvoice(
     const orderPrice = ord?.price;
     const invoiceQty = inv.qty_shipped;
     const invoicePrice = inv.price || ord?.price || 0;
+
+    let status = calcStatus(orderQty, invoiceQty, invoicePrice, orderPrice, isInOps);
+    // 접두사 매칭이면서 수량/단가까지 모두 일치 → 'match_prefix' 로 표시(뱃지 라벨 구분).
+    // 수량/단가 불일치가 있으면 그쪽이 우선(문제 가시성 유지).
+    if (prefixMatched && status === 'match') status = 'match_prefix';
 
     out.push({
       id: makeId(),
@@ -1849,8 +1896,8 @@ function compareOrderInvoice(
       originalInvoicePrice: invoicePrice,
       amount: inv.amount,
       isInOps,
-      category: productCategoryByCode.get(normInv) ?? '',
-      status: calcStatus(orderQty, invoiceQty, invoicePrice, orderPrice, isInOps),
+      category: productCategoryByCode.get(opsLookupCode) ?? '',
+      status,
     });
   }
 
@@ -1890,6 +1937,7 @@ function compareOrderInvoice(
     invoice_only: 3,  // 인보이스만
     unknown:      4,  // 미확인
     match:        5,  // 일치 — 맨 아래
+    match_prefix: 5,  // 일치(코드보정) — match 와 동일 우선순위
   };
   out.sort((a, b) => {
     const statusCmp = STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status];
