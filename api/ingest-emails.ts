@@ -1,9 +1,14 @@
 /**
- * Vercel Cron — Gmail IMAP → 문서관리 자동 수집.
+ * 문서관리 이메일 자동 수집 API — 사용자가 "지금 메일 확인" 버튼을 누를 때 호출.
  *
  * 감지 대상:
  *  - 발신자에 "fedex" 포함 → import_declaration (수입면장)
  *  - 발신자가 "@angelusshoepolish.com" 로 끝남 → angelus_invoice (엔젤러스 인보이스)
+ *
+ * IMAP 조회 조건:
+ *  - 최근 30일 이내 전체 메일 (읽음/안읽음 무관)
+ *  - 처리 결과와 상관없이 Seen 플래그는 절대 변경하지 않음
+ *  - 중복 처리 방지는 email_ingest_log.message_id UNIQUE 제약으로만 판단
  *
  * 처리 흐름 (메일 1건):
  *  1) email_ingest_log INSERT (message_id UNIQUE → 이미 처리된 메일이면 스킵)
@@ -11,14 +16,12 @@
  *  3) Claude API 로 메타데이터 추출 (실패해도 파일 자체는 저장)
  *  4) document_files INSERT (source='email_auto')
  *  5) email_ingest_log 상태 갱신 (processed / skipped / error)
- *  6) 성공 시 IMAP UNSEEN → SEEN 마킹 (실패 시 다음 주기 재시도)
  *
  * 환경변수:
  *  - GMAIL_USER, GMAIL_APP_PASSWORD (기존)
  *  - ANTHROPIC_API_KEY (기존)
  *  - SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (신규 — 서버 전용 write)
  *  - EMAIL_INGEST_COMPANY_ID (신규 — dogfooding 대상 회사 UUID)
- *  - CRON_SECRET (선택 — 호출자 검증)
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { ImapFlow } from 'imapflow';
@@ -171,13 +174,9 @@ export default async function handler(
   req: VercelRequest,
   res: VercelResponse,
 ): Promise<void> {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = req.headers.authorization ?? '';
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
-    }
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
   }
 
   const gmailUser = process.env.GMAIL_USER;
@@ -233,12 +232,11 @@ export default async function handler(
     return;
   }
 
-  const seenUidsToMark: number[] = [];
-
   try {
     const lock = await client.getMailboxLock('INBOX');
     try {
-      const uids = (await client.search({ seen: false })) || [];
+      const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+      const uids = (await client.search({ since })) || [];
       const targetUids = uids.slice(-MAX_MESSAGES_PER_RUN);
       summary.scanned = targetUids.length;
 
@@ -289,7 +287,6 @@ export default async function handler(
             if (logErr.code === '23505') {
               summary.skipped++;
               summary.details.push({ uid, status: 'dup-message-id' });
-              seenUidsToMark.push(uid);
               continue;
             }
             throw logErr;
@@ -308,7 +305,6 @@ export default async function handler(
               .eq('id', logId);
             summary.skipped++;
             summary.details.push({ uid, status: 'no-pdf' });
-            seenUidsToMark.push(uid);
             continue;
           }
 
@@ -407,7 +403,6 @@ export default async function handler(
 
           summary.processed++;
           summary.details.push({ uid, status: 'processed' });
-          seenUidsToMark.push(uid);
         } catch (perMsgErr) {
           const message =
             perMsgErr instanceof Error ? perMsgErr.message : String(perMsgErr);
@@ -431,18 +426,6 @@ export default async function handler(
         }
       }
 
-      if (seenUidsToMark.length > 0) {
-        try {
-          await client.messageFlagsAdd(
-            { uid: seenUidsToMark.join(',') },
-            ['\\Seen'],
-            { uid: true },
-          );
-        } catch (flagErr) {
-          // eslint-disable-next-line no-console
-          console.warn('[ingest-emails] Seen 마킹 실패:', flagErr);
-        }
-      }
     } finally {
       lock.release();
     }
