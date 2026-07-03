@@ -786,8 +786,8 @@ export function PurchaseOrderPage() {
                     style={{
                       ...thStyle,
                       ...stickyLeftStyle,
-                      minWidth: 60,
-                      maxWidth: 60,
+                      minWidth: 96,
+                      maxWidth: 96,
                     }}
                   >
                     코드
@@ -854,7 +854,7 @@ export function PurchaseOrderPage() {
                             background: 'var(--m-surface)',
                             fontFamily: 'Inter Tight, system-ui, sans-serif',
                             textAlign: 'left',
-                            maxWidth: 60,
+                            maxWidth: 96,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                           }}
