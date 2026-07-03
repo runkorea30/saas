@@ -147,15 +147,29 @@ export function ImportReceivingPage() {
   //  사용자 흐름: 인보이스 검증 → 이관 → activeTab 자동으로 receiving 이동 → 사용자가
   //  나중에 안내 설정 탭 클릭 시 이 useEffect 가 트리거되어 최신 첨부 반영.
   useEffect(() => {
-    if (!companyId) return;
-    if (activeTab !== 'portal') return;
+    // eslint-disable-next-line no-console
+    console.log('[notice-invoice] useEffect', { companyId, activeTab, noticeInvoiceReloadKey });
+    if (!companyId) {
+      // eslint-disable-next-line no-console
+      console.log('[notice-invoice] SKIP: companyId is null/empty');
+      return;
+    }
+    if (activeTab !== 'portal') {
+      // eslint-disable-next-line no-console
+      console.log('[notice-invoice] SKIP: activeTab is not portal, current =', activeTab);
+      return;
+    }
     let cancelled = false;
     void (async () => {
-      const { data } = await supabase
+      // eslint-disable-next-line no-console
+      console.log('[notice-invoice] fetching document_files…');
+      const { data, error } = await supabase
         .from('document_files')
         .select('category, file_name, file_path, file_size, uploaded_at')
         .eq('company_id', companyId)
         .in('category', ['import_notice_invoice_air', 'import_notice_invoice_sea']);
+      // eslint-disable-next-line no-console
+      console.log('[notice-invoice] response', { error, dataLength: data?.length, data });
       if (cancelled) return;
       const air = data?.find((d) => d.category === 'import_notice_invoice_air') ?? null;
       const sea = data?.find((d) => d.category === 'import_notice_invoice_sea') ?? null;
