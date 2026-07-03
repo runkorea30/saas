@@ -273,10 +273,12 @@ export function ImportReceivingPage() {
   const setActiveProducts = isSea ? setNoticeSeaProducts : setNoticeProducts;
 
   // 제품 코드 매칭 맵 (convertedCode = products.code).
+  // Map key 도 normalizeSourceCode 로 정규화 — DB 에 대문자 코드가 있어도
+  // 소문자 입력으로 매칭되도록 양방향 방어. (예: DB "720pt105" ↔ 입력 "720PT105")
   const products = productsQuery.data ?? [];
   const productByCode = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>();
-    for (const p of products) map.set(p.code, { id: p.id, name: p.name });
+    for (const p of products) map.set(normalizeSourceCode(p.code), { id: p.id, name: p.name });
     return map;
   }, [products]);
 

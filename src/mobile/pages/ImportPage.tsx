@@ -193,10 +193,11 @@ export function ImportPage() {
   const activeProducts = isSea ? noticeSeaProducts : noticeProducts;
   const setActiveProducts = isSea ? setNoticeSeaProducts : setNoticeProducts;
 
+  // 데스크톱 ImportReceivingPage 와 동일 정규화 — 대소문자만 다른 코드 미매칭 방지.
   const products = productsQuery.data ?? [];
   const productByCode = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>();
-    for (const p of products) map.set(p.code, { id: p.id, name: p.name });
+    for (const p of products) map.set(normalizeSourceCode(p.code), { id: p.id, name: p.name });
     return map;
   }, [products]);
 

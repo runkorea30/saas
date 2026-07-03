@@ -15,9 +15,13 @@
  */
 import type { ImportUnit, ImportRow } from '@/types/import';
 
-/** 원본 코드에서 대시(-)를 제거. */
+/**
+ * 원본 코드에서 대시(-)를 제거하고 소문자화한다.
+ * 인보이스 검증 화면의 normalizeCode 규칙과 일치시켜, 대소문자만 다른
+ * 코드(예: `720PT105` vs DB의 `720pt105`)가 미매칭되는 문제 방지.
+ */
 export function normalizeSourceCode(src: string): string {
-  return src.replace(/-/g, '');
+  return src.replace(/-/g, '').toLowerCase();
 }
 
 /**
