@@ -20,11 +20,11 @@ export type DocFileCategory =
 type DocTab = DocFileCategory | 'inspection';
 
 const TAB_LIST: { key: DocTab; label: string }[] = [
-  { key: 'import_declaration', label: '수입면장' },
+  { key: 'inspection', label: '시험검사번호' },
   { key: 'angelus_invoice', label: '엔젤러스인보이스' },
+  { key: 'import_declaration', label: '수입면장' },
   { key: 'chemical', label: '화학물질관련' },
   { key: 'other', label: '기타서류' },
-  { key: 'inspection', label: '시험검사번호' },
 ];
 
 export function DocumentsPage() {
