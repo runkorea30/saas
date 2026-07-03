@@ -32,10 +32,21 @@ export const config = {
   maxDuration: 60,
 };
 
+type MatchedCategory = 'import_declaration' | 'angelus_invoice';
+
 const IMAP_HOST = 'imap.gmail.com';
 const IMAP_PORT = 993;
-const MAX_MESSAGES_PER_RUN = 20;
+const MAX_MESSAGES_PER_RUN = 30;
+const INGEST_WINDOW_DAYS = 30;
 const STORAGE_BUCKET = 'documents';
+
+const SENDER_FILTERS: Array<{
+  category: MatchedCategory;
+  imapFrom: string;
+}> = [
+  { category: 'import_declaration', imapFrom: 'fedex' },
+  { category: 'angelus_invoice', imapFrom: '@angelusshoepolish.com' },
+];
 
 const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -64,8 +75,6 @@ const ANGELUS_PROMPT = `이 엔젤러스 인보이스 PDF에서 아래 필드를
  - 판단 불가 시 doc_subtype="unknown".
 찾을 수 없으면 null. 마크다운/설명 없이 { 로 시작 } 로 끝나는 JSON 만 출력.`;
 
-type MatchedCategory = 'import_declaration' | 'angelus_invoice';
-
 interface FedexMeta {
   doc_no: string | null;
   doc_date: string | null;
@@ -86,6 +95,7 @@ interface RunSummary {
   processed: number;
   skipped: number;
   errors: number;
+  hasMore: boolean;
   details: Array<{ uid: number; status: string; note?: string }>;
 }
 
@@ -211,6 +221,7 @@ export default async function handler(
     processed: 0,
     skipped: 0,
     errors: 0,
+    hasMore: false,
     details: [],
   };
 
@@ -235,10 +246,23 @@ export default async function handler(
   try {
     const lock = await client.getMailboxLock('INBOX');
     try {
-      const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-      const uids = (await client.search({ since })) || [];
-      const targetUids = uids.slice(-MAX_MESSAGES_PER_RUN);
-      summary.scanned = targetUids.length;
+      const since = new Date(
+        Date.now() - INGEST_WINDOW_DAYS * 24 * 3600 * 1000,
+      );
+
+      const matchedUids = new Map<number, MatchedCategory>();
+      for (const f of SENDER_FILTERS) {
+        const hits =
+          (await client.search({ since, from: f.imapFrom })) || [];
+        for (const uid of hits) {
+          if (!matchedUids.has(uid)) matchedUids.set(uid, f.category);
+        }
+      }
+
+      const sortedUids = Array.from(matchedUids.keys()).sort((a, b) => b - a);
+      summary.scanned = sortedUids.length;
+      const targetUids = sortedUids.slice(0, MAX_MESSAGES_PER_RUN);
+      summary.hasMore = sortedUids.length > targetUids.length;
 
       for (const uid of targetUids) {
         try {
@@ -254,7 +278,8 @@ export default async function handler(
 
           const parsed = await simpleParser(msg.source);
           const fromText = parsed.from?.text ?? '';
-          const category = classifySender(fromText);
+          const category =
+            classifySender(fromText) ?? matchedUids.get(uid) ?? null;
           if (!category) {
             summary.details.push({ uid, status: 'no-match' });
             continue;

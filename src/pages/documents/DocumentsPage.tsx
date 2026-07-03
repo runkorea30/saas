@@ -63,6 +63,7 @@ export function DocumentsPage() {
               processed: number;
               skipped: number;
               errors: number;
+              hasMore?: boolean;
             };
           }
         | null;
@@ -73,9 +74,14 @@ export function DocumentsPage() {
       }
       const s = body.summary;
       const summaryText = s
-        ? `스캔 ${s.scanned} · 신규 ${s.processed} · 스킵 ${s.skipped} · 오류 ${s.errors}`
+        ? `신규 ${s.processed} · 스킵 ${s.skipped} · 오류 ${s.errors}${
+            s.hasMore ? ' · 더 있음 (다시 눌러서 계속)' : ''
+          }`
         : '완료';
-      showToast({ kind: 'success', text: `메일 확인 완료 — ${summaryText}` });
+      showToast({
+        kind: s?.hasMore ? 'info' : 'success',
+        text: `메일 확인 완료 — ${summaryText}`,
+      });
       await queryClient.invalidateQueries({
         queryKey: ['document-files', companyId],
       });
