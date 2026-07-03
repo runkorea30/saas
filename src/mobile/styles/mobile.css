@@ -56,6 +56,38 @@ body.mobile-active #root {
   --m-border: #2c2c2e;
   --m-border-strong: #3a3a3c;
   --m-primary-wash: #2a1a1d;
+
+  /* 🔴 OPS 데스크톱 토큰 리매핑 —
+     모바일은 useForceLightTheme 로 html data-theme 을 제거하므로,
+     데스크톱과 공유하는 컴포넌트(InvoiceUploadCard, FinalReviewPanel 등)가
+     사용하는 var(--bg)/var(--surface)/var(--ink) 등이 라이트 값에 고정된다.
+     모바일 다크 팔레트와 동일 톤으로 매핑해 공유 컴포넌트도 자동 다크화. */
+  --bg: #111111;
+  --bg-sunken: #0a0a0a;
+  --surface: #1c1c1e;
+  --surface-2: #2a2a2c;
+  --line: #2c2c2e;
+  --line-strong: #3a3a3c;
+
+  --ink: #f5f5f5;
+  --ink-2: #d1d5db;
+  --ink-3: #9ca3af;
+  --ink-4: #6b7280;
+
+  --brand: #b04656;
+  --brand-deep: #6b1f2a;
+  --brand-ink: #f0c9cf;
+  --brand-wash: #2a1a1d;
+  --brand-wash-2: #3a232a;
+
+  --success: #86c78c;
+  --success-wash: #1a2e1f;
+  --warning: #e0b060;
+  --warning-wash: #2e2416;
+  --danger: #e07a70;
+  --danger-wash: #2e1a18;
+  --info: #86b4d9;
+  --info-wash: #172230;
 }
 
 .mobile-app {
