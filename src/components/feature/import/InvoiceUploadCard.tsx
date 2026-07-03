@@ -759,6 +759,49 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
           setAttaching(false);
         }
       }
+
+      // 거래처 안내 설정 태그 목록 자동 동기화 — 이번 이관 세트의 제품 중
+      //  아직 태그에 없는 것만 append. 삭제/덮어쓰기 없음(race-free RPC 사용).
+      //  실패해도 이관 자체는 진행. products prop 이 비어있으면 스킵.
+      try {
+        const tagItems: Array<{ code: string; name: string }> = [];
+        const seenCodes = new Set<string>();
+        for (const r of rows) {
+          const rawCode = r.sourceCode?.trim();
+          if (!rawCode) continue;
+          const normCode = normalizeCode(rawCode);
+          if (!normCode || seenCodes.has(normCode)) continue;
+          const name = productNameByCode.get(normCode);
+          if (!name) {
+            // eslint-disable-next-line no-console
+            console.warn('[notice-tag-sync] products 매칭 실패로 스킵:', rawCode);
+            continue;
+          }
+          seenCodes.add(normCode);
+          tagItems.push({ code: rawCode, name });
+        }
+        if (tagItems.length > 0) {
+          const { error: rpcErr } = await supabase.rpc(
+            'append_import_notice_products' as never,
+            {
+              p_company_id: companyId,
+              p_items: tagItems as unknown as Json,
+              p_is_sea: shippingMode === 'sea',
+            } as never,
+          );
+          if (rpcErr) {
+            // eslint-disable-next-line no-console
+            console.error('[notice-tag-sync] RPC error', rpcErr);
+            showToast({
+              kind: 'error',
+              text: `거래처 안내 태그 동기화 실패: ${rpcErr.message}`,
+            });
+          }
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('[notice-tag-sync] unexpected', e);
+      }
     }
     onFill(rows, {
       invoiceNumber: comparison.invoiceNo,
