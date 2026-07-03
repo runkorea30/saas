@@ -27,6 +27,7 @@ import {
 } from '@/utils/deliveryFee';
 import { FileUploadSection } from '@/components/feature/customer-order/FileUploadSection';
 import { MessageSection } from '@/components/feature/customer-order/MessageSection';
+import { MobileInstallQR } from '@/components/feature/customer-order/MobileInstallQR';
 import { DirectOrderEntryCard } from '@/components/feature/customer-order/DirectOrderEntryCard';
 import { DirectShippingSection } from '@/components/feature/customer-order/DirectShippingSection';
 import {
@@ -368,6 +369,7 @@ function CustomerOrderShell({
           showToast({ kind: 'info', text: '로그아웃되었습니다.' });
         }}
       />
+      <MobileInstallQR />
       <div className="mx-auto flex w-full max-w-[1440px] flex-1 gap-[18px] p-[18px]">
         {/* ── 좌측 67%: 입력 폼 그리드 + 오늘/월별 ── */}
         <div className="flex min-w-0 flex-[0_0_67%] flex-col gap-3">
