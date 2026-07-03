@@ -706,13 +706,20 @@ export function ImportReceivingPage() {
           </h1>
         </header>
 
-        {/* 탭 헤더 */}
+        {/* 탭 헤더 — 스크롤 시 TopNav(h-14, z-20) 바로 아래에 sticky 로 붙는다.
+            long product list 를 스크롤 해도 탭 전환이 항상 가능하도록. */}
         <div
           style={{
             display: 'flex',
             gap: 4,
             marginBottom: 16,
             borderBottom: '1px solid var(--line)',
+            position: 'sticky',
+            top: 56,
+            zIndex: 10,
+            background: 'var(--bg)',
+            paddingTop: 8,
+            marginTop: -8,
           }}
         >
           <TabButton
