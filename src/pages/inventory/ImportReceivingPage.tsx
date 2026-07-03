@@ -170,29 +170,39 @@ export function ImportReceivingPage() {
         .in('category', ['import_notice_invoice_air', 'import_notice_invoice_sea']);
       // eslint-disable-next-line no-console
       console.log('[notice-invoice] response', { error, dataLength: data?.length, data });
-      if (cancelled) return;
+      if (cancelled) {
+        // eslint-disable-next-line no-console
+        console.log('[notice-invoice] SKIP setState — cancelled=true BEFORE state update');
+        return;
+      }
       const air = data?.find((d) => d.category === 'import_notice_invoice_air') ?? null;
       const sea = data?.find((d) => d.category === 'import_notice_invoice_sea') ?? null;
-      setNoticeInvoiceAir(
-        air
-          ? {
-              file_name: air.file_name,
-              file_path: air.file_path,
-              file_size: air.file_size,
-              uploaded_at: air.uploaded_at,
-            }
-          : null,
-      );
-      setNoticeInvoiceSea(
-        sea
-          ? {
-              file_name: sea.file_name,
-              file_path: sea.file_path,
-              file_size: sea.file_size,
-              uploaded_at: sea.uploaded_at,
-            }
-          : null,
-      );
+      // eslint-disable-next-line no-console
+      console.log('[notice-invoice] parsed', { airFound: !!air, seaFound: !!sea, air, sea });
+      const airVal = air
+        ? {
+            file_name: air.file_name,
+            file_path: air.file_path,
+            file_size: air.file_size,
+            uploaded_at: air.uploaded_at,
+          }
+        : null;
+      const seaVal = sea
+        ? {
+            file_name: sea.file_name,
+            file_path: sea.file_path,
+            file_size: sea.file_size,
+            uploaded_at: sea.uploaded_at,
+          }
+        : null;
+      // eslint-disable-next-line no-console
+      console.log('[notice-invoice] calling setNoticeInvoiceAir with', airVal);
+      setNoticeInvoiceAir(airVal);
+      // eslint-disable-next-line no-console
+      console.log('[notice-invoice] calling setNoticeInvoiceSea with', seaVal);
+      setNoticeInvoiceSea(seaVal);
+      // eslint-disable-next-line no-console
+      console.log('[notice-invoice] setState calls returned');
     })();
     return () => {
       cancelled = true;
@@ -829,6 +839,14 @@ export function ImportReceivingPage() {
               "입고처리로 이관" 클릭 시 document_files 에 자동 upsert 됨. */}
           {(() => {
             const rec = isSea ? noticeInvoiceSea : noticeInvoiceAir;
+            // eslint-disable-next-line no-console
+            console.log('[notice-invoice] render', {
+              isSea,
+              noticeTab,
+              noticeInvoiceAir,
+              noticeInvoiceSea,
+              rec,
+            });
             const publicUrl = rec
               ? supabase.storage
                   .from('documents')
