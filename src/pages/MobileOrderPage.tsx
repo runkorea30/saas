@@ -68,7 +68,7 @@ export default function MobileOrderPage() {
   return (
     <div className="mo-root" data-mobile-theme={theme}>
       <div className="mo-frame">
-        <MobileOrderInstallBanner />
+        <MobileOrderInstallBanner forceShow={!session} />
         {session ? (
           <AuthenticatedShell
             session={session}

@@ -34,7 +34,17 @@ function writeDismissed(): void {
   }
 }
 
-export function MobileOrderInstallBanner() {
+interface MobileOrderInstallBannerProps {
+  /**
+   * true 이면 localStorage 의 닫힘 기록을 무시하고 항상 렌더 + X 버튼 숨김.
+   * 로그인 이전 화면에서 배너가 항상 눈에 띄도록 강제.
+   */
+  forceShow?: boolean;
+}
+
+export function MobileOrderInstallBanner({
+  forceShow = false,
+}: MobileOrderInstallBannerProps = {}) {
   const [deferredPrompt, setDeferredPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
   const [isIOS, setIsIOS] = useState(false);
@@ -76,7 +86,8 @@ export function MobileOrderInstallBanner() {
     };
   }, []);
 
-  if (isStandalone || dismissed) return null;
+  if (isStandalone) return null;
+  if (dismissed && !forceShow) return null;
 
   const handleInstallClick = async () => {
     if (!deferredPrompt) return;
@@ -96,19 +107,19 @@ export function MobileOrderInstallBanner() {
   const wrapperStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
-    gap: 10,
-    padding: '10px 12px',
-    margin: '10px 12px 0',
+    gap: 14,
+    padding: '16px 16px',
+    margin: '14px 12px 0',
     background: 'var(--mo-bg-card)',
     border: '1px solid var(--mo-border)',
-    borderRadius: 10,
+    borderRadius: 12,
     color: 'var(--mo-text-primary)',
   };
 
   const closeBtnStyle: React.CSSProperties = {
     flexShrink: 0,
-    width: 28,
-    height: 28,
+    width: 32,
+    height: 32,
     padding: 0,
     border: 'none',
     background: 'transparent',
@@ -125,21 +136,21 @@ export function MobileOrderInstallBanner() {
     return (
       <div role="region" aria-label="앱 설치 안내" style={wrapperStyle}>
         <Download
-          size={20}
+          size={28}
           aria-hidden
           style={{ color: 'var(--mo-accent)', flexShrink: 0 }}
         />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
-            style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.25 }}
+            style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.25 }}
           >
             앱처럼 편하게 쓰시려면?
           </div>
           <div
             style={{
-              marginTop: 2,
-              fontSize: 12,
-              lineHeight: 1.3,
+              marginTop: 4,
+              fontSize: 14,
+              lineHeight: 1.35,
               color: 'var(--mo-text-secondary)',
             }}
           >
@@ -151,11 +162,11 @@ export function MobileOrderInstallBanner() {
           onClick={handleInstallClick}
           style={{
             flexShrink: 0,
-            padding: '7px 12px',
-            fontSize: 12.5,
+            padding: '10px 16px',
+            fontSize: 14,
             fontWeight: 600,
             border: '1px solid var(--mo-accent)',
-            borderRadius: 8,
+            borderRadius: 10,
             background: 'var(--mo-accent)',
             color: '#ffffff',
             cursor: 'pointer',
@@ -164,14 +175,16 @@ export function MobileOrderInstallBanner() {
         >
           홈 화면에 설치
         </button>
-        <button
-          type="button"
-          onClick={handleDismiss}
-          aria-label="닫기"
-          style={closeBtnStyle}
-        >
-          <X size={16} aria-hidden />
-        </button>
+        {!forceShow && (
+          <button
+            type="button"
+            onClick={handleDismiss}
+            aria-label="닫기"
+            style={closeBtnStyle}
+          >
+            <X size={18} aria-hidden />
+          </button>
+        )}
       </div>
     );
   }
@@ -185,25 +198,25 @@ export function MobileOrderInstallBanner() {
         style={{ ...wrapperStyle, alignItems: 'flex-start' }}
       >
         <Share
-          size={20}
+          size={28}
           aria-hidden
           style={{
             color: 'var(--mo-accent)',
             flexShrink: 0,
-            marginTop: 2,
+            marginTop: 3,
           }}
         />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
-            style={{ fontSize: 13.5, fontWeight: 600, lineHeight: 1.25 }}
+            style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.25 }}
           >
             앱처럼 편하게 쓰시려면?
           </div>
           <div
             style={{
-              marginTop: 3,
-              fontSize: 12,
-              lineHeight: 1.4,
+              marginTop: 5,
+              fontSize: 14,
+              lineHeight: 1.45,
               color: 'var(--mo-text-secondary)',
             }}
           >
@@ -212,7 +225,7 @@ export function MobileOrderInstallBanner() {
               공유 버튼
             </strong>
             <Share
-              size={12}
+              size={14}
               aria-hidden
               style={{
                 display: 'inline',
@@ -225,7 +238,7 @@ export function MobileOrderInstallBanner() {
             <strong style={{ color: 'var(--mo-text-primary)' }}>
               &quot;홈 화면에 추가
               <Plus
-                size={12}
+                size={14}
                 aria-hidden
                 style={{
                   display: 'inline',
@@ -238,14 +251,16 @@ export function MobileOrderInstallBanner() {
             를 선택해 주세요.
           </div>
         </div>
-        <button
-          type="button"
-          onClick={handleDismiss}
-          aria-label="닫기"
-          style={closeBtnStyle}
-        >
-          <X size={16} aria-hidden />
-        </button>
+        {!forceShow && (
+          <button
+            type="button"
+            onClick={handleDismiss}
+            aria-label="닫기"
+            style={closeBtnStyle}
+          >
+            <X size={18} aria-hidden />
+          </button>
+        )}
       </div>
     );
   }
