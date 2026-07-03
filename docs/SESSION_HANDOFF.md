@@ -105,6 +105,85 @@
 
 ---
 
+## 오늘 추가된 작업 요약 (2026-07-03, 보안 사고 대응 + 인보이스 PDF 자동 이관 + 안내 제품 wipe 재발 방지)
+
+### 1. 보안 사고 대응 (완료)
+- **Anthropic API 키 클라이언트 노출**: `VITE_ANTHROPIC_API_KEY` → 서버리스 함수(`api/analyze-invoice.ts`)로 이전. 키 rotate 완료, Vercel에 `ANTHROPIC_API_KEY`(VITE_ 없음)로 등록 완료.
+- **Supabase service_role 키 git 히스토리 유출** (`.env.migration`, 커밋 `afa9a59`): 레거시 anon/service_role 키 체계 완전 폐지 → 신규 publishable/secret 키 체계로 전환 완료. `@supabase/supabase-js` `^2.46.1` → `^2.110.0` 업그레이드. Supabase 대시보드에서 "Disable JWT-based API keys" 실행 완료 — 레거시 키 완전 무효화됨.
+- **부수 발견 및 조치**: 로컬 개발환경(`npm run dev`)에서 `/api/*` 호출이 안 되던 문제 → `vite.config.ts`에 프로덕션 함수로 프록시 추가.
+- git 히스토리 재작성(filter-repo/BFG)은 보류 — rotate로 이미 무력화되어 급하지 않음. 필요 시 별도 승인 후 진행.
+
+### 2. 발주서/수입매입 기능 개선 (완료)
+- 재고매입 하위 탭 순서 변경 (수입/매입 ↔ 발주서)
+- 발주서 최종결정 화면 엑셀다운로드 버그 수정 (조정된 수량이 반영 안 되던 문제 → DB 재조회 방식으로 수정)
+- 발주서 엑셀다운로드에 V1 브랜드 서식 적용 (네이비 헤더, 줄무늬, TOTAL 합계행) — `exceljs` 라이브러리로 전환
+- 발주서 엑셀다운로드 → 수입/매입 "인보이스 자동입고"에 자동 반영 (`invoice_verifications` UPSERT, 기존 비교/인보이스 데이터는 안전 방식(a)로 전체 초기화)
+
+### 3. 인보이스 검증 다중 세션 지원 (완료)
+- 항공/해상을 동시에 진행 중인 검증을 별도 세션으로 관리 (company_id UNIQUE 제약 제거, 세션 탭 UI 추가)
+- 세션 라벨은 다운로드 시각 기준, 완료 시 즉시 삭제
+
+### 4. 인보이스 검증 화면 개선 (완료)
+- 코드 인라인 수정 시 자동 재매칭 (`rebuildComparisonFromEdits`)
+- "인보이스만" 행에 "↑ 주문서 코드로 수정" 힌트로 방향 정정 (원래 반대 방향으로 잘못 구현됐던 것 수정)
+- 인라인 편집 input 글자 안 보이는 문제 수정 (다크 테마 배경/글자색 충돌)
+- "비교 시작" 클릭 시 `e.arrayBuffer is not a function` 에러 수정 (자동입고 세션은 File 객체가 아니라 이미 파싱된 order_rows를 직접 사용하도록 분기 처리)
+
+### 5. 인보이스 PDF 자동 이관 → 거래처 안내 설정 (완료, 긴 디버깅 끝에 해결)
+- "입고처리로 이관" 클릭 시 인보이스 PDF를 거래처 안내 설정(`document_files`, category=`import_notice_invoice_air`/`sea`)에 자동 반영
+- 항공/해상 라디오 선택 후 이관, 매번 최신 파일로 덮어쓰기
+- **디버깅 과정에서 밝혀진 것들**:
+  - write(이관 저장) 로직은 처음부터 정상 동작했으나, read(화면 표시) 쪽 JSX 조건문이 `rec && publicUrl` 형태로 되어있어 `publicUrl`이 falsy일 때 데이터가 있어도 "없음"으로 표시되던 버그 → `rec` 존재 여부만으로 조건 완화하여 해결
+  - `document_files.category` CHECK 제약에 `import_notice_invoice_air`/`sea` 값 누락되어 있어 INSERT 가 조용히 실패하던 문제 → 마이그레이션 `20260703010000_...` 로 allowlist 추가
+  - `handleFill` 이 `attachInvoiceToNotice` 를 fire-and-forget 후 즉시 tab 전환 → 타이밍 레이스 → `handleFill` async 화 + await 로 수정, `attaching` 로딩 state 추가
+  - `noticeInvoiceReloadKey` counter 를 useEffect deps 에 추가 — portal 탭이 이미 열려있어도 이관 시 재조회 트리거
+  - `attachInvoiceToNotice` 실패 시 `setError` (곧 언마운트) 대신 `showToast` (전역, 탭 전환 후에도 표시) 로 변경
+  - **부수 사고**: 이 작업 도중 `companies.import_notice_products`(거래처 안내 설정의 "표시할 제품" 목록)가 저장 로직의 전체 필드 UPDATE 방식 때문에 **두 차례 실수로 빈 배열로 초기화됨**. 매번 SQL로 수동 복구함. 최종적으로 원인 수정 완료 및 재현 테스트 통과 확인됨 (날짜 필드만 수정 후 저장해도 제품 목록 유지되는 것 확인).
+
+### 6. UX 개선 (완료)
+- 거래처 안내 설정 "전체 삭제" 버튼 — 확인 팝업 + 즉시 자동저장으로 변경 (기존엔 삭제 후 별도로 "저장"까지 눌러야 실제 반영되어 혼란 있었음)
+
+### 7. import_notice_products wipe 재발 방지 (완료, 근본 수정)
+- **재발 이력**: 2026-07-03 하루에만 두 차례 `import_notice_products` 가 `[]` 로 wipe.
+- **근본 원인**: `handleNoticeSave` payload 가 활성 탭의 전체 필드를 UPDATE. `noticeProducts` state 는 `useEffect(company)` 로 늦게 hydrate. 사용자가 hydration 완료 전에 다른 필드만 수정하고 저장하면 초기값 `[]` 이 DB 를 덮어씀.
+- **수정** (커밋 `6a76dc0`): 
+  - `persistProducts(nextProducts, seaTab)` 신규 — products 컬럼만 targeted UPDATE
+  - `mutateProducts(next)` 신규 — 낙관적 UI + 실패 시 롤백
+  - add/remove/PDF 파싱/전체삭제 시 즉시 `mutateProducts` 호출
+  - `handleNoticeSave` payload 에서 `import_notice_products` / `import_notice_sea_products` 두 필드 **완전 제거** — 어떤 상황에서도 저장 버튼이 products 를 못 만짐 (구조적 불가능)
+  - 데스크톱 `ImportReceivingPage.tsx` + 모바일 `mobile/pages/ImportPage.tsx` 동일 패턴
+  - 모바일 `PortalSection` 는 `setActiveProducts` prop → `onRemoveProduct` 콜백 prop 으로 변경 (로컬 state 만 조작하던 경로 제거)
+
+### 8. `import_notice_products` shape drift 대응 (완료)
+- DB 에 flat string 배열 `["72001001", ...]` 로 저장된 레거시 데이터가 있으면 `normalizeProductsJson` / `pickNoticeProducts` 가 filter 로 전부 제거 → 화면 0개로 표시되던 문제
+- 두 정규화 함수 모두 flat string 도 통과되게 수정 (`{code: str, name: str}` 로 wrap). 정식 shape `{code, name}` 도 그대로 통과.
+
+### 임시 진단 로그 (남겨둠, 별도 커밋으로 정리 예정)
+- `[notice-invoice]` (ImportReceivingPage): useEffect 진입/스킵/응답/setState/렌더 시점 state 값
+- `[portal-notice]` (CustomerOrderPage): 파트너 포털의 companies row / pickNoticeProducts / render 결과
+- 문제 재발 시 즉시 원인 파악 가능하도록 현재는 유지
+
+### 현재 데이터 상태 (2026-07-03 기준)
+- `companies.id = 9e13f035-ed4f-4a41-9043-6a585beab221` (런코리아 회사)
+  - `import_notice_status`: "도착예정"
+  - `notice_title`: "항공운송 수입 입고예정"
+  - `import_notice_products`: 14개 항목, `{code, name}` 객체 배열로 정상 저장됨 (복구 완료, 재발 방지 수정도 검증 완료)
+  - `import_notice_sea_products`: `[]` (해상 쪽은 아직 데이터 없음)
+- `document_files` 에 `import_notice_invoice_air` 카테고리로 인보이스 PDF 1건 정상 연동됨
+
+### 남은 항목 (급하지 않음, 여유 있을 때)
+1. `docs/claude-code-execution-prompts.md`, `supabase/migrations/README.md` 에 레거시 `VITE_SUPABASE_ANON_KEY` 예시 문구가 남아있음 — 코드 동작과 무관, 문서만 정리하면 됨
+2. git 히스토리 재작성 — rotate로 이미 안전하지만, 완전히 깨끗하게 하고 싶으면 `git filter-repo` 로 별도 진행 (강제 푸시 필요, 진행 전 재승인 필요)
+3. 해상(sea) 쪽 거래처 안내 설정 데이터는 아직 입력 안 됨 — 필요 시 나중에 채울 것
+4. `[notice-invoice]` / `[portal-notice]` 진단 로그 제거 (별도 커밋)
+
+### 작업 원칙 리마인더
+- 모든 Claude Code 지시는 `.md` 파일로 저장 후 전달하는 방식 유지
+- 새 기능은 "분석 → 승인 → 진행" 체크포인트 유지
+- **오늘의 교훈**: "수정 완료" 라는 보고만 믿지 말고, 가능하면 실제 콘솔 로그/DB 조회로 직접 검증할 것 (오늘 인보이스 PDF 이관 건에서 여러 차례 "고쳤다" 는 보고가 실제로는 미반영이었음이 드러남)
+
+---
+
 ## 오늘 추가된 작업 요약 (2026-06-28, 인보이스 검증 + 재고실사 + 홈 위젯)
 
 이번 세션은 Phase 3.27 → 3.33 까지 7개 페이즈가 연달아 진행된 큰 세션. 핵심 변경:
