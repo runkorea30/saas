@@ -399,7 +399,7 @@ export function ImportPage() {
       showToast({ kind: 'info', text: '이미 추가된 제품입니다.' });
       return;
     }
-    setActiveProducts((prev) => [...prev, { code: found.code, name: found.name }]);
+    void mutateProducts([...activeProducts, { code: found.code, name: found.name }]);
     setNoticeProductInput('');
   };
 
@@ -429,7 +429,7 @@ export function ImportPage() {
         matched.push({ code: product.code, name: product.name });
       }
       if (matched.length > 0) {
-        setActiveProducts((prev) => [...prev, ...matched]);
+        void mutateProducts([...activeProducts, ...matched]);
       }
       const parts: string[] = [`${matched.length}개 제품 추가됨`];
       if (unmatched.length > 0) {
@@ -451,14 +451,53 @@ export function ImportPage() {
     }
   };
 
+  // 🔴 products 는 mutation 시점마다 즉시 targeted UPDATE — desktop
+  //    ImportReceivingPage 와 동일 규칙. 아래 save payload 에도 products 는 절대
+  //    포함시키지 말 것 (hydration race 로 DB wipe 재발 방지).
+  const persistProducts = async (
+    nextProducts: ImportNoticeProduct[],
+    seaTab: boolean,
+  ): Promise<boolean> => {
+    if (!companyId) return false;
+    const updateData = seaTab
+      ? { import_notice_sea_products: nextProducts as unknown as Json }
+      : { import_notice_products: nextProducts as unknown as Json };
+    const { error } = await supabase
+      .from('companies')
+      .update(updateData)
+      .eq('id', companyId);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error('[mobile-import-notice.persistProducts]', error);
+      showToast({
+        kind: 'error',
+        text: `제품 목록 저장 실패: ${error.message}`,
+      });
+      return false;
+    }
+    await queryClient.invalidateQueries({ queryKey: ['current-company'] });
+    return true;
+  };
+
+  const mutateProducts = async (next: ImportNoticeProduct[]) => {
+    const prev = activeProducts;
+    const seaTab = isSea;
+    setActiveProducts(next);
+    const ok = await persistProducts(next, seaTab);
+    if (!ok) {
+      if (seaTab) setNoticeSeaProducts(prev);
+      else setNoticeProducts(prev);
+    }
+  };
+
   const handleNoticeSave = async () => {
     if (!companyId) return;
     setNoticeSaving(true);
     try {
+      // 🔴 products 필드 절대 미포함 — persistProducts() 로만 별도 저장.
       const updateData = isSea
         ? {
             import_notice_sea_status: noticeSeaStatus || null,
-            import_notice_sea_products: noticeSeaProducts as unknown as Json,
             import_notice_sea_order_date: noticeSeaOrderDate || null,
             import_notice_sea_ship_date: noticeSeaShipDate || null,
             import_notice_sea_customs_date: noticeSeaCustomsDate || null,
@@ -467,7 +506,6 @@ export function ImportPage() {
         : {
             import_notice_status: noticeStatus || null,
             import_notice_date: noticeDate || null,
-            import_notice_products: noticeProducts as unknown as Json,
             import_notice_order_date: noticeOrderDate || null,
             import_notice_ship_date: noticeShipDate || null,
             import_notice_customs_date: noticeCustomsDate || null,
@@ -646,12 +684,20 @@ export function ImportPage() {
               noticeDate={noticeDate}
               setNoticeDate={setNoticeDate}
               activeProducts={activeProducts}
-              setActiveProducts={setActiveProducts}
+              onRemoveProduct={(code) => {
+                void mutateProducts(activeProducts.filter((x) => x.code !== code));
+              }}
               noticeProductInput={noticeProductInput}
               setNoticeProductInput={setNoticeProductInput}
               noticeParsingPdf={noticeParsingPdf}
               onAddProduct={handleAddNoticeProduct}
-              onClearProducts={() => setActiveProducts([])}
+              onClearProducts={() => {
+                if (activeProducts.length === 0) return;
+                const ok = window.confirm(
+                  `${isSea ? '해상운송' : '페덱스'} 탭의 제품 목록 ${activeProducts.length}개를 모두 삭제하고 즉시 저장합니다.\n\n되돌릴 수 없습니다. 진행할까요?`,
+                );
+                if (ok) void mutateProducts([]);
+              }}
               onUploadPdf={handleNoticePdfUpload}
               onSave={handleNoticeSave}
               saving={noticeSaving}
@@ -738,7 +784,7 @@ interface PortalSectionProps {
   noticeDate: string;
   setNoticeDate: (v: string) => void;
   activeProducts: ImportNoticeProduct[];
-  setActiveProducts: React.Dispatch<React.SetStateAction<ImportNoticeProduct[]>>;
+  onRemoveProduct: (code: string) => void;
   noticeProductInput: string;
   setNoticeProductInput: (v: string) => void;
   noticeParsingPdf: boolean;
@@ -987,9 +1033,7 @@ function PortalSection(p: PortalSectionProps) {
               <span style={{ color: 'var(--m-text)' }}>{it.name}</span>
               <button
                 type="button"
-                onClick={() =>
-                  p.setActiveProducts((prev) => prev.filter((x) => x.code !== it.code))
-                }
+                onClick={() => p.onRemoveProduct(it.code)}
                 style={{
                   border: 'none',
                   background: 'transparent',

@@ -495,7 +495,8 @@ export function ImportReceivingPage() {
       showToast({ kind: 'info', text: '이미 추가된 제품입니다.' });
       return;
     }
-    setActiveProducts((prev) => [...prev, { code: found.code, name: found.name }]);
+    const next = [...activeProducts, { code: found.code, name: found.name }];
+    void mutateProducts(next);
     setNoticeProductInput('');
   };
 
@@ -532,7 +533,7 @@ export function ImportReceivingPage() {
       }
 
       if (matched.length > 0) {
-        setActiveProducts((prev) => [...prev, ...matched]);
+        void mutateProducts([...activeProducts, ...matched]);
       }
 
       const parts: string[] = [`${matched.length}개 제품 추가됨`];
@@ -557,10 +558,51 @@ export function ImportReceivingPage() {
     }
   };
 
+  // 🔴 products 는 저장 버튼과 완전히 분리 — 모든 변경(추가/삭제/PDF 파싱/전체삭제)
+  //    시점마다 즉시 targeted UPDATE. 이렇게 하지 않으면 사용자가 페이지 hydration
+  //    (useEffect 로 company 값을 state 에 복사) 완료 전에 다른 필드만 편집하고
+  //    "저장" 을 누르는 경우, 저장 payload 에 들어간 초기값 [] 이 DB 를 wipe.
+  //    (실제 발생 이력 2회 — 08:20 UTC 재현.)
+  const persistProducts = async (
+    nextProducts: ImportNoticeProduct[],
+    seaTab: boolean,
+  ): Promise<boolean> => {
+    if (!companyId) return false;
+    const updateData = seaTab
+      ? { import_notice_sea_products: nextProducts as unknown as Json }
+      : { import_notice_products: nextProducts as unknown as Json };
+    const { error } = await supabase
+      .from('companies')
+      .update(updateData)
+      .eq('id', companyId);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error('[import-notice.persistProducts]', error);
+      showToast({
+        kind: 'error',
+        text: `제품 목록 저장 실패: ${error.message}`,
+      });
+      return false;
+    }
+    await queryClient.invalidateQueries({ queryKey: ['current-company'] });
+    return true;
+  };
+
+  // 낙관적 UI: state 를 먼저 갱신, 저장 실패 시 롤백.
+  const mutateProducts = async (next: ImportNoticeProduct[]) => {
+    const prev = activeProducts;
+    const seaTab = isSea;
+    setActiveProducts(next);
+    const ok = await persistProducts(next, seaTab);
+    if (!ok) {
+      // 롤백 — 다른 탭으로 이동한 후여도 원래 탭의 setter 를 직접 부름.
+      if (seaTab) setNoticeSeaProducts(prev);
+      else setNoticeProducts(prev);
+    }
+  };
+
   // "전체 삭제" 버튼: 확인 후 즉시 저장까지 원자적으로.
-  //  기존에는 로컬 state 만 비우고 별도 "저장" 클릭이 필요해 사용자가
-  //  삭제된 줄 오인함. 현재 활성 탭 (페덱스/해상) 의 products 컬럼만
-  //  빈 배열로 UPDATE — status/date 등 다른 필드는 건드리지 않음.
+  //  현재 활성 탭 (페덱스/해상) 의 products 컬럼만 빈 배열로 UPDATE.
   const handleClearAll = async () => {
     if (!companyId) return;
     if (activeProducts.length === 0) return;
@@ -568,26 +610,13 @@ export function ImportReceivingPage() {
       `${isSea ? '해상운송' : '페덱스'} 탭의 제품 목록 ${activeProducts.length}개를 모두 삭제하고 즉시 저장합니다.\n\n되돌릴 수 없습니다. 진행할까요?`,
     );
     if (!ok) return;
-    setActiveProducts([]);
     setNoticeSaving(true);
     try {
-      const updateData = isSea
-        ? { import_notice_sea_products: [] as unknown as Json }
-        : { import_notice_products: [] as unknown as Json };
-      const { error } = await supabase
-        .from('companies')
-        .update(updateData)
-        .eq('id', companyId);
-      if (error) throw error;
-      await queryClient.invalidateQueries({ queryKey: ['current-company'] });
-      showToast({ kind: 'success', text: '전체 삭제 후 저장되었습니다.' });
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error('[import-notice.clear]', e);
-      showToast({
-        kind: 'error',
-        text: e instanceof Error ? e.message : '전체 삭제 중 오류가 발생했습니다.',
-      });
+      const persisted = await persistProducts([], isSea);
+      if (persisted) {
+        setActiveProducts([]);
+        showToast({ kind: 'success', text: '전체 삭제 후 저장되었습니다.' });
+      }
     } finally {
       setNoticeSaving(false);
     }
@@ -597,10 +626,14 @@ export function ImportReceivingPage() {
     if (!companyId) return;
     setNoticeSaving(true);
     try {
+      // 🔴 import_notice_products / import_notice_sea_products 는 이 payload 에
+      //    포함하지 않음. products 는 add/remove/PDF/전체삭제 시 즉시 targeted
+      //    UPDATE 로 persistProducts() 를 통해 별도 저장. 이 함수에 포함시키면
+      //    사용자가 hydration 완료 전에 다른 필드만 편집하고 저장할 때 초기값
+      //    [] 이 DB 를 wipe 하는 사고가 재발 (2회 확인됨).
       const updateData = isSea
         ? {
             import_notice_sea_status: noticeSeaStatus || null,
-            import_notice_sea_products: noticeSeaProducts as unknown as Json,
             import_notice_sea_order_date: noticeSeaOrderDate || null,
             import_notice_sea_ship_date: noticeSeaShipDate || null,
             import_notice_sea_customs_date: noticeSeaCustomsDate || null,
@@ -609,7 +642,6 @@ export function ImportReceivingPage() {
         : {
             import_notice_status: noticeStatus || null,
             import_notice_date: noticeDate || null,
-            import_notice_products: noticeProducts as unknown as Json,
             import_notice_order_date: noticeOrderDate || null,
             import_notice_ship_date: noticeShipDate || null,
             import_notice_customs_date: noticeCustomsDate || null,
@@ -1209,11 +1241,12 @@ export function ImportReceivingPage() {
                   <span style={{ color: 'var(--ink)' }}>{p.name}</span>
                   <button
                     type="button"
-                    onClick={() =>
-                      setActiveProducts((prev) =>
-                        prev.filter((x) => x.code !== p.code),
-                      )
-                    }
+                    onClick={() => {
+                      const next = activeProducts.filter(
+                        (x) => x.code !== p.code,
+                      );
+                      void mutateProducts(next);
+                    }}
                     style={{
                       border: 'none',
                       background: 'transparent',
