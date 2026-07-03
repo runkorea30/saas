@@ -839,6 +839,11 @@ export function ImportReceivingPage() {
               "입고처리로 이관" 클릭 시 document_files 에 자동 upsert 됨. */}
           {(() => {
             const rec = isSea ? noticeInvoiceSea : noticeInvoiceAir;
+            const publicUrl = rec
+              ? supabase.storage
+                  .from('documents')
+                  .getPublicUrl(rec.file_path).data.publicUrl
+              : null;
             // eslint-disable-next-line no-console
             console.log('[notice-invoice] render', {
               isSea,
@@ -846,12 +851,11 @@ export function ImportReceivingPage() {
               noticeInvoiceAir,
               noticeInvoiceSea,
               rec,
+              publicUrl,
+              publicUrlType: typeof publicUrl,
+              publicUrlTruthy: !!publicUrl,
+              condition: !!(rec && publicUrl),
             });
-            const publicUrl = rec
-              ? supabase.storage
-                  .from('documents')
-                  .getPublicUrl(rec.file_path).data.publicUrl
-              : null;
             return (
               <div
                 style={{
@@ -867,10 +871,10 @@ export function ImportReceivingPage() {
                 }}
               >
                 <span style={{ color: 'var(--ink-3)', flexShrink: 0 }}>인보이스 PDF</span>
-                {rec && publicUrl ? (
+                {rec ? (
                   <>
                     <a
-                      href={publicUrl}
+                      href={publicUrl ?? '#'}
                       target="_blank"
                       rel="noreferrer"
                       style={{ color: 'var(--brand)', fontWeight: 500 }}
