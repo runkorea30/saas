@@ -462,14 +462,19 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
 
   const counts = useMemo(() => {
     const rows = comparison?.rows ?? [];
+    // `matched` 파생값 — "일치로 취급하는 상태"의 합 (요약 박스에서 사용).
+    // match_prefix (일치(코드보정))가 추가되면서 요약이 이걸 불일치로 오집계하던 버그
+    // 재발 방지 목적. 앞으로 "일치 취급" 상태가 늘면 여기만 확장하면 된다.
     const c: Record<CompareStatus, number> & {
       all: number;
+      matched: number;
       edited: number;
       invoiceTotal: number;
       orderTotal: number;
       diffTotal: number;
     } = {
       all: rows.length,
+      matched: 0,
       edited: 0,
       invoiceTotal: 0,
       orderTotal: 0,
@@ -499,6 +504,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       c.invoiceTotal += r.invoicePrice * r.invoiceQty;
       c.orderTotal += (r.orderPrice ?? r.invoicePrice) * r.orderQty;
     }
+    c.matched = c.match + c.match_prefix;
     c.invoiceTotal = parseFloat(c.invoiceTotal.toFixed(2));
     c.orderTotal = parseFloat(c.orderTotal.toFixed(2));
     c.diffTotal = parseFloat((c.invoiceTotal - c.orderTotal).toFixed(2));
@@ -1040,21 +1046,21 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
             <div
               style={{
                 flex: '1 1 140px',
-                border: `1px solid ${counts.match === counts.all ? 'var(--success)' : 'var(--line)'}`,
+                border: `1px solid ${counts.matched === counts.all ? 'var(--success)' : 'var(--line)'}`,
                 borderRadius: 8,
                 padding: '8px 14px',
-                background: counts.match === counts.all ? 'var(--success-wash)' : 'var(--surface)',
+                background: counts.matched === counts.all ? 'var(--success-wash)' : 'var(--surface)',
               }}
             >
               <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginBottom: 3 }}>
                 검증 현황
               </div>
               <div style={{ fontWeight: 700, fontSize: 13 }}>
-                {counts.match === counts.all ? (
+                {counts.matched === counts.all ? (
                   <span style={{ color: 'var(--success)' }}>✅ 전체 일치</span>
                 ) : (
                   <span style={{ color: 'var(--danger)' }}>
-                    불일치 {counts.all - counts.match}건
+                    불일치 {counts.all - counts.matched}건
                     <span
                       style={{
                         fontWeight: 400,
