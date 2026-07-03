@@ -557,6 +557,42 @@ export function ImportReceivingPage() {
     }
   };
 
+  // "전체 삭제" 버튼: 확인 후 즉시 저장까지 원자적으로.
+  //  기존에는 로컬 state 만 비우고 별도 "저장" 클릭이 필요해 사용자가
+  //  삭제된 줄 오인함. 현재 활성 탭 (페덱스/해상) 의 products 컬럼만
+  //  빈 배열로 UPDATE — status/date 등 다른 필드는 건드리지 않음.
+  const handleClearAll = async () => {
+    if (!companyId) return;
+    if (activeProducts.length === 0) return;
+    const ok = window.confirm(
+      `${isSea ? '해상운송' : '페덱스'} 탭의 제품 목록 ${activeProducts.length}개를 모두 삭제하고 즉시 저장합니다.\n\n되돌릴 수 없습니다. 진행할까요?`,
+    );
+    if (!ok) return;
+    setActiveProducts([]);
+    setNoticeSaving(true);
+    try {
+      const updateData = isSea
+        ? { import_notice_sea_products: [] as unknown as Json }
+        : { import_notice_products: [] as unknown as Json };
+      const { error } = await supabase
+        .from('companies')
+        .update(updateData)
+        .eq('id', companyId);
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ['current-company'] });
+      showToast({ kind: 'success', text: '전체 삭제 후 저장되었습니다.' });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[import-notice.clear]', e);
+      showToast({
+        kind: 'error',
+        text: e instanceof Error ? e.message : '전체 삭제 중 오류가 발생했습니다.',
+      });
+    } finally {
+      setNoticeSaving(false);
+    }
+  };
+
   const handleNoticeSave = async () => {
     if (!companyId) return;
     setNoticeSaving(true);
@@ -1129,7 +1165,8 @@ export function ImportReceivingPage() {
               {activeProducts.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setActiveProducts([])}
+                  onClick={() => void handleClearAll()}
+                  disabled={noticeSaving}
                   style={{
                     marginLeft: 'auto',
                     padding: '6px 12px',
@@ -1138,10 +1175,11 @@ export function ImportReceivingPage() {
                     border: '1px solid var(--danger, #ef4444)',
                     background: 'var(--surface)',
                     color: 'var(--danger, #ef4444)',
-                    cursor: 'pointer',
+                    cursor: noticeSaving ? 'not-allowed' : 'pointer',
+                    opacity: noticeSaving ? 0.55 : 1,
                   }}
                 >
-                  전체 삭제
+                  {noticeSaving ? '삭제 중…' : '전체 삭제'}
                 </button>
               )}
             </div>
