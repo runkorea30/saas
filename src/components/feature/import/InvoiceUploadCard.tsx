@@ -1307,7 +1307,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
                                         : 'var(--line)'
                                   }`,
                                   borderRadius: 4,
-                                  background: focusedId === r.id + '_oqty' ? 'var(--accent-wash, #EFF6FF)' : 'var(--surface)',
+                                  background: 'var(--surface)',
                                   color: 'var(--ink)',
                                   fontSize: 12.5,
                                   outline: 'none',
@@ -1349,7 +1349,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
                                         : 'var(--line)'
                                   }`,
                                   borderRadius: 4,
-                                  background: focusedId === r.id + '_oprice' ? 'var(--accent-wash, #EFF6FF)' : 'var(--surface)',
+                                  background: 'var(--surface)',
                                   color: 'var(--ink)',
                                   fontSize: 12.5,
                                   outline: 'none',
@@ -1391,12 +1391,11 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
                                     : 'var(--line)'
                               }`,
                               borderRadius: 4,
-                              background: focusedId === r.id + '_qty' ? 'var(--accent-wash, #EFF6FF)' : 'var(--surface)',
+                              background: 'var(--surface)',
                               color: 'var(--ink)',
                               fontWeight: 500,
                               fontSize: 12.5,
                               outline: 'none',
-                              boxShadow: focusedId === r.id + '_qty' ? '0 0 0 2px var(--accent-wash, #DBEAFE)' : 'none',
                             }}
                           />
                         </div>
@@ -1427,10 +1426,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
                                     : 'var(--line)'
                               }`,
                               borderRadius: 4,
-                              background:
-                                focusedId === r.id + '_price'
-                                  ? 'var(--accent-wash, #EFF6FF)'
-                                  : 'var(--surface)',
+                              background: 'var(--surface)',
                               color: 'var(--ink)',
                               fontWeight: 500,
                               fontSize: 12,
