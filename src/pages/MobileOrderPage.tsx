@@ -21,6 +21,7 @@ import { MobileOrderLogin } from '@/components/mobile-order/MobileOrderLogin';
 import { MobileOrderUpload } from '@/components/mobile-order/MobileOrderUpload';
 import { MobileOrderForm } from '@/components/mobile-order/MobileOrderForm';
 import { MobileOrderHistory } from '@/components/mobile-order/MobileOrderHistory';
+import { MobileOrderInstallBanner } from '@/components/mobile-order/MobileOrderInstallBanner';
 import '@/styles/mobile-order.css';
 
 type ViewKey = 'upload' | 'form' | 'history';
@@ -67,6 +68,7 @@ export default function MobileOrderPage() {
   return (
     <div className="mo-root" data-mobile-theme={theme}>
       <div className="mo-frame">
+        <MobileOrderInstallBanner />
         {session ? (
           <AuthenticatedShell
             session={session}
