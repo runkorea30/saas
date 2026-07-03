@@ -1321,8 +1321,20 @@ function ImportNoticeCard({
       if (error) throw error;
       if (!data) return null;
 
+      // eslint-disable-next-line no-console
+      console.log('[portal-notice] companies row', {
+        raw_fedex: data.import_notice_products,
+        raw_sea: data.import_notice_sea_products,
+      });
       const fedexBase = pickNoticeProducts(data.import_notice_products);
       const seaBase = pickNoticeProducts(data.import_notice_sea_products);
+      // eslint-disable-next-line no-console
+      console.log('[portal-notice] pickNoticeProducts', {
+        fedexBase,
+        seaBase,
+        fedexCount: fedexBase.length,
+        seaCount: seaBase.length,
+      });
       const allCodes = Array.from(
         new Set([...fedexBase.map((p) => p.code), ...seaBase.map((p) => p.code)]),
       );
@@ -1421,6 +1433,14 @@ function ImportNoticeCard({
     : tab === 'sea' ? (notice?.sea ?? null)
     : null;
 
+  // eslint-disable-next-line no-console
+  console.log('[portal-notice] render', {
+    tab,
+    noticeLoaded: !!notice,
+    fedexProductsCount: notice?.fedex?.products?.length ?? 'n/a',
+    seaProductsCount: notice?.sea?.products?.length ?? 'n/a',
+    activeShipmentProducts: activeShipment?.products?.length ?? 'n/a',
+  });
   let productList: ImportNoticeProduct[] = [];
   if (tab === 'fedex' || tab === 'sea') {
     productList = sortByCategoryThenCode(activeShipment?.products ?? []);
