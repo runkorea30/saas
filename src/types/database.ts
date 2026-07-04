@@ -2171,6 +2171,8 @@ export type Database = {
           application_uploaded_at: string | null
           company_id: string
           created_at: string | null
+          google_drive_file_id: string | null
+          google_drive_synced_at: string | null
           hs_no: string | null
           id: string
           import_req_no: string | null
@@ -2186,6 +2188,8 @@ export type Database = {
           application_uploaded_at?: string | null
           company_id: string
           created_at?: string | null
+          google_drive_file_id?: string | null
+          google_drive_synced_at?: string | null
           hs_no?: string | null
           id?: string
           import_req_no?: string | null
@@ -2201,6 +2205,8 @@ export type Database = {
           application_uploaded_at?: string | null
           company_id?: string
           created_at?: string | null
+          google_drive_file_id?: string | null
+          google_drive_synced_at?: string | null
           hs_no?: string | null
           id?: string
           import_req_no?: string | null
