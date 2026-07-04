@@ -104,6 +104,9 @@ export default async function handler(
       .upload(row.application_file_url, buffer, {
         contentType: XLSX_MIME,
         upsert: true,
+        // 🔴 CDN 캐시(기본 3600s) 로 인해 동기화 직후 다운로드가 옛 파일을 반환하는 버그.
+        //    cacheControl:'0' 로 매 요청 원본 재조회 강제.
+        cacheControl: '0',
       });
     if (upErr) {
       return res

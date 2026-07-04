@@ -259,7 +259,12 @@ export function InspectionCertTab({ companyId }: Props) {
       }
       const { error: uploadError } = await supabase.storage
         .from('documents')
-        .upload(filePath, file, { contentType: file.type, upsert: true });
+        .upload(filePath, file, {
+          contentType: file.type,
+          upsert: true,
+          // 🔴 재업로드 시 CDN 캐시 만료 전 옛 파일이 다운로드되는 버그 방지.
+          cacheControl: '0',
+        });
       if (uploadError) {
         const msg = /bucket|not found|does not exist/i.test(uploadError.message)
           ? '파일 저장소가 준비되지 않았습니다. 관리자에게 문의하세요.'
