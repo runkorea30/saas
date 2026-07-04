@@ -13,6 +13,11 @@ import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
 import type { Database } from '@/types/database';
+import { isWithinExpiryThreshold } from '@/utils/dateThresholds';
+import {
+  INSPECTION_THRESHOLD_DAYS,
+  IMPORT_THRESHOLD_DAYS,
+} from '@/hooks/queries/useInspectionExpiryAlerts';
 
 type InspectionUpdate =
   Database['mochicraft_demo']['Tables']['inspection_certificates']['Update'];
@@ -51,26 +56,25 @@ type EditableField =
   | 'import_req_no'
   | 'import_valid_until';
 
-type ValidityKind = 'valid' | 'expiring' | 'expired' | 'unknown';
-
-function getValidityStatus(dateStr: string | null): ValidityKind {
-  if (!dateStr) return 'unknown';
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const expiry = new Date(dateStr);
-  const diffDays = Math.ceil(
-    (expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
-  );
-  if (diffDays < 0) return 'expired';
-  if (diffDays <= 90) return 'expiring';
-  return 'valid';
+/**
+ * 필드별 임계값(검사 90일 / 수입 30일) 이내면 danger 색상, 그 외엔 기본 잉크.
+ */
+function validityColorForField(
+  dateStr: string | null,
+  thresholdDays: number,
+): string {
+  if (!dateStr) return 'var(--ink-3)';
+  return isWithinExpiryThreshold(dateStr, thresholdDays)
+    ? 'var(--danger)'
+    : 'var(--ink)';
 }
 
-function validityColor(kind: ValidityKind): string {
-  if (kind === 'expired') return 'var(--danger)';
-  if (kind === 'expiring') return 'var(--warning, #C97419)';
-  if (kind === 'valid') return 'var(--success, var(--ink))';
-  return 'var(--ink-3)';
+function isNearExpiry(
+  dateStr: string | null,
+  thresholdDays: number,
+): boolean {
+  if (!dateStr) return false;
+  return isWithinExpiryThreshold(dateStr, thresholdDays);
 }
 
 interface Props {
@@ -182,6 +186,9 @@ export function InspectionCertTab({ companyId }: Props) {
         .eq('company_id', companyId);
       if (error) throw error;
       await queryClient.invalidateQueries({ queryKey });
+      await queryClient.invalidateQueries({
+        queryKey: ['inspection-expiry-alerts', companyId],
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '저장 실패';
       showToast({ kind: 'error', text: msg });
@@ -201,6 +208,9 @@ export function InspectionCertTab({ companyId }: Props) {
       if (error) throw error;
       if (!data) return;
       await queryClient.invalidateQueries({ queryKey });
+      await queryClient.invalidateQueries({
+        queryKey: ['inspection-expiry-alerts', companyId],
+      });
       // 새 행의 product_name 자동 편집.
       setTimeout(() => {
         setEditingCell({ id: data.id, field: 'product_name' });
@@ -251,6 +261,9 @@ export function InspectionCertTab({ companyId }: Props) {
       if (updateError) throw updateError;
       showToast({ kind: 'success', text: '업로드 완료' });
       await queryClient.invalidateQueries({ queryKey });
+      await queryClient.invalidateQueries({
+        queryKey: ['inspection-expiry-alerts', companyId],
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '업로드 실패';
       showToast({ kind: 'error', text: msg });
@@ -298,6 +311,9 @@ export function InspectionCertTab({ companyId }: Props) {
       if (error) throw error;
       showToast({ kind: 'success', text: '파일 삭제 완료' });
       await queryClient.invalidateQueries({ queryKey });
+      await queryClient.invalidateQueries({
+        queryKey: ['inspection-expiry-alerts', companyId],
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '삭제 실패';
       showToast({ kind: 'error', text: msg });
@@ -319,6 +335,9 @@ export function InspectionCertTab({ companyId }: Props) {
       showToast({ kind: 'success', text: `${ids.length}건 삭제 완료` });
       setCheckedIds(new Set());
       await queryClient.invalidateQueries({ queryKey });
+      await queryClient.invalidateQueries({
+        queryKey: ['inspection-expiry-alerts', companyId],
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '삭제 실패';
       showToast({ kind: 'error', text: msg });
@@ -505,6 +524,7 @@ export function InspectionCertTab({ companyId }: Props) {
                         startEdit={startEdit}
                         saveEdit={saveEdit}
                         cancelEdit={cancelEdit}
+                        thresholdDays={INSPECTION_THRESHOLD_DAYS}
                       />
                     </td>
                     <td style={cellTdStyle('left')}>
@@ -529,6 +549,7 @@ export function InspectionCertTab({ companyId }: Props) {
                         startEdit={startEdit}
                         saveEdit={saveEdit}
                         cancelEdit={cancelEdit}
+                        thresholdDays={IMPORT_THRESHOLD_DAYS}
                       />
                     </td>
                     <td style={cellTdStyle('left')}>
@@ -627,10 +648,11 @@ function EditableDateCell({
   startEdit,
   saveEdit,
   cancelEdit,
-}: CellSharedProps) {
+  thresholdDays,
+}: CellSharedProps & { thresholdDays: number }) {
   const isEditing = editingCell?.id === row.id && editingCell?.field === field;
   const value = (row[field] as string | null) ?? '';
-  const status = getValidityStatus(value || null);
+  const near = isNearExpiry(value || null, thresholdDays);
 
   if (isEditing) {
     return (
@@ -658,9 +680,8 @@ function EditableDateCell({
         minHeight: 24,
         padding: '2px 6px',
         borderRadius: 4,
-        color: validityColor(status),
-        fontWeight:
-          status === 'expired' || status === 'expiring' ? 600 : 400,
+        color: validityColorForField(value || null, thresholdDays),
+        fontWeight: near ? 600 : 400,
         transition: 'background 0.1s',
       }}
       onMouseEnter={(e) =>

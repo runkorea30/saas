@@ -18,6 +18,8 @@ import {
   type OrderBasis,
 } from '@/hooks/queries/useOrderNeedEstimate';
 import { usePurchaseOrderExcluded } from '@/hooks/usePurchaseOrderExcluded';
+import { useInspectionExpiryAlerts } from '@/hooks/queries/useInspectionExpiryAlerts';
+import { ExpiryAlertTicker } from './ExpiryAlertTicker';
 
 function fmtUsd(v: number): string {
   return v.toLocaleString('en-US', {
@@ -41,6 +43,23 @@ export function TopNav({ onLogout }: { onLogout: () => Promise<void> }) {
     basis,
     excluded,
   );
+
+  const {
+    inspectionAlerts,
+    importAlerts,
+    isLoading: alertsLoading,
+  } = useInspectionExpiryAlerts(companyId);
+
+  const alertMessages = alertsLoading
+    ? []
+    : [
+        ...inspectionAlerts.map(
+          (a) => `${a.productName} 제품의 검사유효기간 연장요청합니다.`,
+        ),
+        ...importAlerts.map(
+          (a) => `${a.productName} 제품의 수입유효기간 연장요청합니다.`,
+        ),
+      ];
 
   // 팝오버 외부 클릭 시 닫기.
   useEffect(() => {
@@ -85,11 +104,17 @@ export function TopNav({ onLogout }: { onLogout: () => Promise<void> }) {
             );
           })}
 
-          {/* 설정 바로 오른쪽 — 발주 예상 위젯 */}
+          {/* 설정 바로 오른쪽 — 유효기간 임박 티커 + 발주 예상 위젯 */}
           <span
             className="w-px h-4 bg-line mx-2"
             aria-hidden
           />
+
+          <ExpiryAlertTicker alerts={alertMessages} />
+
+          {alertMessages.length > 0 && (
+            <span className="w-px h-4 bg-line mx-2" aria-hidden />
+          )}
 
           <div className="flex items-center gap-2 relative" ref={filterRef}>
             <div className="flex rounded border border-line overflow-hidden text-xs">
