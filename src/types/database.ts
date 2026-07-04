@@ -309,6 +309,7 @@ export type Database = {
           created_at: string
           deleted_at: string | null
           id: string
+          import_expiry_threshold_months: number
           import_notice_arrival_text: string | null
           import_notice_customs_date: string | null
           import_notice_date: string | null
@@ -323,6 +324,7 @@ export type Database = {
           import_notice_ship_date: string | null
           import_notice_status: string | null
           industry: string | null
+          inspection_expiry_threshold_months: number
           name: string
           notice_body: string | null
           notice_title: string | null
@@ -335,6 +337,7 @@ export type Database = {
           created_at?: string
           deleted_at?: string | null
           id?: string
+          import_expiry_threshold_months?: number
           import_notice_arrival_text?: string | null
           import_notice_customs_date?: string | null
           import_notice_date?: string | null
@@ -349,6 +352,7 @@ export type Database = {
           import_notice_ship_date?: string | null
           import_notice_status?: string | null
           industry?: string | null
+          inspection_expiry_threshold_months?: number
           name: string
           notice_body?: string | null
           notice_title?: string | null
@@ -361,6 +365,7 @@ export type Database = {
           created_at?: string
           deleted_at?: string | null
           id?: string
+          import_expiry_threshold_months?: number
           import_notice_arrival_text?: string | null
           import_notice_customs_date?: string | null
           import_notice_date?: string | null
@@ -375,6 +380,7 @@ export type Database = {
           import_notice_ship_date?: string | null
           import_notice_status?: string | null
           industry?: string | null
+          inspection_expiry_threshold_months?: number
           name?: string
           notice_body?: string | null
           notice_title?: string | null

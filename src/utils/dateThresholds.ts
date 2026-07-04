@@ -42,3 +42,22 @@ export function isWithinExpiryThreshold(
   if (invalid) return false;
   return daysLeft <= thresholdDays;
 }
+
+/**
+ * dateStr 이 오늘 기준 months 개월 이내(만료 포함)에 도래하는지.
+ * setMonth 기반 정확한 개월 계산 — "3개월 이내" 는 오늘 + 3개월 캘린더 날짜까지.
+ * - 값이 없거나 파싱 실패면 false.
+ */
+export function isWithinExpiryMonths(
+  dateStr: string | null | undefined,
+  months: number,
+): boolean {
+  if (!dateStr) return false;
+  const expiry = new Date(dateStr);
+  if (Number.isNaN(expiry.getTime())) return false;
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setMonth(cutoff.getMonth() + months);
+  expiry.setHours(0, 0, 0, 0);
+  return expiry.getTime() <= cutoff.getTime();
+}

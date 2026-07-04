@@ -31,7 +31,7 @@ function fmtUsd(v: number): string {
 export function TopNav({ onLogout }: { onLogout: () => Promise<void> }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const { companyId } = useCompany();
+  const { companyId, company } = useCompany();
   const [basis, setBasis] = useState<OrderBasis>('1m');
   const { excluded, toggle, includeAll, restoreDefault } =
     usePurchaseOrderExcluded();
@@ -48,7 +48,11 @@ export function TopNav({ onLogout }: { onLogout: () => Promise<void> }) {
     inspectionAlerts,
     importAlerts,
     isLoading: alertsLoading,
-  } = useInspectionExpiryAlerts(companyId);
+  } = useInspectionExpiryAlerts(
+    companyId,
+    company?.inspection_expiry_threshold_months ?? 3,
+    company?.import_expiry_threshold_months ?? 1,
+  );
 
   const alertMessages = alertsLoading
     ? []

@@ -13,11 +13,13 @@ import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
 import type { Database } from '@/types/database';
-import { isWithinExpiryThreshold } from '@/utils/dateThresholds';
-import {
-  INSPECTION_THRESHOLD_DAYS,
-  IMPORT_THRESHOLD_DAYS,
-} from '@/hooks/queries/useInspectionExpiryAlerts';
+import { isWithinExpiryMonths } from '@/utils/dateThresholds';
+import { useCompany } from '@/hooks/useCompany';
+
+const THRESHOLD_MONTH_OPTIONS = [1, 2, 3, 6] as const;
+type ThresholdField =
+  | 'inspection_expiry_threshold_months'
+  | 'import_expiry_threshold_months';
 
 type InspectionUpdate =
   Database['mochicraft_demo']['Tables']['inspection_certificates']['Update'];
@@ -57,24 +59,24 @@ type EditableField =
   | 'import_valid_until';
 
 /**
- * 필드별 임계값(검사 90일 / 수입 30일) 이내면 danger 색상, 그 외엔 기본 잉크.
+ * 필드별 임계값(개월) 이내면 danger 색상, 그 외엔 기본 잉크.
  */
 function validityColorForField(
   dateStr: string | null,
-  thresholdDays: number,
+  thresholdMonths: number,
 ): string {
   if (!dateStr) return 'var(--ink-3)';
-  return isWithinExpiryThreshold(dateStr, thresholdDays)
+  return isWithinExpiryMonths(dateStr, thresholdMonths)
     ? 'var(--danger)'
     : 'var(--ink)';
 }
 
 function isNearExpiry(
   dateStr: string | null,
-  thresholdDays: number,
+  thresholdMonths: number,
 ): boolean {
   if (!dateStr) return false;
-  return isWithinExpiryThreshold(dateStr, thresholdDays);
+  return isWithinExpiryMonths(dateStr, thresholdMonths);
 }
 
 interface Props {
@@ -84,6 +86,12 @@ interface Props {
 export function InspectionCertTab({ companyId }: Props) {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
+  const { company } = useCompany();
+  const inspectionMonths = company?.inspection_expiry_threshold_months ?? 3;
+  const importMonths = company?.import_expiry_threshold_months ?? 1;
+  const [savingThreshold, setSavingThreshold] = useState<ThresholdField | null>(
+    null,
+  );
 
   const queryKey = ['inspection-certs', companyId];
 
@@ -320,6 +328,41 @@ export function InspectionCertTab({ companyId }: Props) {
     }
   };
 
+  const handleThresholdChange = async (
+    field: ThresholdField,
+    next: number,
+  ) => {
+    if (!companyId || !company) return;
+    const prev = company[field];
+    if (prev === next) return;
+    setSavingThreshold(field);
+    try {
+      // 🟠 컴퓨티드 키([field]) 는 string 으로 widening 되므로 companies Update 타입에
+      //    맞춰 명시 캐스팅. field 타입 자체가 ThresholdField 리터럴 유니온이라 안전.
+      const payload = { [field]: next } as
+        Database['mochicraft_demo']['Tables']['companies']['Update'];
+      const { error } = await supabase
+        .from('companies')
+        .update(payload)
+        .eq('id', companyId);
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ['current-company'] });
+      const label =
+        field === 'inspection_expiry_threshold_months'
+          ? '검사유효기간 임박 기준'
+          : '수입유효기간 임박 기준';
+      showToast({
+        kind: 'success',
+        text: `${label}을 ${next}개월로 저장했습니다.`,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '저장 실패';
+      showToast({ kind: 'error', text: msg });
+    } finally {
+      setSavingThreshold(null);
+    }
+  };
+
   const handleDelete = async () => {
     if (!companyId || checkedIds.size === 0) return;
     if (!window.confirm(`선택된 ${checkedIds.size}건을 삭제하시겠습니까?`))
@@ -387,6 +430,23 @@ export function InspectionCertTab({ companyId }: Props) {
         )}
 
         <div style={{ flex: 1 }} />
+
+        <ThresholdSelect
+          label="검사유효기간 임박"
+          value={inspectionMonths}
+          disabled={savingThreshold !== null}
+          onChange={(v) =>
+            handleThresholdChange('inspection_expiry_threshold_months', v)
+          }
+        />
+        <ThresholdSelect
+          label="수입유효기간 임박"
+          value={importMonths}
+          disabled={savingThreshold !== null}
+          onChange={(v) =>
+            handleThresholdChange('import_expiry_threshold_months', v)
+          }
+        />
 
         <button
           type="button"
@@ -524,7 +584,7 @@ export function InspectionCertTab({ companyId }: Props) {
                         startEdit={startEdit}
                         saveEdit={saveEdit}
                         cancelEdit={cancelEdit}
-                        thresholdDays={INSPECTION_THRESHOLD_DAYS}
+                        thresholdMonths={inspectionMonths}
                       />
                     </td>
                     <td style={cellTdStyle('left')}>
@@ -549,7 +609,7 @@ export function InspectionCertTab({ companyId }: Props) {
                         startEdit={startEdit}
                         saveEdit={saveEdit}
                         cancelEdit={cancelEdit}
-                        thresholdDays={IMPORT_THRESHOLD_DAYS}
+                        thresholdMonths={importMonths}
                       />
                     </td>
                     <td style={cellTdStyle('left')}>
@@ -648,11 +708,11 @@ function EditableDateCell({
   startEdit,
   saveEdit,
   cancelEdit,
-  thresholdDays,
-}: CellSharedProps & { thresholdDays: number }) {
+  thresholdMonths,
+}: CellSharedProps & { thresholdMonths: number }) {
   const isEditing = editingCell?.id === row.id && editingCell?.field === field;
   const value = (row[field] as string | null) ?? '';
-  const near = isNearExpiry(value || null, thresholdDays);
+  const near = isNearExpiry(value || null, thresholdMonths);
 
   if (isEditing) {
     return (
@@ -680,7 +740,7 @@ function EditableDateCell({
         minHeight: 24,
         padding: '2px 6px',
         borderRadius: 4,
-        color: validityColorForField(value || null, thresholdDays),
+        color: validityColorForField(value || null, thresholdMonths),
         fontWeight: near ? 600 : 400,
         transition: 'background 0.1s',
       }}
@@ -857,6 +917,59 @@ function cellTdStyle(
     color: 'var(--ink)',
     verticalAlign: 'middle',
   };
+}
+
+/**
+ * 임박 기준 select — 라벨 + 개월 옵션(1/2/3/6).
+ */
+function ThresholdSelect({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  disabled: boolean;
+  onChange: (next: number) => void;
+}) {
+  return (
+    <label
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        fontSize: 12,
+        color: 'var(--ink-2)',
+        fontFamily: 'var(--font-kr)',
+      }}
+    >
+      <span>{label}:</span>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{
+          height: 34,
+          padding: '0 10px',
+          borderRadius: 8,
+          border: '1px solid var(--line-strong)',
+          background: 'var(--surface)',
+          color: 'var(--ink)',
+          fontSize: 13,
+          fontFamily: 'var(--font-kr)',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          opacity: disabled ? 0.6 : 1,
+        }}
+      >
+        {THRESHOLD_MONTH_OPTIONS.map((m) => (
+          <option key={m} value={m}>
+            {m}개월
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

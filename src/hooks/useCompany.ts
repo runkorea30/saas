@@ -48,13 +48,16 @@ export interface Company {
   import_notice_sea_ship_date: string | null;
   import_notice_sea_customs_date: string | null;
   import_notice_sea_arrival_text: string | null;
+  // 유효기간 임박 경고 임계값 (개월)
+  inspection_expiry_threshold_months: number;
+  import_expiry_threshold_months: number;
 }
 
 async function fetchFirstCompany() {
   return supabase
     .from('companies')
     .select(
-      'id, name, import_notice_status, import_notice_date, import_notice_products, import_notice_order_date, import_notice_ship_date, import_notice_customs_date, import_notice_arrival_text, import_notice_sea_status, import_notice_sea_products, import_notice_sea_order_date, import_notice_sea_ship_date, import_notice_sea_customs_date, import_notice_sea_arrival_text',
+      'id, name, import_notice_status, import_notice_date, import_notice_products, import_notice_order_date, import_notice_ship_date, import_notice_customs_date, import_notice_arrival_text, import_notice_sea_status, import_notice_sea_products, import_notice_sea_order_date, import_notice_sea_ship_date, import_notice_sea_customs_date, import_notice_sea_arrival_text, inspection_expiry_threshold_months, import_expiry_threshold_months',
     )
     .is('deleted_at', null)
     .order('created_at', { ascending: true })
@@ -111,6 +114,8 @@ function normalizeCompany(row: CompanyRow | null): Company | null {
     import_notice_sea_ship_date: row.import_notice_sea_ship_date ?? null,
     import_notice_sea_customs_date: row.import_notice_sea_customs_date ?? null,
     import_notice_sea_arrival_text: row.import_notice_sea_arrival_text ?? null,
+    inspection_expiry_threshold_months: row.inspection_expiry_threshold_months ?? 3,
+    import_expiry_threshold_months: row.import_expiry_threshold_months ?? 1,
   };
 }
 
