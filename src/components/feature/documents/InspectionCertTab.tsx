@@ -8,7 +8,15 @@
  */
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, Download, X } from 'lucide-react';
+import {
+  Plus,
+  Trash2,
+  Download,
+  X,
+  ExternalLink,
+  RefreshCw,
+  Loader2,
+} from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
@@ -25,7 +33,7 @@ type InspectionUpdate =
   Database['mochicraft_demo']['Tables']['inspection_certificates']['Update'];
 
 const INSPECTION_SELECT =
-  'id, product_name, hs_no, inspection_no, inspection_valid_until, import_req_no, import_valid_until, application_file_url, application_file_name, application_uploaded_at, created_at';
+  'id, product_name, hs_no, inspection_no, inspection_valid_until, import_req_no, import_valid_until, application_file_url, application_file_name, application_uploaded_at, google_drive_file_id, google_drive_synced_at, created_at';
 
 const ALLOWED_FILE_TYPES = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -47,6 +55,8 @@ interface InspectionCert {
   application_file_url: string | null;
   application_file_name: string | null;
   application_uploaded_at: string | null;
+  google_drive_file_id: string | null;
+  google_drive_synced_at: string | null;
   created_at: string | null;
 }
 
@@ -313,6 +323,8 @@ export function InspectionCertTab({ companyId }: Props) {
           application_file_url: null,
           application_file_name: null,
           application_uploaded_at: null,
+          google_drive_file_id: null,
+          google_drive_synced_at: null,
         } as InspectionUpdate)
         .eq('id', record.id)
         .eq('company_id', companyId);
@@ -325,6 +337,108 @@ export function InspectionCertTab({ companyId }: Props) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : '삭제 실패';
       showToast({ kind: 'error', text: msg });
+    }
+  };
+
+  const [gdriveBusyId, setGdriveBusyId] = useState<string | null>(null);
+  const [gdriveMode, setGdriveMode] = useState<'open' | 'sync' | null>(null);
+
+  const openSheetInNewTab = (fileId: string) => {
+    window.open(
+      `https://docs.google.com/spreadsheets/d/${fileId}/edit`,
+      '_blank',
+      'noopener,noreferrer',
+    );
+  };
+
+  const handleOpenSheet = async (record: InspectionCert) => {
+    if (!companyId) return;
+    if (record.google_drive_file_id) {
+      openSheetInNewTab(record.google_drive_file_id);
+      return;
+    }
+    if (!record.application_file_url || !record.application_file_name) {
+      showToast({ kind: 'error', text: '먼저 파일을 업로드해 주세요' });
+      return;
+    }
+    setGdriveBusyId(record.id);
+    setGdriveMode('open');
+    try {
+      const { data, error } = await supabase.storage
+        .from('documents')
+        .download(record.application_file_url);
+      if (error || !data) {
+        showToast({ kind: 'error', text: '파일 로드 실패' });
+        return;
+      }
+      const buffer = await data.arrayBuffer();
+      const base64 = arrayBufferToBase64(buffer);
+      const res = await fetch('/api/gdrive-open', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          cert_id: record.id,
+          file_name: record.application_file_name,
+          file_base64: base64,
+          company_id: companyId,
+        }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { fileId?: string; error?: string }
+        | null;
+      if (!res.ok || !body?.fileId) {
+        showToast({
+          kind: 'error',
+          text: body?.error ?? `요청 실패 (${res.status})`,
+        });
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey });
+      openSheetInNewTab(body.fileId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '시트 열기 실패';
+      showToast({ kind: 'error', text: msg });
+    } finally {
+      setGdriveBusyId(null);
+      setGdriveMode(null);
+    }
+  };
+
+  const handleSyncSheet = async (record: InspectionCert) => {
+    if (!companyId) return;
+    if (!record.google_drive_file_id) {
+      showToast({
+        kind: 'info',
+        text: '먼저 "시트 열기"를 눌러 드라이브에 업로드해 주세요',
+      });
+      return;
+    }
+    setGdriveBusyId(record.id);
+    setGdriveMode('sync');
+    try {
+      const res = await fetch('/api/gdrive-sync', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ cert_id: record.id }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { success?: boolean; synced_at?: string; error?: string }
+        | null;
+      if (!res.ok || !body?.success) {
+        showToast({
+          kind: 'error',
+          text: body?.error ?? `요청 실패 (${res.status})`,
+        });
+        return;
+      }
+      showToast({ kind: 'success', text: '동기화 완료' });
+      await queryClient.invalidateQueries({ queryKey });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '동기화 실패';
+      showToast({ kind: 'error', text: msg });
+    } finally {
+      setGdriveBusyId(null);
+      setGdriveMode(null);
     }
   };
 
@@ -618,6 +732,11 @@ export function InspectionCertTab({ companyId }: Props) {
                         onUpload={handleUpload}
                         onDownload={handleDownload}
                         onDelete={handleDeleteFile}
+                        onOpenSheet={handleOpenSheet}
+                        onSyncSheet={handleSyncSheet}
+                        gdriveBusy={
+                          gdriveBusyId === row.id ? gdriveMode : null
+                        }
                       />
                     </td>
                   </tr>
@@ -759,6 +878,10 @@ interface ApplicationFileCellProps {
   onUpload: (record: InspectionCert, file: File) => void | Promise<void>;
   onDownload: (record: InspectionCert) => void | Promise<void>;
   onDelete: (record: InspectionCert) => void | Promise<void>;
+  onOpenSheet: (record: InspectionCert) => void | Promise<void>;
+  onSyncSheet: (record: InspectionCert) => void | Promise<void>;
+  /** 이 record 에 대해 진행 중인 gdrive 작업 종류. null 이면 유휴. */
+  gdriveBusy: 'open' | 'sync' | null;
 }
 
 function ApplicationFileCell({
@@ -766,49 +889,120 @@ function ApplicationFileCell({
   onUpload,
   onDownload,
   onDelete,
+  onOpenSheet,
+  onSyncSheet,
+  gdriveBusy,
 }: ApplicationFileCellProps) {
   const [hover, setHover] = useState(false);
 
   if (record.application_file_url && record.application_file_name) {
+    const isExcel = isExcelFileName(record.application_file_name);
+    const openBusy = gdriveBusy === 'open';
+    const syncBusy = gdriveBusy === 'sync';
+    const anyBusy = gdriveBusy !== null;
+    const disabledReason = !isExcel ? '엑셀 파일만 지원합니다' : undefined;
+
     return (
       <div
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
-        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+        style={{ display: 'flex', flexDirection: 'column', gap: 2 }}
       >
-        <span
-          title={record.application_file_name}
-          style={{
-            fontSize: 12,
-            maxWidth: 120,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            color: 'var(--ink-2)',
-            flex: 1,
-          }}
-        >
-          {record.application_file_name}
-        </span>
-        <button
-          type="button"
-          onClick={() => onDownload(record)}
-          title="다운로드"
-          style={iconBtnStyle('var(--ink-2)')}
-        >
-          <Download size={14} />
-        </button>
-        <button
-          type="button"
-          onClick={() => onDelete(record)}
-          title="삭제"
-          style={{
-            ...iconBtnStyle('var(--danger)'),
-            visibility: hover ? 'visible' : 'hidden',
-          }}
-        >
-          <X size={14} />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span
+            title={record.application_file_name}
+            style={{
+              fontSize: 12,
+              maxWidth: 110,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              color: 'var(--ink-2)',
+              flex: 1,
+            }}
+          >
+            {record.application_file_name}
+          </span>
+          <button
+            type="button"
+            onClick={() => onOpenSheet(record)}
+            disabled={!isExcel || anyBusy}
+            title={
+              disabledReason ??
+              (record.google_drive_file_id
+                ? '구글 스프레드시트로 열기'
+                : '구글 스프레드시트로 변환·업로드 후 열기')
+            }
+            style={{
+              ...iconBtnStyle(
+                isExcel ? 'var(--info)' : 'var(--ink-3)',
+              ),
+              opacity: !isExcel ? 0.4 : anyBusy ? 0.6 : 1,
+              cursor: !isExcel || anyBusy ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {openBusy ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <ExternalLink size={13} />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => onSyncSheet(record)}
+            disabled={!isExcel || anyBusy}
+            title={
+              disabledReason ??
+              (record.google_drive_file_id
+                ? '드라이브에서 최신 내용을 가져와 덮어쓰기'
+                : '먼저 시트 열기를 눌러주세요')
+            }
+            style={{
+              ...iconBtnStyle(
+                isExcel ? 'var(--info)' : 'var(--ink-3)',
+              ),
+              opacity: !isExcel ? 0.4 : anyBusy ? 0.6 : 1,
+              cursor: !isExcel || anyBusy ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {syncBusy ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <RefreshCw size={13} />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => onDownload(record)}
+            title="다운로드"
+            style={iconBtnStyle('var(--ink-2)')}
+          >
+            <Download size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={() => onDelete(record)}
+            title="삭제"
+            style={{
+              ...iconBtnStyle('var(--danger)'),
+              visibility: hover ? 'visible' : 'hidden',
+            }}
+          >
+            <X size={13} />
+          </button>
+        </div>
+        {record.google_drive_synced_at && (
+          <span
+            style={{
+              fontSize: 10.5,
+              color: 'var(--ink-3)',
+              fontFamily: 'var(--font-kr)',
+            }}
+            title={record.google_drive_synced_at}
+          >
+            최근 동기화: {formatRelativeKst(record.google_drive_synced_at)}
+          </span>
+        )}
       </div>
     );
   }
@@ -856,6 +1050,46 @@ function iconBtnStyle(color: string): React.CSSProperties {
     cursor: 'pointer',
     padding: 0,
   };
+}
+
+function isExcelFileName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith('.xlsx') || lower.endsWith('.xls');
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  // 큰 버퍼(수 MB) 대응: 32KB 청크 단위 문자열 조립 후 btoa.
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, Array.from(chunk));
+  }
+  return btoa(binary);
+}
+
+/**
+ * 🔴 프로젝트 원칙: toISOString().slice() 금지. getFullYear/getMonth/getDate 로 KST 기준 상대 시간 산출.
+ */
+function formatRelativeKst(iso: string): string {
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return '—';
+  const now = new Date();
+  const diffMs = now.getTime() - then.getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 1) return '방금 전';
+  if (diffMin < 60) return `${diffMin}분 전`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}시간 전`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 30) return `${diffDay}일 전`;
+  // 30일 이상은 KST 절대 날짜 표시.
+  const kst = new Date(then.getTime() + 9 * 3600_000);
+  const y = kst.getUTCFullYear();
+  const m = String(kst.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(kst.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function EmptyRow({ text }: { text: string }) {
