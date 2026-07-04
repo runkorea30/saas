@@ -107,6 +107,13 @@ export default async function handler(
     });
     const buffer = Buffer.concat(chunks);
 
+    // 🟡 진단 로그 — xlsx 손상 지점 추적. 정상 zip 매직바이트 = "504b0304".
+    console.log('[gdrive-sync] export buffer length:', buffer.length);
+    console.log(
+      '[gdrive-sync] export buffer magic bytes:',
+      buffer.subarray(0, 4).toString('hex'),
+    );
+
     const { error: upErr } = await supabase.storage
       .from(STORAGE_BUCKET)
       .upload(row.application_file_url, buffer, {
@@ -120,6 +127,25 @@ export default async function handler(
       return res
         .status(500)
         .json({ error: `Storage 업로드 실패: ${upErr.message}` });
+    }
+
+    // 🟡 진단: 방금 올린 파일을 즉시 재다운로드해서 원본 buffer 와 바이트 비교.
+    const { data: verifyData, error: verifyErr } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .download(row.application_file_url);
+    if (verifyErr) {
+      console.log('[gdrive-sync] 검증 다운로드 실패:', verifyErr.message);
+    } else {
+      const verifyBuffer = Buffer.from(await verifyData.arrayBuffer());
+      console.log('[gdrive-sync] verify buffer length:', verifyBuffer.length);
+      console.log(
+        '[gdrive-sync] verify buffer magic bytes:',
+        verifyBuffer.subarray(0, 4).toString('hex'),
+      );
+      console.log(
+        '[gdrive-sync] buffer 완전 일치 여부:',
+        buffer.equals(verifyBuffer),
+      );
     }
 
     const nowIso = new Date().toISOString();
