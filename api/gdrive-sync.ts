@@ -92,12 +92,20 @@ export default async function handler(
     oauth2.setCredentials({ refresh_token: refreshToken });
     const drive = google.drive({ version: 'v3', auth: oauth2 });
 
-    // arraybuffer 로 받아 Buffer 로 변환 → Supabase Storage upload.
+    // 🔴 stream 응답 필수 — arraybuffer 는 gaxios 가 응답을 텍스트로 처리해
+    //    xlsx zip 컨테이너 바이트가 미묘하게 손상되어 Excel "내용에 문제가 있습니다" 경고 발생.
     const exportResp = await drive.files.export(
       { fileId: row.google_drive_file_id, mimeType: XLSX_MIME },
-      { responseType: 'arraybuffer' },
+      { responseType: 'stream' },
     );
-    const buffer = Buffer.from(exportResp.data as ArrayBuffer);
+    const chunks: Buffer[] = [];
+    await new Promise<void>((resolve, reject) => {
+      (exportResp.data as NodeJS.ReadableStream)
+        .on('data', (chunk: Buffer) => chunks.push(chunk))
+        .on('end', () => resolve())
+        .on('error', (err: Error) => reject(err));
+    });
+    const buffer = Buffer.concat(chunks);
 
     const { error: upErr } = await supabase.storage
       .from(STORAGE_BUCKET)
