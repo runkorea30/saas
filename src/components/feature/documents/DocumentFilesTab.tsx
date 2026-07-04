@@ -7,7 +7,7 @@
  * 🟠 자동 수집(source='email_auto'): Storage `documents` 버킷에 업로드, `file_path` 는 버킷 경로.
  *    다운로드 시 file_path 가 "data:" 로 시작하면 base64, 아니면 Storage.download 사용.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, FileUp, Loader2, Trash2, Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -59,6 +59,10 @@ export function DocumentFilesTab({ companyId, category }: Props) {
   const [uploading, setUploading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DocumentFileRow | null>(null);
   const [busyDelete, setBusyDelete] = useState(false);
+  const [searchType, setSearchType] =
+    useState<'file_name' | 'doc_no' | 'year'>('file_name');
+  const [searchText, setSearchText] = useState('');
+  const [searchYear, setSearchYear] = useState('');
 
   const queryKey = ['document-files', companyId, category];
 
@@ -192,6 +196,47 @@ export function DocumentFilesTab({ companyId, category }: Props) {
   };
 
   const showMetaColumns = category === 'import_declaration';
+  const showSearchBar = category === 'import_declaration';
+
+  // 🟠 연도별조회용 선택지 — 실제 데이터에 존재하는 연도만 desc 정렬.
+  const availableYears = useMemo(() => {
+    if (!showSearchBar) return [];
+    const set = new Set<string>();
+    for (const r of rows) {
+      const y = r.extracted_doc_date?.slice(0, 4);
+      if (y && /^\d{4}$/.test(y)) set.add(y);
+    }
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [rows, showSearchBar]);
+
+  const filteredRows = useMemo(() => {
+    if (!showSearchBar) return rows;
+    if (searchType === 'year') {
+      if (!searchYear) return rows;
+      return rows.filter((r) =>
+        (r.extracted_doc_date ?? '').startsWith(searchYear),
+      );
+    }
+    const q = searchText.trim().toLowerCase();
+    if (!q) return rows;
+    if (searchType === 'file_name') {
+      return rows.filter((r) => r.file_name.toLowerCase().includes(q));
+    }
+    return rows.filter((r) =>
+      (r.extracted_doc_no ?? '').toLowerCase().includes(q),
+    );
+  }, [rows, showSearchBar, searchType, searchText, searchYear]);
+
+  const hasActiveSearch =
+    showSearchBar &&
+    ((searchType === 'year' && Boolean(searchYear)) ||
+      (searchType !== 'year' && searchText.trim().length > 0));
+
+  const handleSearchTypeChange = (next: 'file_name' | 'doc_no' | 'year') => {
+    setSearchType(next);
+    setSearchText('');
+    setSearchYear('');
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -253,6 +298,110 @@ export function DocumentFilesTab({ companyId, category }: Props) {
         </div>
       </div>
 
+      {showSearchBar && (
+        <div
+          style={{
+            padding: '10px 16px',
+            background: 'var(--surface)',
+            border: '1px solid var(--line)',
+            borderRadius: 'var(--radius-lg)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+        >
+          <select
+            value={searchType}
+            onChange={(e) =>
+              handleSearchTypeChange(
+                e.target.value as 'file_name' | 'doc_no' | 'year',
+              )
+            }
+            style={{
+              height: 34,
+              padding: '0 10px',
+              borderRadius: 8,
+              border: '1px solid var(--line-strong)',
+              background: 'var(--surface)',
+              color: 'var(--ink)',
+              fontSize: 13,
+              fontFamily: 'var(--font-kr)',
+            }}
+          >
+            <option value="file_name">파일명</option>
+            <option value="doc_no">신고번호</option>
+            <option value="year">연도별조회</option>
+          </select>
+
+          {searchType === 'year' ? (
+            <select
+              value={searchYear}
+              onChange={(e) => setSearchYear(e.target.value)}
+              style={{
+                height: 34,
+                padding: '0 10px',
+                borderRadius: 8,
+                border: '1px solid var(--line-strong)',
+                background: 'var(--surface)',
+                color: 'var(--ink)',
+                fontSize: 13,
+                fontFamily: 'var(--font-kr)',
+                minWidth: 140,
+              }}
+            >
+              <option value="">연도 선택</option>
+              {availableYears.map((y) => (
+                <option key={y} value={y}>
+                  {y}년
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type="text"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder={
+                searchType === 'file_name' ? '파일명 검색' : '신고번호 검색'
+              }
+              style={{
+                height: 34,
+                padding: '0 12px',
+                borderRadius: 8,
+                border: '1px solid var(--line-strong)',
+                background: 'var(--surface)',
+                color: 'var(--ink)',
+                fontSize: 13,
+                width: 240,
+                fontFamily: 'var(--font-kr)',
+              }}
+            />
+          )}
+
+          {hasActiveSearch && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchText('');
+                setSearchYear('');
+              }}
+              className="btn-base"
+            >
+              초기화
+            </button>
+          )}
+
+          <div style={{ flex: 1 }} />
+
+          <div style={{ color: 'var(--ink-3)', fontSize: 12 }}>
+            {hasActiveSearch
+              ? `${filteredRows.length} / ${rows.length}건`
+              : `${rows.length}건`}
+          </div>
+        </div>
+      )}
+
       <div
         style={{
           background: 'var(--surface)',
@@ -272,7 +421,7 @@ export function DocumentFilesTab({ companyId, category }: Props) {
           >
             불러오는 중…
           </div>
-        ) : rows.length === 0 ? (
+        ) : filteredRows.length === 0 ? (
           <div
             style={{
               padding: 40,
@@ -281,7 +430,9 @@ export function DocumentFilesTab({ companyId, category }: Props) {
               fontSize: 13,
             }}
           >
-            업로드된 파일이 없습니다.
+            {hasActiveSearch
+              ? '검색 결과가 없습니다.'
+              : '업로드된 파일이 없습니다.'}
           </div>
         ) : (
           <table
@@ -311,7 +462,7 @@ export function DocumentFilesTab({ companyId, category }: Props) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => {
+              {filteredRows.map((row) => {
                 const isAuto = row.source === 'email_auto';
                 const meta =
                   (row.extracted_metadata as {

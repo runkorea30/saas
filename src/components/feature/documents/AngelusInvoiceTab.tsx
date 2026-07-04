@@ -74,6 +74,8 @@ export function AngelusInvoiceTab({ companyId }: Props) {
   const [uploading, setUploading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AngelusRow | null>(null);
   const [busyDelete, setBusyDelete] = useState(false);
+  const [searchType, setSearchType] = useState<'doc_no' | 'file_name'>('doc_no');
+  const [searchText, setSearchText] = useState('');
 
   const queryKey = ['document-files', companyId, 'angelus_invoice'];
 
@@ -95,7 +97,28 @@ export function AngelusInvoiceTab({ companyId }: Props) {
     staleTime: 30_000,
   });
 
-  const { groups, unassigned } = useMemo(() => groupByPo(rows), [rows]);
+  const filteredRows = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    if (!q) return rows;
+    if (searchType === 'file_name') {
+      return rows.filter((r) => r.file_name.toLowerCase().includes(q));
+    }
+    return rows.filter((r) =>
+      (r.extracted_doc_no ?? '').toLowerCase().includes(q),
+    );
+  }, [rows, searchType, searchText]);
+
+  const hasActiveSearch = searchText.trim().length > 0;
+
+  const { groups, unassigned } = useMemo(
+    () => groupByPo(filteredRows),
+    [filteredRows],
+  );
+
+  const handleSearchTypeChange = (next: 'doc_no' | 'file_name') => {
+    setSearchType(next);
+    setSearchText('');
+  };
 
   const knownPoRefs = useMemo(
     () =>
@@ -322,6 +345,77 @@ export function AngelusInvoiceTab({ companyId }: Props) {
         </div>
       </div>
 
+      <div
+        style={{
+          padding: '10px 16px',
+          background: 'var(--surface)',
+          border: '1px solid var(--line)',
+          borderRadius: 'var(--radius-lg)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          flexWrap: 'wrap',
+        }}
+      >
+        <select
+          value={searchType}
+          onChange={(e) =>
+            handleSearchTypeChange(e.target.value as 'doc_no' | 'file_name')
+          }
+          style={{
+            height: 34,
+            padding: '0 10px',
+            borderRadius: 8,
+            border: '1px solid var(--line-strong)',
+            background: 'var(--surface)',
+            color: 'var(--ink)',
+            fontSize: 13,
+            fontFamily: 'var(--font-kr)',
+          }}
+        >
+          <option value="doc_no">인보이스번호</option>
+          <option value="file_name">파일명</option>
+        </select>
+
+        <input
+          type="text"
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          placeholder={
+            searchType === 'file_name' ? '파일명 검색' : '인보이스번호 검색'
+          }
+          style={{
+            height: 34,
+            padding: '0 12px',
+            borderRadius: 8,
+            border: '1px solid var(--line-strong)',
+            background: 'var(--surface)',
+            color: 'var(--ink)',
+            fontSize: 13,
+            width: 240,
+            fontFamily: 'var(--font-kr)',
+          }}
+        />
+
+        {hasActiveSearch && (
+          <button
+            type="button"
+            onClick={() => setSearchText('')}
+            className="btn-base"
+          >
+            초기화
+          </button>
+        )}
+
+        <div style={{ flex: 1 }} />
+
+        <div style={{ color: 'var(--ink-3)', fontSize: 12 }}>
+          {hasActiveSearch
+            ? `${filteredRows.length} / ${rows.length}건`
+            : `${rows.length}건`}
+        </div>
+      </div>
+
       {isLoading ? (
         <div
           style={{
@@ -336,7 +430,7 @@ export function AngelusInvoiceTab({ companyId }: Props) {
         >
           불러오는 중…
         </div>
-      ) : rows.length === 0 ? (
+      ) : filteredRows.length === 0 ? (
         <div
           style={{
             padding: 40,
@@ -348,7 +442,9 @@ export function AngelusInvoiceTab({ companyId }: Props) {
             borderRadius: 'var(--radius-lg)',
           }}
         >
-          업로드된 인보이스가 없습니다.
+          {hasActiveSearch
+            ? '검색 결과가 없습니다.'
+            : '업로드된 인보이스가 없습니다.'}
         </div>
       ) : (
         <>
