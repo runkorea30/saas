@@ -38,6 +38,7 @@ import { ReceivablesPage } from '@/pages/finance/ReceivablesPage';
 import { TaxInvoicesPage } from '@/pages/finance/TaxInvoicesPage';
 import { IncomeStatementPage } from '@/pages/finance/IncomeStatementPage';
 import { BillingPage } from '@/pages/sales/BillingPage';
+import { ShippingInvoicesPage } from '@/pages/sales/ShippingInvoicesPage';
 import { DocumentsPage } from '@/pages/documents/DocumentsPage';
 import { MobileApp } from '@/mobile/MobileApp';
 import MobileOrderPage from '@/pages/MobileOrderPage';
@@ -100,7 +101,7 @@ function App() {
             <Route path="orders" element={<OrdersPage />} />
             <Route path="order-entry" element={<OrderEntryPage />} />
             <Route path="analysis" element={<SalesAnalysisPage />} />
-            <Route path="invoices" element={<PlaceholderPage />} />
+            <Route path="invoices" element={<ShippingInvoicesPage />} />
             <Route path="billing" element={<BillingPage />} />
           </Route>
 

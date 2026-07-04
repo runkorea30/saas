@@ -16,10 +16,32 @@ import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
 import { useResizableSplit } from '@/hooks/useResizableSplit';
 import { useOrders } from '@/hooks/queries/useOrders';
+import { useCustomers } from '@/hooks/queries/useCustomers';
+import {
+  useSaveShippingInvoices,
+  useMarkShippingInvoicesDownloaded,
+} from '@/hooks/useShippingInvoices';
+import { useToast } from '@/components/ui/Toast';
 import { getSameDayCustomerOrderIds } from '@/utils/orderGrouping';
+import {
+  buildShippingInvoiceRows,
+  buildSingleOrderShippingInvoiceRows,
+  type ShippingInvoiceRow,
+} from '@/utils/shippingInvoiceBuilder';
+import { buildLogenWorkbookArrayBuffer } from '@/utils/logenExcelExport';
+import {
+  LOGEN_EXPORT_FILENAME,
+  downloadBlobToUserFolder,
+  getLogenFolderHandle,
+  isFolderPickerSupported,
+  pickLogenFolder,
+  saveLogenFolderHandle,
+  writeLogenExcelFile,
+} from '@/utils/logenFolderStorage';
 import { OrderListTable } from '@/components/feature/orders/OrderListTable';
 import { OrderDetailPane } from '@/components/feature/orders/OrderDetailPane';
 import { OrderBulkBar } from '@/components/feature/orders/OrderBulkBar';
+import { PrintInvoiceQuantityModal } from '@/components/feature/orders/PrintInvoiceQuantityModal';
 import {
   InvoicePrintView,
   type InvoiceCustomerGroup,
@@ -129,6 +151,12 @@ export function OrdersPage() {
     companyId,
     range: { start: toIso(rangeStart), end: toIso(rangeEnd) },
   });
+
+  // 송장인쇄 시 일반 묶음 배송정보 소스로 사용 (전체 거래처 마스터).
+  const { data: customersList = [] } = useCustomers(companyId);
+  const { showToast } = useToast();
+  const saveInvoicesMutation = useSaveShippingInvoices();
+  const markDownloadedMutation = useMarkShippingInvoicesDownloaded();
 
   // ───── 거래처 옵션 (로드된 주문에서 추출) ─────
   const customerOptions = useMemo(() => {
@@ -387,6 +415,173 @@ export function OrdersPage() {
     await queryClient.invalidateQueries({ queryKey: ['orders'] });
   };
 
+  // ───── 송장 인쇄 ─────
+  //
+  // 흐름 (송장인쇄 단일):
+  //  1. 우클릭한 주문의 같은 거래처+같은 날짜 묶음 전체 id 수집
+  //  2. buildShippingInvoiceRows() → 직송/일반 규칙에 맞는 행 배열
+  //  3. shipping_invoices INSERT (label_count=1)
+  //  4. 저장된 DB 행으로 xlsx workbook 생성
+  //  5. 로컬 폴더 handle 있으면 자동 저장, 없으면 최초 선택 유도 → 저장
+  //     (미지원 브라우저는 다운로드 폴백)
+  //  6. shipping_invoices.downloaded_at 업데이트
+  //  7. 완료 토스트
+  //
+  // 송장인쇄(다중): 2 다음에 수량 모달 → labelCounts 입력 → 3부터 반복.
+
+  const [multiPrintRows, setMultiPrintRows] = useState<ShippingInvoiceRow[] | null>(null);
+  const [multiPrintSubmitting, setMultiPrintSubmitting] = useState(false);
+
+  /**
+   * 저장 → xlsx 생성 → 로컬 폴더 저장 → downloaded_at UPDATE 파이프라인.
+   * labelCounts 가 없으면 각 행 1건씩.
+   */
+  const runInvoicePipeline = async (
+    rows: ShippingInvoiceRow[],
+    labelCounts?: number[],
+  ): Promise<void> => {
+    if (!companyId) {
+      showToast({ kind: 'error', text: '회사 컨텍스트가 없습니다.' });
+      return;
+    }
+    if (rows.length === 0) {
+      showToast({ kind: 'info', text: '선택된 주문이 없습니다.' });
+      return;
+    }
+
+    // 1) INSERT
+    let dbRows;
+    try {
+      dbRows = await saveInvoicesMutation.mutateAsync({
+        companyId,
+        rows,
+        labelCounts,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '저장 실패';
+      showToast({ kind: 'error', text: `송장 저장 실패: ${msg}` });
+      return;
+    }
+    if (dbRows.length === 0) {
+      showToast({ kind: 'error', text: '송장 저장 결과가 비어 있습니다.' });
+      return;
+    }
+
+    // 2) xlsx 생성
+    const buf = buildLogenWorkbookArrayBuffer(dbRows);
+
+    // 3) 로컬 폴더 저장 or 폴백 — 항상 LOGEN_EXPORT_FILENAME 에 덮어쓰기.
+    let savedTo: 'folder' | 'download' = 'download';
+    try {
+      if (isFolderPickerSupported()) {
+        let handle = await getLogenFolderHandle();
+        if (!handle) {
+          handle = await pickLogenFolder();
+          if (handle) await saveLogenFolderHandle(handle);
+        }
+        if (handle) {
+          await writeLogenExcelFile(handle, buf);
+          savedTo = 'folder';
+        } else {
+          downloadBlobToUserFolder(buf);
+        }
+      } else {
+        downloadBlobToUserFolder(buf);
+      }
+    } catch (e) {
+      // 폴더 저장 중 오류 → 다운로드 폴백
+      downloadBlobToUserFolder(buf);
+      const msg = e instanceof Error ? e.message : '';
+      showToast({
+        kind: 'error',
+        text: `폴더 저장 실패, 다운로드로 대체: ${msg}`,
+      });
+    }
+
+    // 4) downloaded_at UPDATE
+    try {
+      await markDownloadedMutation.mutateAsync({
+        companyId,
+        ids: dbRows.map((r) => r.id),
+      });
+    } catch {
+      // 실패해도 파일은 생성됨 — 조용히 무시하고 다음 로드 시 재조정.
+    }
+
+    showToast({
+      kind: 'success',
+      text:
+        savedTo === 'folder'
+          ? `송장 ${dbRows.length}건 저장 + ${LOGEN_EXPORT_FILENAME} 파일에 저장(덮어쓰기) 완료`
+          : `송장 ${dbRows.length}건 저장 + ${LOGEN_EXPORT_FILENAME} 다운로드 완료`,
+    });
+  };
+
+  /**
+   * 우클릭 시 대상 id 목록을 계산.
+   *
+   * 🔴 버그(다중 거래처 누락) 수정:
+   *   기존 로직은 `getSameDayCustomerOrderIds(우클릭id)` 만 사용 → 우클릭한 주문의
+   *   같은 거래처+같은 날짜 그룹만 반환. 사용자가 체크박스로 슈즈케어 + 디엔에스를
+   *   함께 선택하고 슈즈케어 행에 우클릭하면 디엔에스가 아예 전달되지 않았음.
+   *
+   * 수정:
+   *   - 체크된 주문이 1건 이상이면 체크된 전체를 사용 (여러 거래처 지원)
+   *   - 체크가 하나도 없으면 편의상 우클릭 주문의 그룹 폴백 (기존 UX 유지)
+   */
+  const resolveShippingTargetIds = (orderId: string): string[] => {
+    const checkedIds = Object.keys(checked).filter((k) => checked[k]);
+    if (checkedIds.length > 0) return checkedIds;
+    return getSameDayCustomerOrderIds(groupedOrders, orderId);
+  };
+
+  /** 우클릭 → "송장인쇄". 즉시 저장 흐름. */
+  const handlePrintSingleShippingInvoice = async (orderId: string) => {
+    setContextMenu(null);
+    const ids = resolveShippingTargetIds(orderId);
+    const rows = buildShippingInvoiceRows(orders, customersList, ids);
+    await runInvoicePipeline(rows);
+  };
+
+  /** 우클릭 → "송장인쇄(다중)". 수량 모달 오픈. */
+  const handleOpenMultiPrint = (orderId: string) => {
+    setContextMenu(null);
+    const ids = resolveShippingTargetIds(orderId);
+    const rows = buildShippingInvoiceRows(orders, customersList, ids);
+    if (rows.length === 0) {
+      showToast({ kind: 'info', text: '송장으로 만들 대상이 없습니다.' });
+      return;
+    }
+    setMultiPrintRows(rows);
+  };
+
+  /**
+   * 우클릭 → "이 주문만 송장인쇄".
+   * 체크박스 그룹 자동선택을 무시하고 우클릭한 order id 하나만 대상.
+   * 같은 거래처+날짜의 다른 주문이 있어도 합치지 않음.
+   */
+  const handlePrintOnlyThisOrder = async (orderId: string) => {
+    setContextMenu(null);
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) {
+      showToast({ kind: 'error', text: '주문을 찾을 수 없습니다.' });
+      return;
+    }
+    const rows = buildSingleOrderShippingInvoiceRows(order, customersList);
+    await runInvoicePipeline(rows);
+  };
+
+  const handleMultiPrintSubmit = async (labelCounts: number[]) => {
+    if (!multiPrintRows) return;
+    setMultiPrintSubmitting(true);
+    try {
+      await runInvoicePipeline(multiPrintRows, labelCounts);
+    } finally {
+      setMultiPrintSubmitting(false);
+      setMultiPrintRows(null);
+    }
+  };
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <main
@@ -398,7 +593,7 @@ export function OrdersPage() {
           margin: '0 auto',
         }}
       >
-        {/* 페이지 헤더 — 제목 + 필터 + 액션을 한 줄에, 요약은 별도 줄 */}
+        {/* 페이지 헤더 — 제목 + 필터 + 요약 + 액션을 한 줄에 배치. */}
         <header style={{ marginBottom: 10 }}>
           <div
             style={{
@@ -412,7 +607,7 @@ export function OrdersPage() {
           >
             판매 › 주문내역
           </div>
-          {/* Row 1: 제목 | 기간 | 날짜 | 거래처 | 상태 | grow | 엑셀 | 주문추가 */}
+          {/* Row 1: 제목 | 기간 | 날짜 | 거래처 | 상태 | grow | 요약(건수/총액/순액/평균) | 엑셀 | 거래명세서 | 주문추가 */}
           <div
             style={{
               display: 'flex',
@@ -504,6 +699,41 @@ export function OrdersPage() {
               }))}
             />
             <div style={{ flex: 1 }} />
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 14,
+                padding: '0 10px',
+                marginRight: 4,
+                borderLeft: '1px solid var(--line)',
+                borderRight: '1px solid var(--line)',
+                height: 28,
+              }}
+            >
+              <SummaryItem
+                inline
+                label="건수"
+                value={`${summary.count.toLocaleString('ko-KR')}건`}
+              />
+              <SummaryItem
+                inline
+                label="총액"
+                value={`${fmtWon(summary.gross)}원`}
+              />
+              <SummaryItem
+                inline
+                label="순액"
+                value={`${fmtWon(summary.net)}원`}
+                tone={summary.returns < 0 ? 'danger' : undefined}
+              />
+              <SummaryItem
+                inline
+                label="평균"
+                value={`${fmtWon(summary.avg)}원`}
+                muted
+              />
+            </div>
             <button
               type="button"
               className="btn-base"
@@ -542,24 +772,6 @@ export function OrdersPage() {
             >
               <Plus size={13} /> 주문 추가
             </button>
-          </div>
-          {/* Row 2: 요약 */}
-          <div
-            style={{
-              display: 'flex',
-              gap: 18,
-              flexWrap: 'wrap',
-              marginTop: 8,
-            }}
-          >
-            <SummaryItem label="건수" value={`${summary.count.toLocaleString('ko-KR')}건`} />
-            <SummaryItem label="총액" value={`${fmtWon(summary.gross)}원`} />
-            <SummaryItem
-              label="순액"
-              value={`${fmtWon(summary.net)}원`}
-              tone={summary.returns < 0 ? 'danger' : undefined}
-            />
-            <SummaryItem label="평균" value={`${fmtWon(summary.avg)}원`} muted />
           </div>
         </header>
 
@@ -698,6 +910,19 @@ export function OrdersPage() {
             handleChangeStatus(contextMenu.orderId, status)
           }
           onPrintInvoice={() => handlePrintSingleInvoice(contextMenu.orderId)}
+          onPrintShipping={() => void handlePrintSingleShippingInvoice(contextMenu.orderId)}
+          onPrintShippingMulti={() => handleOpenMultiPrint(contextMenu.orderId)}
+          onPrintShippingOnlyThis={() => void handlePrintOnlyThisOrder(contextMenu.orderId)}
+        />
+      )}
+
+      {multiPrintRows && (
+        <PrintInvoiceQuantityModal
+          open
+          rows={multiPrintRows}
+          submitting={multiPrintSubmitting}
+          onClose={() => setMultiPrintRows(null)}
+          onSubmit={(counts) => void handleMultiPrintSubmit(counts)}
         />
       )}
     </div>
@@ -710,12 +935,18 @@ function OrderContextMenu({
   onClose,
   onChangeStatus,
   onPrintInvoice,
+  onPrintShipping,
+  onPrintShippingMulti,
+  onPrintShippingOnlyThis,
 }: {
   x: number;
   y: number;
   onClose: () => void;
   onChangeStatus: (status: string) => void;
   onPrintInvoice: () => void;
+  onPrintShipping: () => void;
+  onPrintShippingMulti: () => void;
+  onPrintShippingOnlyThis: () => void;
 }) {
   useEffect(() => {
     const handleClick = () => onClose();
@@ -768,6 +999,60 @@ function OrderContextMenu({
       >
         거래명세서 출력
       </button>
+      <button
+        type="button"
+        onClick={onPrintShipping}
+        style={{
+          width: '100%',
+          textAlign: 'left',
+          padding: '7px 10px',
+          border: 'none',
+          background: 'transparent',
+          cursor: 'pointer',
+          borderRadius: 4,
+          color: 'var(--ink)',
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
+        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+      >
+        송장인쇄
+      </button>
+      <button
+        type="button"
+        onClick={onPrintShippingMulti}
+        style={{
+          width: '100%',
+          textAlign: 'left',
+          padding: '7px 10px',
+          border: 'none',
+          background: 'transparent',
+          cursor: 'pointer',
+          borderRadius: 4,
+          color: 'var(--ink)',
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
+        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+      >
+        송장인쇄(다중)
+      </button>
+      <button
+        type="button"
+        onClick={onPrintShippingOnlyThis}
+        style={{
+          width: '100%',
+          textAlign: 'left',
+          padding: '7px 10px',
+          border: 'none',
+          background: 'transparent',
+          cursor: 'pointer',
+          borderRadius: 4,
+          color: 'var(--ink)',
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
+        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+      >
+        이 주문만 송장인쇄
+      </button>
       <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
       <div style={{ padding: '4px 10px 2px', fontSize: 10.5, color: 'var(--ink-3)' }}>
         상태 변경
@@ -802,12 +1087,58 @@ function SummaryItem({
   value,
   tone,
   muted,
+  inline,
 }: {
   label: string;
   value: string;
   tone?: 'danger';
   muted?: boolean;
+  /** true 면 라벨/값을 한 줄로 나란히 배치 (필터 행 인라인 배치용). */
+  inline?: boolean;
 }) {
+  const valueColor =
+    tone === 'danger'
+      ? 'var(--danger)'
+      : muted
+        ? 'var(--ink-3)'
+        : 'var(--ink)';
+
+  if (inline) {
+    return (
+      <div
+        style={{
+          display: 'inline-flex',
+          alignItems: 'baseline',
+          gap: 4,
+          fontFamily: 'var(--font-num)',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 10.5,
+            color: 'var(--ink-3)',
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+          }}
+        >
+          {label}
+        </span>
+        <span
+          className="num"
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: valueColor,
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {value}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <span
@@ -826,12 +1157,7 @@ function SummaryItem({
         style={{
           fontSize: 12.5,
           fontWeight: 600,
-          color:
-            tone === 'danger'
-              ? 'var(--danger)'
-              : muted
-                ? 'var(--ink-3)'
-                : 'var(--ink)',
+          color: valueColor,
           fontVariantNumeric: 'tabular-nums',
         }}
       >

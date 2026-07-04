@@ -262,10 +262,14 @@ export function CustomerEditModal({ open, customer, companyId, onClose }: Props)
           />
         </Field>
 
-        <Field label="배송지">
+        <Field
+          label="배송 주소 (택배 발송용)"
+          hint="일반(비직송) 주문의 송장 인쇄 시 이 주소가 사용됩니다. 사업장 주소와 다른 경우에만 입력."
+        >
           <textarea
             value={form.delivery_address}
             onChange={(e) => update('delivery_address', e.target.value)}
+            placeholder="사업장 주소와 같으면 비워두어도 됩니다"
             rows={2}
             disabled={busy}
             style={{ ...inputStyle, resize: 'vertical', minHeight: 56 }}
@@ -391,7 +395,10 @@ export function CustomerEditModal({ open, customer, companyId, onClose }: Props)
               </Field>
             </Row>
 
-            <Field label="사업자 주소">
+            <Field
+              label="사업장 주소 (세금계산서용)"
+              hint="세금계산서 발행 시 표시되는 사업자등록증 상 주소. 배송 주소와 다를 수 있음."
+            >
               <textarea
                 value={form.business_address}
                 onChange={(e) => update('business_address', e.target.value)}

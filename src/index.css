@@ -425,6 +425,20 @@
   }
 
   /* ═══════════════════════════════════════════════════════════════════
+     다크 테마의 네이티브 위젯 가독성 —
+     브라우저 기본 스타일(달력 아이콘, number 스피너 ▲▼, 선택 표시)이
+     라이트 배경을 가정하고 그려져 다크 배경 위에서 텍스트/아이콘이
+     사라지는 문제 해결. color-scheme: dark 로 네이티브 위젯을 다크로 렌더.
+     ─────────────────────────────────────────────────────────────────── */
+  html[data-theme^='dark-'] input[type='date'],
+  html[data-theme^='dark-'] input[type='datetime-local'],
+  html[data-theme^='dark-'] input[type='time'],
+  html[data-theme^='dark-'] input[type='month'],
+  html[data-theme^='dark-'] input[type='number'] {
+    color-scheme: dark;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
      포털 다크그레이 — 값은 OPS 다크그레이(--bg #2C2C2A 계열)와 동일.
      포털 전용 --p-* prefix 만 오버라이드. light 는 :root 기본값 사용.
      1단계: 헤더 영역 토큰만 우선 오버라이드.

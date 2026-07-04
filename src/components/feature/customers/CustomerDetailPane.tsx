@@ -173,7 +173,7 @@ export function CustomerDetailPane({
           <InfoRow label="연락처 1" value={customer.contact1} numeric />
           <InfoRow label="연락처 2" value={customer.contact2} numeric />
           <InfoRow label="이메일" value={customer.email} />
-          <InfoRow label="배송지" value={customer.delivery_address} />
+          <InfoRow label="배송 주소" value={customer.delivery_address} />
           <InfoRow label="정산 주기" value={customer.settlement_cycle} />
           <InfoRow
             label="은행별칭"
@@ -251,7 +251,7 @@ export function CustomerDetailPane({
               )}
               <InfoRow label="대표자명" value={taxInfo?.ceo_name ?? null} />
               <InfoRow
-                label="사업자 주소"
+                label="사업장 주소"
                 value={taxInfo?.business_address ?? null}
               />
               <InfoRow label="업태" value={taxInfo?.business_type ?? null} />
