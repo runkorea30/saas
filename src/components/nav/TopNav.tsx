@@ -4,7 +4,10 @@
  * - 중앙: 5개 섹션 버튼 (홈/판매/재고매입/재무/문서관리/설정)
  * - 설정 바로 오른쪽: 발주 예상 위젯 (1m/3m 토글 + 카테고리 필터 + USD 금액)
  *
- * 🔴 계산식은 발주서 페이지와 완전 일치 (useOrderNeedEstimate 주석 참조).
+ * 🔴 계산식 (2026-07-05):
+ *    · useOrderNeedEstimate 로 원복 (판매량 1개월/3개월 기준)
+ *    · 재고에 입고예정(useIncomingQuantities) 을 더해 넘겨 이중 발주 방지
+ *    · 재주문점 기반은 정보 표시(발주서 페이지 컬럼) 로만 유지
  * 🟠 excludedCategories 는 usePurchaseOrderExcluded 훅 — 발주서 페이지와 공유.
  */
 import { useEffect, useRef, useState } from 'react';
@@ -121,21 +124,35 @@ export function TopNav({ onLogout }: { onLogout: () => Promise<void> }) {
           )}
 
           <div className="flex items-center gap-2 relative" ref={filterRef}>
-            <div className="flex rounded border border-line overflow-hidden text-xs">
-              {(['1m', '3m'] as OrderBasis[]).map((b) => (
-                <button
-                  key={b}
-                  type="button"
-                  onClick={() => setBasis(b)}
-                  className={
-                    basis === b
-                      ? 'px-2 py-1 bg-brand text-white transition-colors'
-                      : 'px-2 py-1 text-ink-3 hover:bg-surface-2 hover:text-ink transition-colors'
-                  }
-                >
-                  {b === '1m' ? '1개월' : '3개월'}
-                </button>
-              ))}
+            {/*
+              🎨 다크모드 안전 토글 (2026-07-05):
+              선택 상태에 하드코딩 'bg-brand text-white' → CSS 변수 기반으로 교체.
+              두 테마 모두에서 배경-글자 대비 확보. (기존 흰-배경-흰-글자 버그 재발 방지)
+            */}
+            <div
+              className="flex rounded border border-line overflow-hidden text-xs"
+            >
+              {(['1m', '3m'] as OrderBasis[]).map((b) => {
+                const active = basis === b;
+                return (
+                  <button
+                    key={b}
+                    type="button"
+                    onClick={() => setBasis(b)}
+                    style={{
+                      padding: '4px 8px',
+                      background: active ? 'var(--brand)' : 'var(--surface)',
+                      color: active ? 'var(--surface)' : 'var(--ink-3)',
+                      fontWeight: active ? 600 : 400,
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'background 0.15s, color 0.15s',
+                    }}
+                  >
+                    {b === '1m' ? '1개월' : '3개월'}
+                  </button>
+                );
+              })}
             </div>
 
             <button

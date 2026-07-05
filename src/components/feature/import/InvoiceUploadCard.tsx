@@ -12,8 +12,8 @@
  *    "입고처리로 이관" 시 BO 행은 제외 — 실입고 0 인 행을 만들지 않음.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { FileSpreadsheet, FileText, X } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { FileSpreadsheet, FileText, ListTodo, X } from 'lucide-react';
 import {
   parseOrderSheet,
   type OrderSheetRow,
@@ -27,6 +27,10 @@ import type { ImportRowInput, ImportInvoiceHeader } from '@/types/import';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/Toast';
 import type { Json } from '@/types/database';
+import {
+  fetchPendingSessions,
+  type PendingSession,
+} from '@/lib/invoiceVerification';
 
 // 주문서/인보이스/OPS 제품 코드 간 매칭용 정규화.
 // 공백·하이픈 제거 + 소문자 통일. (leading-zero 는 제거하지 않음 — 다른 SKU 가 충돌할 수 있음.)
@@ -252,6 +256,13 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
   const [dbLoaded, setDbLoaded] = useState(false);
   // DB 자동 저장 useEffect 가 마운트 직후/DB 복원 직후에 한 번 트리거되는 것을 막기 위함.
   const skipNextAutoSave = useRef(true);
+  /**
+   * 현재 편집 중인 세션 행의 PK id.
+   * 🔴 스키마 변경(2026-07-05) 이후 다중 세션 지원. 회사당 유일하지 않으므로
+   *    모든 UPDATE/DELETE 는 이 id 로 좁힘. null 이면 아직 서버 행이 없어
+   *    최초 saveToDb 에서 INSERT 후 채워짐.
+   */
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   // 정규화된 OPS 제품코드 → 한글명 맵. (인보이스/주문서의 영문명을 한글로 치환)
   const productNameByCode = useMemo(() => {
@@ -280,6 +291,10 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     Boolean(products && products.length > 0);
 
   // ── DB 저장 ──
+  //
+  // 🔴 다중 세션 지원 (2026-07-05):
+  //    · sessionId 가 있으면 UPDATE by id (다른 미확정 세션은 절대 건드리지 않음).
+  //    · sessionId 가 없으면 INSERT 후 id 를 확보. 이후엔 계속 UPDATE.
   const saveToDb = async (
     data: {
       rows: ComparisonRow[];
@@ -296,37 +311,69 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     if (!companyId) return;
     setDbSaving(true);
     try {
-      await supabase
-        .from('invoice_verifications')
-        .upsert(
-          {
+      const payload = {
+        invoice_no: data.invoiceNo,
+        invoice_date: data.invoiceDate,
+        comparison_rows: data.rows as unknown as Json,
+        order_rows: data.orderRows as unknown as Json,
+        invoice_rows: data.invoiceRows as unknown as Json,
+        order_file_name: orderFileName ?? null,
+        invoice_file_name: invoiceFileName ?? null,
+        invoice_file_path: invoiceFilePathArg ?? null,
+        last_tab: currentTab,
+        updated_at: new Date().toISOString(),
+      };
+      if (sessionId) {
+        await supabase
+          .from('invoice_verifications')
+          .update(payload)
+          .eq('id', sessionId);
+      } else {
+        const { data: inserted } = await supabase
+          .from('invoice_verifications')
+          .insert({
             company_id: companyId,
-            invoice_no: data.invoiceNo,
-            invoice_date: data.invoiceDate,
-            comparison_rows: data.rows as unknown as Json,
-            order_rows: data.orderRows as unknown as Json,
-            invoice_rows: data.invoiceRows as unknown as Json,
-            order_file_name: orderFileName ?? null,
-            invoice_file_name: invoiceFileName ?? null,
-            invoice_file_path: invoiceFilePathArg ?? null,
-            last_tab: currentTab,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'company_id' },
-        );
+            transfer_rows: [] as unknown as Json,
+            transfer_saved_at: null,
+            ...payload,
+          })
+          .select('id')
+          .single();
+        if (inserted && (inserted as { id: string }).id) {
+          setSessionId((inserted as { id: string }).id);
+        }
+      }
     } catch { /* ignore — 저장 실패해도 UI 방해 안 함 */ }
     finally { setDbSaving(false); }
   };
 
-  // ── DB 복원 (companyId 로드 시 1회) ──
+  // ── 미확정 세션 목록 (다중 세션 지원 후 도입) ──
+  //
+  // 🟠 목적:
+  //    1) 마운트 시 "가장 최근 미확정 세션" 을 자동 복원 (기존 UX 유지)
+  //    2) 여러 미확정이 있으면 헤더에 목록 chip 노출 → 클릭 시 그 세션으로 전환
+  const pendingQuery = useQuery({
+    queryKey: ['invoice-verifications-pending', companyId],
+    enabled: Boolean(companyId),
+    queryFn: () => fetchPendingSessions(companyId!),
+    staleTime: 15_000,
+  });
+  const pendingSessions: PendingSession[] = pendingQuery.data ?? [];
+
+  // ── DB 복원 (companyId 로드 시 1회, 가장 최근 미확정 세션 기준) ──
   useEffect(() => {
     if (!companyId || dbLoaded) return;
+    if (pendingQuery.isLoading) return; // 세션 목록 완료 대기
     setDbLoaded(true);
+
+    const current = pendingSessions[0];
+    if (!current) return; // 미확정 세션 없음 — 빈 상태 유지 (첫 저장 시 INSERT)
+    setSessionId(current.id);
 
     void supabase
       .from('invoice_verifications')
       .select('*')
-      .eq('company_id', companyId)
+      .eq('id', current.id)
       .maybeSingle()
       .then(({ data }) => {
         if (!data) return;
@@ -347,7 +394,37 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
         // Storage 경로 복원 — 입고처리로 이관 시 참조.
         setInvoiceFilePath(data.invoice_file_path ?? null);
       });
-  }, [companyId, dbLoaded]);
+  }, [companyId, dbLoaded, pendingQuery.isLoading, pendingSessions]);
+
+  /**
+   * 사용자가 목록에서 다른 미확정 세션을 클릭했을 때 그 세션으로 전환.
+   * 새 발주서 다운로드로 새 드래프트 세션이 만들어졌을 때도 이 경로로 스위칭 가능.
+   */
+  const switchToSession = async (targetId: string) => {
+    if (!targetId || targetId === sessionId) return;
+    const { data, error } = await supabase
+      .from('invoice_verifications')
+      .select('*')
+      .eq('id', targetId)
+      .maybeSingle();
+    if (error || !data) {
+      showToast({ kind: 'error', text: '세션 불러오기 실패' });
+      return;
+    }
+    skipNextAutoSave.current = true;
+    setSessionId(targetId);
+    setComparison({
+      rows: (data.comparison_rows as unknown as ComparisonRow[]) ?? [],
+      orderRows: (data.order_rows as unknown as OrderSheetRow[]) ?? [],
+      invoiceRows: (data.invoice_rows as unknown as InvoiceParsedRow[]) ?? [],
+      invoiceNo: data.invoice_no ?? '',
+      invoiceDate: data.invoice_date ?? '',
+    });
+    setTab((data.last_tab as Tab) ?? 'all');
+    setOrderFile(data.order_file_name ? ({ name: data.order_file_name } as File) : null);
+    setInvoiceFile(data.invoice_file_name ? ({ name: data.invoice_file_name } as File) : null);
+    setInvoiceFilePath(data.invoice_file_path ?? null);
+  };
 
   // ── products 로드 완료 시 unknown 행 자동 재매칭 ──
   // DB 복원 직후엔 products 가 비어있어 모두 unknown 으로 들어올 수 있음.
@@ -712,17 +789,25 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     //    async IIFE 안에서 await 해 요청 실행을 보장.
     if (companyId) {
       void (async () => {
-        const { error } = await supabase
+        // 🔴 다중 세션 대응: sessionId 로 좁혀 UPDATE. 그래야 다른 미확정 세션의
+        //    transfer_rows 를 실수로 지우지 않는다.
+        const target = supabase
           .from('invoice_verifications')
           .update({
             transfer_rows: rows as unknown as Json,
             transfer_saved_at: new Date().toISOString(),
-          })
-          .eq('company_id', companyId);
+          });
+        const { error } = await (sessionId
+          ? target.eq('id', sessionId)
+          : target.eq('company_id', companyId).is('resolved_at', null));
         if (error) {
           // eslint-disable-next-line no-console
           console.error('[transfer_rows.save]', error);
         }
+        // 미확정 목록 재조회 → 헤더 chip 즉시 반영.
+        queryClient.invalidateQueries({
+          queryKey: ['invoice-verifications-pending', companyId],
+        });
       })();
 
       // 🟠 인보이스 PDF 가 실제로 Storage 에 업로드된 상태라면(invoiceFilePath 존재)
@@ -829,19 +914,23 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     const orphanedPath = invoiceFilePath;
     setInvoiceFilePath(null);
     if (orphanedPath) void removeInvoicePdfSilently(orphanedPath);
-    if (companyId) {
-      // 🔴 PostgrestBuilder thenable — await 로 실행 보장.
+    if (companyId && sessionId) {
+      // 🔴 다중 세션 대응: 현재 편집중인 세션 하나만 삭제. 다른 미확정은 보존.
       void (async () => {
         const { error } = await supabase
           .from('invoice_verifications')
           .delete()
-          .eq('company_id', companyId);
+          .eq('id', sessionId);
         if (error) {
           // eslint-disable-next-line no-console
           console.error('[invoice_verifications.delete]', error);
         }
+        queryClient.invalidateQueries({
+          queryKey: ['invoice-verifications-pending', companyId],
+        });
       })();
     }
+    setSessionId(null);
   };
 
   return (
@@ -857,7 +946,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
         gap: 12,
       }}
     >
-      <header style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <header style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <h2
           className="disp"
           style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}
@@ -867,6 +956,12 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
         <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
           주문서(엑셀) + 인보이스(PDF) 업로드 → 비교 → 입고처리로 이관
         </span>
+        <div style={{ flex: 1 }} />
+        <PendingSessionPicker
+          sessions={pendingSessions}
+          currentId={sessionId}
+          onPick={(id) => void switchToSession(id)}
+        />
       </header>
 
       {/* Drop zones */}
@@ -1645,6 +1740,119 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
 // ───────────────────────────────────────────────────────────
 // helpers / subcomponents
 // ───────────────────────────────────────────────────────────
+
+/**
+ * 헤더 우측의 "미확정 이관 목록" 드롭다운.
+ *
+ * 하나 이하면 렌더링 안 함 (군더더기 방지). 두 개 이상이면 갯수 배지 + 열림 시
+ * 각 세션의 invoice_no / 이관일시 / 라벨수 표시. 클릭하면 그 세션으로 스위치.
+ */
+function PendingSessionPicker({
+  sessions,
+  currentId,
+  onPick,
+}: {
+  sessions: PendingSession[];
+  currentId: string | null;
+  onPick: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  // 편집중 세션도 목록에 있는 게 자연스럽지만, 스위치 대상은 "다른" 세션.
+  const others = sessions.filter((s) => s.id !== currentId);
+  if (sessions.length <= 1) return null; // 하나뿐이면 굳이 노출 안 함
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: '3px 8px',
+          fontSize: 11,
+          border: '1px solid var(--line)',
+          borderRadius: 6,
+          background: 'var(--surface)',
+          color: 'var(--ink-2)',
+          cursor: 'pointer',
+        }}
+        title="다른 미확정 이관 세션으로 전환"
+      >
+        <ListTodo size={12} />
+        미확정 이관 {sessions.length}건
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '100%',
+            right: 0,
+            marginTop: 4,
+            minWidth: 260,
+            background: 'var(--surface)',
+            border: '1px solid var(--line)',
+            borderRadius: 8,
+            boxShadow: 'var(--shadow-lg, 0 4px 12px rgba(0,0,0,0.08))',
+            zIndex: 20,
+            padding: 6,
+          }}
+        >
+          {others.length === 0 && (
+            <div style={{ padding: 8, fontSize: 11, color: 'var(--ink-3)' }}>
+              다른 미확정 세션이 없습니다.
+            </div>
+          )}
+          {others.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onPick(s.id);
+              }}
+              style={{
+                display: 'flex',
+                width: '100%',
+                textAlign: 'left',
+                gap: 8,
+                padding: '6px 8px',
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--ink)',
+                fontSize: 11.5,
+                cursor: 'pointer',
+                borderRadius: 4,
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2, #fafafa)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+            >
+              <span style={{ fontFamily: 'var(--font-num)', fontWeight: 600 }}>
+                {s.invoice_no || '(번호 미입력)'}
+              </span>
+              <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-num)' }}>
+                {s.transfer_saved_at
+                  ? `이관 ${s.transfer_saved_at.slice(0, 10)} · ${s.transfer_row_count}라벨`
+                  : '편집중'}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function FileSlot({
   label,

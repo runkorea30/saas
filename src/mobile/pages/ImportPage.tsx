@@ -20,6 +20,7 @@ import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
 import type { ImportNoticeProduct, ImportNoticeStatus } from '@/hooks/useCompany';
 import type { Json } from '@/types/database';
+import { markSessionResolved } from '@/lib/invoiceVerification';
 import { useProducts } from '@/hooks/queries/useProducts';
 import { useCreateImportWithLots } from '@/hooks/queries/useCreateImportWithLots';
 import { useToast } from '@/components/ui/Toast';
@@ -156,10 +157,14 @@ export function ImportPage() {
     if (!companyId || transferLoaded) return;
     setTransferLoaded(true);
 
+    // 🔴 다중 세션 대응: 미확정 + transfer_rows 있는 가장 최근 세션만 복원.
     void supabase
       .from('invoice_verifications')
       .select('transfer_rows, invoice_no, invoice_date')
       .eq('company_id', companyId)
+      .is('resolved_at', null)
+      .order('transfer_saved_at', { ascending: false, nullsFirst: false })
+      .limit(1)
       .maybeSingle()
       .then(({ data }) => {
         if (!data) return;
@@ -357,19 +362,23 @@ export function ImportPage() {
             text: `${rowsToSubmit.length}건 입고 완료`,
           });
           setRowInputs([createEmptyRow()]);
-          // 이관본도 클리어 — 다음 새로고침 때 빈 상태로 시작.
+          // 🔴 다중 세션 대응: 회사 전체 UPDATE 대신 해당 invoice_no 만.
           if (companyId) {
             void (async () => {
-              const { error } = await supabase
-                .from('invoice_verifications')
-                .update({
-                  transfer_rows: [] as unknown as Json,
-                  transfer_saved_at: null,
-                })
-                .eq('company_id', companyId);
-              if (error) {
+              try {
+                await markSessionResolved({
+                  companyId,
+                  invoiceNumber: header.invoiceNumber,
+                });
+                queryClient.invalidateQueries({
+                  queryKey: ['invoice-verifications-pending', companyId],
+                });
+                queryClient.invalidateQueries({
+                  queryKey: ['incoming-quantities', companyId],
+                });
+              } catch (e) {
                 // eslint-disable-next-line no-console
-                console.error('[transfer_rows.clear]', error);
+                console.error('[markSessionResolved]', e);
               }
             })();
           }

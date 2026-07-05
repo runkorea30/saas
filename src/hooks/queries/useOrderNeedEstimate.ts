@@ -15,6 +15,8 @@
  */
 import { useMemo } from 'react';
 import { usePurchaseOrder } from './usePurchaseOrder';
+import { useIncomingQuantities } from './useIncomingQuantities';
+import { usePurchaseForecast } from './usePurchaseForecast';
 import {
   calcSalesQty1m,
   calcSalesQty3m,
@@ -38,6 +40,28 @@ export function useOrderNeedEstimate(
 ): OrderNeedEstimate {
   const { products, salesMap, stockMap, categories, isLoading } =
     usePurchaseOrder(companyId);
+  // 🔴 (2026-07-05) 이미 발주해서 오고 있는 "입고예정" 수량은 재고에 미리 더해서
+  //    calcOrderQty 가 그만큼 덜 주문하게 함. 발주서 페이지 handleGenerate 와 정합.
+  const incomingQ = useIncomingQuantities(companyId);
+  const incomingByProduct =
+    incomingQ.data?.totalByProduct ?? new Map<string, number>();
+  // 🔴 (2026-07-05) usePurchaseForecast 의 ForecastRow.{daily_avg, lead_time_days} 재사용.
+  //    "리드타임 기간 소진분(dailyAvg × leadDays)" 을 재고에서 미리 빼고 발주수량을 계산해
+  //    발주 → 도착 사이의 자연 소진까지 감안한다.
+  const { rows: forecastRows } = usePurchaseForecast(companyId);
+  const forecastById = useMemo(() => {
+    const map = new Map<
+      string,
+      { daily_avg: number; lead_time_days: number }
+    >();
+    for (const r of forecastRows) {
+      map.set(r.id, {
+        daily_avg: r.daily_avg,
+        lead_time_days: r.lead_time_days,
+      });
+    }
+    return map;
+  }, [forecastRows]);
 
   const estimate = useMemo(() => {
     if (isLoading || products.length === 0) {
@@ -55,7 +79,17 @@ export function useOrderNeedEstimate(
       const qty3m = calcSalesQty3m(qty6m);
       const baseQty = basis === '1m' ? calcSalesQty1m(qty3m) : qty3m;
       const stock = stockMap.get(p.id) ?? 0;
-      const needDz = calcOrderQty(baseQty, stock, p.unit_order || p.unit);
+      const incoming = incomingByProduct.get(p.id) ?? 0;
+      // 리드타임 감안: 발주 → 입고 사이에 자연 소진될 재고만큼 미리 뺌.
+      // 재고가 리드타임 소진량 미만이면 0 으로 clamp (사실상 credit 없음).
+      const f = forecastById.get(p.id);
+      const leadTimeQty = (f?.daily_avg ?? 0) * (f?.lead_time_days ?? 0);
+      const depletionAdjustedStock = Math.max(0, stock - leadTimeQty);
+      const needDz = calcOrderQty(
+        baseQty,
+        depletionAdjustedStock + incoming,
+        p.unit_order || p.unit,
+      );
       if (needDz <= 0) continue;
 
       totalUsd += needDz * Number(p.unit_price_usd);
@@ -66,7 +100,16 @@ export function useOrderNeedEstimate(
       estimatedUsd: parseFloat(totalUsd.toFixed(2)),
       needCount,
     };
-  }, [products, salesMap, stockMap, basis, excludedCategories, isLoading]);
+  }, [
+    products,
+    salesMap,
+    stockMap,
+    incomingByProduct,
+    forecastById,
+    basis,
+    excludedCategories,
+    isLoading,
+  ]);
 
   return { ...estimate, categories, isLoading };
 }

@@ -529,6 +529,72 @@ export async function calcOrderSuggestion(
   return map.get(productId) ?? 0;
 }
 
+/**
+ * 제품별 "일평균 판매수량" 맵 (구매 예측 화면 전용).
+ *
+ * 정의: 최근 `lookbackDays` 일(기본 180) 동안의 순판매수량 ÷ lookbackDays.
+ *   - 순판매수량 = SUM(is_return=false quantity) − SUM(is_return=true quantity)
+ *   - `orders.deleted_at IS NULL`, `order_items.deleted_at IS NULL`,
+ *     `orders.status <> 'canceled'` 만 집계 (정상매출).
+ *
+ * 🟠 RPC `recalculate_reorder_points` 의 daily_avg 정의와 완전히 동일해야 한다.
+ *    한쪽만 바뀌면 화면 표시값과 DB 저장 reorder_point 사이에 괴리 발생.
+ *
+ * 🟡 TODO(계절성): 현재는 단순 평균이지만, 나중에 월별 가중치(peak season)
+ *    를 반영하려면 이 함수 시그니처만 유지하고 내부 로직을 교체하면 됨.
+ *    호출부(usePurchaseForecast / RPC)는 반환 shape 만 알 뿐, 계산 방식은 몰라야 함.
+ */
+export interface DailySalesEntry {
+  /** 최종 일평균판매량 = MAX(0, net_qty / lookbackDays). */
+  daily_avg: number;
+  /** 원본 순판매수량(EA) = SUM(quantity WHERE !is_return) − SUM(quantity WHERE is_return). */
+  net_qty: number;
+  /** 분모(일). 그대로 lookbackDays. 계산검증 팝오버에서 근거로 노출. */
+  lookback_days: number;
+}
+
+export async function calcSalesPerDayByProduct(
+  companyId: string,
+  lookbackDays: number = 180,
+): Promise<Map<string, DailySalesEntry>> {
+  const now = new Date();
+  const since = new Date(now.getTime() - lookbackDays * 86_400_000).toISOString();
+
+  interface Row {
+    product_id: string;
+    quantity: number;
+    is_return: boolean;
+  }
+  const rows = await fetchAllRows<Row>(() =>
+    supabase
+      .from('order_items')
+      .select(
+        'product_id, quantity, is_return, order:orders!inner(order_date, company_id, status, deleted_at)',
+      )
+      .eq('company_id', companyId)
+      .is('deleted_at', null)
+      .is('order.deleted_at', null)
+      .neq('order.status', 'canceled')
+      .gte('order.order_date', since),
+  );
+
+  const netByProduct = new Map<string, number>();
+  for (const r of rows) {
+    const delta = r.is_return ? -r.quantity : r.quantity;
+    netByProduct.set(r.product_id, (netByProduct.get(r.product_id) ?? 0) + delta);
+  }
+  const result = new Map<string, DailySalesEntry>();
+  for (const [pid, net] of netByProduct) {
+    // 순판매가 음수(반품 우세)면 0 취급 — 재주문점 계산에서 음수 의미 없음.
+    result.set(pid, {
+      daily_avg: Math.max(0, net / lookbackDays),
+      net_qty: net,
+      lookback_days: lookbackDays,
+    });
+  }
+  return result;
+}
+
 // ───────────────────────────────────────────────────────────
 // 발주서 페이지용 (순수 산술, 당월 제외 6개월 윈도우 기반)
 // ───────────────────────────────────────────────────────────

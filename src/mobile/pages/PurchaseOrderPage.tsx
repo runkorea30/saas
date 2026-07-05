@@ -24,7 +24,14 @@ import {
 } from '@/hooks/queries/usePurchaseOrder';
 import { resetInvoiceVerificationForNewOrder } from '@/lib/invoiceVerification';
 import type { OrderSheetRow } from '@/utils/orderSheetParser';
+import {
+  useAutoRecalcReorderPoints,
+  usePurchaseForecast,
+  type ForecastRow,
+} from '@/hooks/queries/usePurchaseForecast';
+import { useIncomingQuantities } from '@/hooks/queries/useIncomingQuantities';
 import { useOrderNeedEstimate } from '@/hooks/queries/useOrderNeedEstimate';
+import { useLeadTimeSettings } from '@/hooks/useLeadTimeSettings';
 import { usePurchaseOrderExcluded } from '@/hooks/usePurchaseOrderExcluded';
 import { useToast } from '@/components/ui/Toast';
 import { supabase } from '@/lib/supabase';
@@ -100,12 +107,46 @@ export function PurchaseOrderPage() {
 
   // 발주 예상 제외 카테고리 — TopNav 위젯과 동일 localStorage 공유.
   const { excluded: excludedCategories } = usePurchaseOrderExcluded();
-  // 데스크탑 TopNav 발주 예상 위젯과 동일 계산식.
+  // 재주문점 기반 예측 — 상태/입고예정 배지 등 정보 표시에만 사용.
+  const forecastQ = usePurchaseForecast(companyId);
+  // 하루 1회 자동 재계산 (localStorage TTL). 데스크탑/모바일 공유.
+  useAutoRecalcReorderPoints(companyId);
+  const forecastById = useMemo(() => {
+    const map = new Map<string, ForecastRow>();
+    for (const r of forecastQ.rows) map.set(r.id, r);
+    return map;
+  }, [forecastQ.rows]);
+  // 입고예정 수량 — "1단계 발주서 생성" 계산에 stock 과 함께 더해 넘김.
+  const incomingQ = useIncomingQuantities(companyId);
+  const incomingByProduct =
+    incomingQ.data?.totalByProduct ?? new Map<string, number>();
+  // 리드타임 설정 — 데스크톱과 동일 localStorage.
+  const leadTime = useLeadTimeSettings(companyId);
+  const [leadTimeModalOpen, setLeadTimeModalOpen] = useState(false);
+  // 데스크탑 TopNav 위젯과 동일 계산식 (판매량 기준 + 입고예정 반영).
   const { estimatedUsd: needEstimateUsd } = useOrderNeedEstimate(
     companyId,
     salesBasis,
     excludedCategories,
   );
+  const urgentCount = useMemo(
+    () => forecastQ.rows.filter((r) => r.status === 'now').length,
+    [forecastQ.rows],
+  );
+
+  /** 정렬 모드: 'category'(기본) 또는 'urgency'(발주필요일 오름차순). */
+  const [sortMode, setSortMode] = useState<'category' | 'urgency'>('category');
+  /**
+   * 상단 고정 정렬(33번) — 데스크톱과 동일 정책. 셋 상호 배타.
+   * 34번 버그수정 규칙도 함께 반영: 제외 카테고리(눈 아이콘 off) 는 pin 대상 아님.
+   */
+  const [pinMode, setPinMode] = useState<
+    'none' | 'incoming' | 'orderQty' | 'status'
+  >('none');
+  const [statusPinBucket, setStatusPinBucket] = useState<
+    '1m' | '2m' | '3m' | '3m_plus' | null
+  >(null);
+  const [pinSheetOpen, setPinSheetOpen] = useState(false);
 
   // 새로고침 — usePurchaseOrder 가 노출하지 않는 내부 4개 쿼리를 invalidate.
   // invalidateQueries 는 자동으로 활성 쿼리를 refetch.
@@ -136,8 +177,77 @@ export function PurchaseOrderPage() {
         : selectedCategory === SAVED_ALL_FILTER
           ? products.filter((p) => savedCategories.has(p.category))
           : products.filter((p) => p.category === selectedCategory);
-    return sortByCategory(base);
-  }, [products, selectedCategory, savedCategories]);
+
+    // 1단계: sortMode 기준 정렬.
+    let sorted: typeof base;
+    if (sortMode === 'urgency') {
+      sorted = [...base].sort((a, b) => {
+        const fa = forecastById.get(a.id);
+        const fb = forecastById.get(b.id);
+        const rank = (r?: ForecastRow) => {
+          if (!r) return 3;
+          if (r.status === 'no_history') return 2;
+          return 0;
+        };
+        const ra = rank(fa);
+        const rb = rank(fb);
+        if (ra !== rb) return ra - rb;
+        const da = fa?.days_until_reorder ?? Number.POSITIVE_INFINITY;
+        const db = fb?.days_until_reorder ?? Number.POSITIVE_INFINITY;
+        if (da !== db) return da - db;
+        return a.code.localeCompare(b.code);
+      });
+    } else {
+      const withHistory: typeof base = [];
+      const noHistory: typeof base = [];
+      for (const p of base) {
+        const f = forecastById.get(p.id);
+        if (f && f.status === 'no_history') noHistory.push(p);
+        else withHistory.push(p);
+      }
+      sorted = [...sortByCategory(withHistory), ...sortByCategory(noHistory)];
+    }
+
+    // 2단계: 상단 고정 정렬(33번). 34번 규칙: 제외 카테고리는 pin 대상 아님.
+    if (pinMode === 'none') return sorted;
+    const matches = (p: (typeof base)[number]): boolean => {
+      // 🔴 제외 카테고리는 무조건 pin 배제 (34번).
+      if (excludedCategories.has(p.category)) return false;
+      if (pinMode === 'incoming') {
+        return (forecastById.get(p.id)?.incoming_qty ?? 0) > 0;
+      }
+      if (pinMode === 'orderQty') {
+        return (orderQty.get(p.id) ?? 0) >= 1;
+      }
+      // status
+      if (!statusPinBucket) return false;
+      const f = forecastById.get(p.id);
+      if (!f || f.status === 'no_history') return false;
+      const d = f.days_until_reorder;
+      if (d == null) return false;
+      if (statusPinBucket === '1m') return d <= 30;
+      if (statusPinBucket === '2m') return d <= 60;
+      if (statusPinBucket === '3m') return d <= 90;
+      return d > 90; // '3m_plus'
+    };
+    const pinned: typeof base = [];
+    const rest: typeof base = [];
+    for (const p of sorted) {
+      if (matches(p)) pinned.push(p);
+      else rest.push(p);
+    }
+    return [...pinned, ...rest];
+  }, [
+    products,
+    selectedCategory,
+    savedCategories,
+    sortMode,
+    forecastById,
+    pinMode,
+    statusPinBucket,
+    orderQty,
+    excludedCategories,
+  ]);
 
   const totalUsd = useMemo(() => {
     let sum = 0;
@@ -181,14 +291,23 @@ export function PurchaseOrderPage() {
       const qty3m = calcSalesQty3m(qty6mExcl);
       const baseQty = salesBasis === '1m' ? calcSalesQty1m(qty3m) : qty3m;
       const stock = stockMap.get(p.id) ?? 0;
-      const orderQ = calcOrderQty(baseQty, stock, p.unit_order || p.unit);
+      const incoming = incomingByProduct.get(p.id) ?? 0;
+      // 🔴 (2026-07-05) 리드타임 감안 재고 조정 + 입고예정 반영. 데스크탑과 완전 동일.
+      const f = forecastById.get(p.id);
+      const leadTimeQty = (f?.daily_avg ?? 0) * (f?.lead_time_days ?? 0);
+      const depletionAdjustedStock = Math.max(0, stock - leadTimeQty);
+      const orderQ = calcOrderQty(
+        baseQty,
+        depletionAdjustedStock + incoming,
+        p.unit_order || p.unit,
+      );
       if (orderQ > 0) next.set(p.id, orderQ);
     }
     setOrderQty(next);
     const basisLabel = salesBasis === '1m' ? '1개월' : '3개월';
     showToast({
       kind: 'success',
-      text: `발주서 생성 완료 (${next.size}품목 · ${basisLabel} 기준)`,
+      text: `발주서 생성 완료 (${next.size}품목 · ${basisLabel} 기준, 리드타임·입고예정 반영)`,
     });
   };
 
@@ -419,6 +538,9 @@ export function PurchaseOrderPage() {
         orderRows,
         orderFileName: fileName,
       });
+      queryClient.invalidateQueries({
+        queryKey: ['invoice-verifications-pending', companyId],
+      });
       showToast({
         kind: 'success',
         text: '엑셀 다운로드 완료 · 인보이스 검증에 반영됨',
@@ -477,13 +599,12 @@ export function PurchaseOrderPage() {
               하단 텍스트와 '저장' 버튼 disabled 는 사용자 입력 라이브(filledCount) 유지. */}
           <KpiCard label="발주 품목" value={`${savedItemCount}개`} />
           <KpiCard
-            label="총합계"
-            value={`$${formatUsd(savedTotalUsd)}`}
-            tone="brand"
+            label={`발주예상 (${salesBasis === '1m' ? '1M' : '3M'})`}
+            value={`$${formatUsd(needEstimateUsd)}`}
           />
           <KpiCard
-            label={`발주 예상 (${salesBasis === '1m' ? '1M' : '3M'})`}
-            value={`$${formatUsd(needEstimateUsd)}`}
+            label="발주확정"
+            value={`$${formatUsd(savedTotalUsd)}`}
             tone="brand"
           />
           <KpiCard
@@ -491,6 +612,13 @@ export function PurchaseOrderPage() {
             value={`${savedCategories.size}개`}
             tone={savedCategories.size > 0 ? 'success' : undefined}
           />
+          {urgentCount > 0 && (
+            <KpiCard
+              label="지금 발주 필요"
+              value={`${urgentCount}건`}
+              tone="danger"
+            />
+          )}
           {/* 목표금액 달성률 카드 */}
           <div
             style={{
@@ -609,7 +737,11 @@ export function PurchaseOrderPage() {
           </div>
         </div>
 
-        {/* 액션 버튼 — 4개 가로 스크롤 */}
+        {/*
+          📐 툴바 재구성 (2026-07-05, 데스크톱과 동일 정책):
+          핵심 워크플로우(1→2→3→4 + 초기화) 와 보조 도구를 2줄로 분리.
+        */}
+        {/* 핵심 워크플로우 — 1단계 → 4단계 순서, 마지막에 초기화. */}
         <div
           style={{
             display: 'flex',
@@ -618,41 +750,6 @@ export function PurchaseOrderPage() {
             WebkitOverflowScrolling: 'touch',
           }}
         >
-          {/* 1m/3m 기준 토글 */}
-          <div
-            style={{
-              display: 'flex',
-              flexShrink: 0,
-              gap: 0,
-              border: '1px solid var(--m-border)',
-              borderRadius: 6,
-              overflow: 'hidden',
-            }}
-          >
-            {(['1m', '3m'] as const).map((basis) => (
-              <button
-                key={basis}
-                type="button"
-                onClick={() => setSalesBasis(basis)}
-                style={{
-                  height: 30,
-                  padding: '0 10px',
-                  fontSize: 11.5,
-                  fontWeight: salesBasis === basis ? 700 : 400,
-                  border: 'none',
-                  background:
-                    salesBasis === basis
-                      ? 'var(--m-primary)'
-                      : 'var(--m-surface)',
-                  color:
-                    salesBasis === basis ? '#fff' : 'var(--m-text-secondary)',
-                  cursor: 'pointer',
-                }}
-              >
-                {basis === '1m' ? '1개월' : '3개월'}
-              </button>
-            ))}
-          </div>
           <ActionBtn
             label={`1. 생성`}
             onClick={handleGenerate}
@@ -674,7 +771,99 @@ export function PurchaseOrderPage() {
             onClick={handleDownloadExcel}
             disabled={savedCategories.size === 0 || busy}
           />
+          <div style={{ flexShrink: 0, width: 6 }} />
           <ActionBtn label="초기화" onClick={handleReset} disabled={busy} />
+        </div>
+
+        {/* 보조 도구 — 1m/3m 토글, 재주문점 채우기, 정렬. */}
+        <div
+          style={{
+            display: 'flex',
+            gap: 6,
+            overflowX: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            marginTop: 6,
+            alignItems: 'center',
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              color: 'var(--m-text-secondary)',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              flexShrink: 0,
+              marginRight: 2,
+            }}
+          >
+            보조
+          </span>
+          {/* 1m/3m 기준 토글 */}
+          <div
+            style={{
+              display: 'flex',
+              flexShrink: 0,
+              gap: 0,
+              border: '1px solid var(--m-border)',
+              borderRadius: 6,
+              overflow: 'hidden',
+            }}
+          >
+            {(['1m', '3m'] as const).map((basis) => (
+              <button
+                key={basis}
+                type="button"
+                onClick={() => setSalesBasis(basis)}
+                style={{
+                  height: 26,
+                  padding: '0 10px',
+                  fontSize: 11,
+                  fontWeight: salesBasis === basis ? 700 : 400,
+                  border: 'none',
+                  background:
+                    salesBasis === basis
+                      ? 'var(--m-primary)'
+                      : 'var(--m-surface)',
+                  color:
+                    salesBasis === basis ? '#fff' : 'var(--m-text-secondary)',
+                  cursor: 'pointer',
+                }}
+              >
+                {basis === '1m' ? '1개월' : '3개월'}
+              </button>
+            ))}
+          </div>
+          <ActionBtn
+            label={sortMode === 'category' ? '⇅ 카테고리' : '⇅ 급한순'}
+            onClick={() =>
+              setSortMode((m) =>
+                m === 'category' ? 'urgency' : 'category',
+              )
+            }
+          />
+          <ActionBtn
+            label={(() => {
+              if (pinMode === 'none') return '⇕ 상단고정';
+              if (pinMode === 'incoming') return '⇕ 입고예정';
+              if (pinMode === 'orderQty') return '⇕ 발주수량';
+              const bucketLabel =
+                statusPinBucket === '1m'
+                  ? '1개월'
+                  : statusPinBucket === '2m'
+                    ? '2개월'
+                    : statusPinBucket === '3m'
+                      ? '3개월'
+                      : statusPinBucket === '3m_plus'
+                        ? '3개월+'
+                        : '';
+              return `⇕ 상태: ${bucketLabel}`;
+            })()}
+            onClick={() => setPinSheetOpen(true)}
+          />
+          <ActionBtn
+            label={`⏱ 리드타임(${leadTime.sea}/${leadTime.fedex})`}
+            onClick={() => setLeadTimeModalOpen(true)}
+          />
         </div>
       </header>
 
@@ -846,6 +1035,8 @@ export function PurchaseOrderPage() {
                     const usd =
                       p.unit_price_usd != null ? Number(p.unit_price_usd) : 0;
                     const lineTotal = qty * usd;
+                    const f = forecastById.get(p.id);
+                    const incoming = f?.incoming_qty ?? 0;
                     return (
                       <tr key={p.id} style={rowStyle}>
                         <td
@@ -873,7 +1064,85 @@ export function PurchaseOrderPage() {
                           }}
                           title={p.name}
                         >
-                          {p.name}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                            <span>{p.name}</span>
+                            {f && f.status === 'now' && (
+                              <span
+                                style={{
+                                  padding: '1px 5px',
+                                  background: 'var(--m-danger, #ef4444)',
+                                  color: '#fff',
+                                  borderRadius: 3,
+                                  fontSize: 9.5,
+                                  fontWeight: 700,
+                                }}
+                              >
+                                지금 발주
+                              </span>
+                            )}
+                            {f && f.status === 'later' && f.days_until_reorder !== null && f.days_until_reorder <= 14 && (
+                              <span
+                                style={{
+                                  padding: '1px 5px',
+                                  background: 'var(--m-warning-soft, #fef3c7)',
+                                  color: 'var(--m-warning-ink, #92400e)',
+                                  borderRadius: 3,
+                                  fontSize: 9.5,
+                                  fontWeight: 700,
+                                  fontFamily: 'Inter Tight, system-ui, sans-serif',
+                                }}
+                              >
+                                D-{f.days_until_reorder}
+                              </span>
+                            )}
+                            {incoming > 0 && (
+                              <span
+                                style={{
+                                  padding: '1px 5px',
+                                  background: 'var(--m-info-soft, #dbeafe)',
+                                  color: 'var(--m-info, #2563eb)',
+                                  borderRadius: 3,
+                                  fontSize: 9.5,
+                                  fontWeight: 700,
+                                  fontFamily: 'Inter Tight, system-ui, sans-serif',
+                                }}
+                                title="이관됐지만 미확정 상태인 발주 예정 수량 (EA)"
+                              >
+                                입고예정 +{incoming}
+                              </span>
+                            )}
+                            {f &&
+                              f.daily_avg > 0 &&
+                              (() => {
+                                // 🔴 표시 전용 clamp. 발주수량 depletionAdjustedStock 와는 별개 계산.
+                                const leadDiff = Math.max(
+                                  0,
+                                  Math.round(
+                                    f.daily_avg * f.lead_time_days - stock,
+                                  ),
+                                );
+                                if (leadDiff <= 0) return null;
+                                return (
+                                  <span
+                                    style={{
+                                      padding: '1px 5px',
+                                      background:
+                                        'var(--m-warning-soft, #fef3c7)',
+                                      color:
+                                        'var(--m-warning-ink, #92400e)',
+                                      borderRadius: 3,
+                                      fontSize: 9.5,
+                                      fontWeight: 700,
+                                      fontFamily:
+                                        'Inter Tight, system-ui, sans-serif',
+                                    }}
+                                    title={`리드타임 ${f.lead_time_days}일 소진 예상 (재고 대비 부족량 EA)`}
+                                  >
+                                    리드타임 {leadDiff}
+                                  </span>
+                                );
+                              })()}
+                          </div>
                         </td>
                         <td style={{ ...tdStyle, textAlign: 'right' }}>
                           <input
@@ -964,6 +1233,400 @@ export function PurchaseOrderPage() {
       </div>
       </>
       )}
+
+      {/* 상단고정 정렬 바텀시트 (입고예정/발주수량/상태 D-day 구간). 33/34번 정책. */}
+      {pinSheetOpen && (
+        <MobilePinSheet
+          pinMode={pinMode}
+          statusPinBucket={statusPinBucket}
+          onSelectIncoming={() => {
+            setPinMode((m) => (m === 'incoming' ? 'none' : 'incoming'));
+          }}
+          onSelectOrderQty={() => {
+            setPinMode((m) => (m === 'orderQty' ? 'none' : 'orderQty'));
+          }}
+          onSelectStatus={(bucket) => {
+            if (bucket === null) {
+              setStatusPinBucket(null);
+              if (pinMode === 'status') setPinMode('none');
+            } else {
+              setStatusPinBucket(bucket);
+              setPinMode('status');
+            }
+          }}
+          onClear={() => {
+            setPinMode('none');
+            setStatusPinBucket(null);
+          }}
+          onClose={() => setPinSheetOpen(false)}
+        />
+      )}
+
+      {/* 리드타임 조정 모달 (해상/FedEx). 데스크톱과 동일한 useLeadTimeSettings 공유. */}
+      {leadTimeModalOpen && (
+        <MobileLeadTimeModal
+          sea={leadTime.sea}
+          fedex={leadTime.fedex}
+          isDefault={leadTime.isDefault}
+          onChangeSea={leadTime.setSea}
+          onChangeFedex={leadTime.setFedex}
+          onReset={leadTime.reset}
+          onClose={() => setLeadTimeModalOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * 상단고정 정렬 바텀시트 (모바일 33/34번).
+ * · 입고예정/발주수량 토글 + 상태 D-day 구간 4개 + 해제 버튼.
+ * · 셋 상호 배타 — 부모의 setState 로직이 pinMode 를 관리.
+ * · 34번 규칙(제외 카테고리 pin 배제)은 부모 matches() 에서 이미 처리됨.
+ */
+function MobilePinSheet({
+  pinMode,
+  statusPinBucket,
+  onSelectIncoming,
+  onSelectOrderQty,
+  onSelectStatus,
+  onClear,
+  onClose,
+}: {
+  pinMode: 'none' | 'incoming' | 'orderQty' | 'status';
+  statusPinBucket: '1m' | '2m' | '3m' | '3m_plus' | null;
+  onSelectIncoming: () => void;
+  onSelectOrderQty: () => void;
+  onSelectStatus: (bucket: '1m' | '2m' | '3m' | '3m_plus' | null) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  const rowStyle = (active: boolean): React.CSSProperties => ({
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '10px 12px',
+    borderRadius: 8,
+    border: `1px solid ${active ? 'var(--m-primary)' : 'var(--m-border)'}`,
+    background: active ? 'var(--m-primary)' : 'var(--m-surface)',
+    color: active ? '#fff' : 'var(--m-text)',
+    fontSize: 13,
+    fontWeight: active ? 700 : 500,
+    cursor: 'pointer',
+    width: '100%',
+  });
+  const statusOptions: {
+    key: '1m' | '2m' | '3m' | '3m_plus';
+    label: string;
+  }[] = [
+    { key: '1m', label: '1개월 (D-30 이내)' },
+    { key: '2m', label: '2개월 (D-60 이내)' },
+    { key: '3m', label: '3개월 (D-90 이내)' },
+    { key: '3m_plus', label: '3개월 이상 (D-90 초과)' },
+  ];
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.35)',
+        zIndex: 50,
+        display: 'flex',
+        alignItems: 'flex-end',
+        justifyContent: 'center',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'var(--m-surface)',
+          borderRadius: '12px 12px 0 0',
+          padding: 20,
+          width: '100%',
+          maxWidth: 480,
+          boxShadow: '0 -4px 12px rgba(0,0,0,0.15)',
+          maxHeight: '80vh',
+          overflowY: 'auto',
+        }}
+      >
+        <div
+          style={{
+            fontSize: 15,
+            fontWeight: 700,
+            color: 'var(--m-text)',
+            marginBottom: 4,
+          }}
+        >
+          상단고정 정렬
+        </div>
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--m-text-secondary)',
+            marginBottom: 16,
+          }}
+        >
+          조건에 맞는 행이 최상단으로. 제외 카테고리는 대상 아님.
+        </div>
+
+        <button
+          type="button"
+          onClick={onSelectIncoming}
+          style={{ ...rowStyle(pinMode === 'incoming'), marginBottom: 8 }}
+        >
+          <span>⇕ 입고예정</span>
+          <span style={{ fontSize: 10.5, opacity: 0.7 }}>
+            {pinMode === 'incoming' ? '활성 · 눌러 해제' : '입고예정 &gt; 0'}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={onSelectOrderQty}
+          style={{ ...rowStyle(pinMode === 'orderQty'), marginBottom: 12 }}
+        >
+          <span>⇕ 발주수량</span>
+          <span style={{ fontSize: 10.5, opacity: 0.7 }}>
+            {pinMode === 'orderQty' ? '활성 · 눌러 해제' : '발주수량 ≥ 1'}
+          </span>
+        </button>
+
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--m-text-secondary)',
+            marginBottom: 6,
+          }}
+        >
+          상태(D-day 누적 구간)
+        </div>
+        {statusOptions.map((opt) => {
+          const active =
+            pinMode === 'status' && statusPinBucket === opt.key;
+          return (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={() => onSelectStatus(active ? null : opt.key)}
+              style={{ ...rowStyle(active), marginBottom: 6 }}
+            >
+              <span>⇕ {opt.label}</span>
+              <span style={{ fontSize: 10.5, opacity: 0.7 }}>
+                {active ? '활성 · 눌러 해제' : ''}
+              </span>
+            </button>
+          );
+        })}
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+          {pinMode !== 'none' && (
+            <button
+              type="button"
+              onClick={onClear}
+              style={{
+                flex: 1,
+                height: 40,
+                borderRadius: 8,
+                border: '1px solid var(--m-border-strong)',
+                background: 'var(--m-surface)',
+                color: 'var(--m-text-secondary)',
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              전체 해제
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              flex: 1,
+              height: 40,
+              borderRadius: 8,
+              border: 'none',
+              background: 'var(--m-primary)',
+              color: '#fff',
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            닫기
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobileLeadTimeModal({
+  sea,
+  fedex,
+  isDefault,
+  onChangeSea,
+  onChangeFedex,
+  onReset,
+  onClose,
+}: {
+  sea: number;
+  fedex: number;
+  isDefault: boolean;
+  onChangeSea: (n: number) => void;
+  onChangeFedex: (n: number) => void;
+  onReset: () => void;
+  onClose: () => void;
+}) {
+  const inputStyle: React.CSSProperties = {
+    width: 80,
+    height: 32,
+    padding: '0 8px',
+    border: '1px solid var(--m-border-strong)',
+    borderRadius: 6,
+    fontSize: 14,
+    textAlign: 'right',
+    fontFamily: 'Inter Tight, system-ui, sans-serif',
+    background: 'var(--m-surface)',
+    color: 'var(--m-text)',
+    outline: 'none',
+  };
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.35)',
+        zIndex: 50,
+        display: 'flex',
+        alignItems: 'flex-end',
+        justifyContent: 'center',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'var(--m-surface)',
+          borderRadius: '12px 12px 0 0',
+          padding: 20,
+          width: '100%',
+          maxWidth: 480,
+          boxShadow: '0 -4px 12px rgba(0,0,0,0.15)',
+        }}
+      >
+        <div
+          style={{
+            fontSize: 15,
+            fontWeight: 700,
+            color: 'var(--m-text)',
+            marginBottom: 4,
+          }}
+        >
+          리드타임 조정
+        </div>
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--m-text-secondary)',
+            marginBottom: 16,
+          }}
+        >
+          상태·리드타임수량·발주수량 계산에 즉시 반영됩니다.
+        </div>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            marginBottom: 12,
+            fontSize: 13,
+            color: 'var(--m-text)',
+          }}
+        >
+          <span>해상 (레더다이 / 스웨이드다이 / 디글레이저)</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="number"
+              min={1}
+              max={365}
+              step={1}
+              value={sea}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (Number.isFinite(n)) onChangeSea(n);
+              }}
+              onFocus={(e) => e.currentTarget.select()}
+              style={inputStyle}
+            />
+            <span style={{ fontSize: 12, color: 'var(--m-text-secondary)' }}>일</span>
+          </span>
+        </label>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            marginBottom: 20,
+            fontSize: 13,
+            color: 'var(--m-text)',
+          }}
+        >
+          <span>FedEx (그 외 카테고리)</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="number"
+              min={1}
+              max={365}
+              step={1}
+              value={fedex}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (Number.isFinite(n)) onChangeFedex(n);
+              }}
+              onFocus={(e) => e.currentTarget.select()}
+              style={inputStyle}
+            />
+            <span style={{ fontSize: 12, color: 'var(--m-text-secondary)' }}>일</span>
+          </span>
+        </label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {!isDefault && (
+            <button
+              type="button"
+              onClick={onReset}
+              style={{
+                flex: 1,
+                height: 40,
+                borderRadius: 8,
+                border: '1px solid var(--m-border-strong)',
+                background: 'var(--m-surface)',
+                color: 'var(--m-text-secondary)',
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              기본값(90/15) 초기화
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              flex: 1,
+              height: 40,
+              borderRadius: 8,
+              border: 'none',
+              background: 'var(--m-primary)',
+              color: '#fff',
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            닫기
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -979,14 +1642,16 @@ function KpiCard({
 }: {
   label: string;
   value: string;
-  tone?: 'brand' | 'success';
+  tone?: 'brand' | 'success' | 'danger';
 }) {
   const color =
     tone === 'brand'
       ? 'var(--m-primary)'
       : tone === 'success'
         ? 'var(--m-success)'
-        : 'var(--m-text)';
+        : tone === 'danger'
+          ? 'var(--m-danger, #ef4444)'
+          : 'var(--m-text)';
   return (
     <div
       style={{

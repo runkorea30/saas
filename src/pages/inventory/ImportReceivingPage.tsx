@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
+import { markSessionResolved } from '@/lib/invoiceVerification';
 import type { ImportNoticeProduct, ImportNoticeStatus } from '@/hooks/useCompany';
 import type { Json } from '@/types/database';
 import { useProducts } from '@/hooks/queries/useProducts';
@@ -216,10 +217,15 @@ export function ImportReceivingPage() {
     if (!companyId || transferLoaded) return;
     setTransferLoaded(true);
 
+    // 🔴 다중 세션 대응: 회사 전체가 아니라 "가장 최근 미확정 & 이관된" 세션만 복원.
+    //    resolved_at IS NULL AND transfer_rows 존재 조건으로 좁힘.
     void supabase
       .from('invoice_verifications')
       .select('transfer_rows, invoice_no, invoice_date')
       .eq('company_id', companyId)
+      .is('resolved_at', null)
+      .order('transfer_saved_at', { ascending: false, nullsFirst: false })
+      .limit(1)
       .maybeSingle()
       .then(({ data }) => {
         if (!data) return;
@@ -451,20 +457,24 @@ export function ImportReceivingPage() {
           });
           // 행은 초기화, 헤더는 유지 (연속 입력 편의).
           setRowInputs([createEmptyRow()]);
-          // 이관본도 클리어 — 다음 새로고침 때 빈 상태로 시작.
-          // 🔴 PostgrestBuilder thenable — await 로 실행 보장.
+          // 🔴 다중 세션 대응: 해당 invoice_no 의 세션 행만 resolved_at 세팅 + 이관본
+          //    정리. 회사 전체를 UPDATE 하던 기존 방식은 다른 미확정 세션까지 초기화.
           if (companyId) {
             void (async () => {
-              const { error } = await supabase
-                .from('invoice_verifications')
-                .update({
-                  transfer_rows: [] as unknown as Json,
-                  transfer_saved_at: null,
-                })
-                .eq('company_id', companyId);
-              if (error) {
+              try {
+                await markSessionResolved({
+                  companyId,
+                  invoiceNumber: header.invoiceNumber,
+                });
+                queryClient.invalidateQueries({
+                  queryKey: ['invoice-verifications-pending', companyId],
+                });
+                queryClient.invalidateQueries({
+                  queryKey: ['incoming-quantities', companyId],
+                });
+              } catch (e) {
                 // eslint-disable-next-line no-console
-                console.error('[transfer_rows.clear]', error);
+                console.error('[markSessionResolved]', e);
               }
             })();
           }
