@@ -108,6 +108,15 @@ export default async function handler(
     });
 
     const text = await upstream.text();
+    // 🟠 (2026-07-06) 400/500 등 실패 응답은 Vercel 로그에 원문을 남겨 진짜 원인 추적 가능하도록.
+    //    성공 응답은 크기 크므로 로깅 안 함.
+    if (!upstream.ok) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[analyze-invoice] Anthropic ${upstream.status}:`,
+        text.slice(0, 800),
+      );
+    }
     res
       .status(upstream.status)
       .setHeader('Content-Type', 'application/json')

@@ -49,13 +49,24 @@ export async function parseInvoicePDF(file: File): Promise<InvoiceParsed> {
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    // 서버 프록시 함수는 JSON `{ error }` 를 반환하지만 Anthropic 원문(비-JSON) 이
-    // 그대로 나올 수도 있으므로 그냥 문자열로 보여준다.
+    // 🔴 (2026-07-06) 두 가지 응답 shape 모두 지원:
+    //   1) 서버 프록시(api/analyze-invoice.ts) 자체 오류: `{ error: "문자열" }`
+    //   2) Anthropic 원문 프록시: `{ type: "error", error: { type, message } }`
+    //      이전엔 (2) 케이스에서 parsed.error 가 객체라 `${msg}` 보간 시
+    //      `[object Object]` 로 뭉개져 사용자가 진짜 원인을 못 봤음.
     let msg = errText.slice(0, 500);
     try {
-      const parsed = JSON.parse(errText) as { error?: string };
-      if (parsed.error) msg = parsed.error;
-    } catch { /* ignore */ }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const parsed = JSON.parse(errText) as any;
+      const err = parsed?.error;
+      if (typeof err === 'string') {
+        msg = err;
+      } else if (err && typeof err.message === 'string') {
+        msg = err.type ? `${err.type}: ${err.message}` : err.message;
+      } else if (err) {
+        msg = JSON.stringify(err).slice(0, 500);
+      }
+    } catch { /* JSON 아니면 원문 그대로 노출 */ }
     throw new Error(`인보이스 분석 오류 (${res.status}): ${msg}`);
   }
 
