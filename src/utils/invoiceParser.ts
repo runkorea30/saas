@@ -1,13 +1,12 @@
 /**
- * 인보이스 PDF 파싱 — Vercel Serverless 프록시 `/api/analyze-invoice` 를 통해
- * Claude API (Sonnet 4.6) 호출.
+ * 인보이스 PDF 파싱 — Vercel Serverless `/api/analyze-invoice` 호출.
  *
- * 🔴 보안: 이전 버전은 브라우저에서 직접 Anthropic API 를 호출하며 `VITE_ANTHROPIC_API_KEY`
- *    를 클라이언트 번들에 노출했다. `VITE_` 접두사가 붙은 값은 Vite 빌드 시 정적 자산에
- *    그대로 실려나가 도구창/스크래핑 봇에 그대로 유출된다. 이제는 서버리스 함수에서만
- *    `ANTHROPIC_API_KEY` (VITE_ 접두사 없음) 를 읽어 호출한다.
- * 🟠 프롬프트/모델 상수는 서버(`api/analyze-invoice.ts`) 에 있음.
- * 🟡 응답 형식: 서버는 Anthropic 응답 원문을 그대로 프록시. JSON 추출·정규화는 여기서 유지.
+ * 🔴 (2026-07-06) 서버측 구현이 Anthropic Claude 호출 → 로컬 `pdf-parse` + 정규식
+ *    파서로 완전 대체됨. 클라이언트 코드는 그대로 (응답 shape 하위호환 유지).
+ * 🟠 이전 잔재: 응답 shape `{content:[{type:'text', text:'<InvoiceParsed JSON>'}]}` 은
+ *    Claude 응답 계약을 그대로 유지 — 이 파일의 파싱 로직(extractJson, normalizeInvoice)
+ *    을 건드리지 않고 서버만 교체하기 위함.
+ * 🟡 응답 형식: 서버가 뽑은 InvoiceParsed 를 JSON.stringify 한 문자열이 content[0].text 에 담김.
  */
 
 export interface InvoiceParsedRow {
