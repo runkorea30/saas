@@ -238,7 +238,10 @@ export function OrderListPage() {
         // 펼침 모드에서만 스크롤바 시각 숨김 (스크롤 기능 유지).
         className={isUnfolded ? 'm-hide-scrollbar' : undefined}
         style={{
-          flex: isUnfolded ? '0 0 35%' : '1 1 auto',
+          // 🟡 (2026-07-06) 좌측 목록 폭 35% → 44% 로 확장. 태블릿 가로 뷰에서
+          //    금액("₩745,360") 이 줄바꿈되던 문제 해결. 우측 상세는 flex:1 이라
+          //    자동 축소되지만 여전히 56% 확보되므로 가독성 유지.
+          flex: isUnfolded ? '0 0 44%' : '1 1 auto',
           borderRight: isUnfolded ? '1px solid var(--m-border)' : 'none',
           minHeight: 0,
           ...(isUnfolded
@@ -524,6 +527,7 @@ function OrderGroupCard({
             fontWeight: 700,
             color: 'var(--m-text)',
             textAlign: 'right',
+            whiteSpace: 'nowrap',
           }}
         >
           ₩{fmtWon(groupTotal)}
@@ -604,6 +608,7 @@ function OrderGroupCard({
                   color: 'var(--m-text-secondary)',
                   flex: 1,
                   textAlign: 'right',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 {fmtWon(qty)}개
@@ -614,8 +619,10 @@ function OrderGroupCard({
                   fontSize: 13,
                   fontWeight: 600,
                   color: 'var(--m-text)',
-                  minWidth: 80,
+                  minWidth: 90,
                   textAlign: 'right',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
                 }}
               >
                 ₩{fmtWon(o.total_amount)}
@@ -848,6 +855,7 @@ function OrderCard({
           fontWeight: 600,
           color: 'var(--m-text)',
           textAlign: 'right',
+          whiteSpace: 'nowrap',
         }}
       >
         ₩{fmtWon(order.total_amount)}
