@@ -130,6 +130,36 @@ function toLikePattern(term: string): string {
   return `%${escaped}%`;
 }
 
+/**
+ * 'YYYY-MM-DD' (KST 달력일자) → 해당일 KST 00:00 의 UTC ISO 문자열.
+ * printed_at (timestamptz) 범위 필터에 사용.
+ */
+function kstStartOfDayUtcIso(kstDate: string): string {
+  return new Date(`${kstDate}T00:00:00+09:00`).toISOString();
+}
+
+/**
+ * 'YYYY-MM-DD' (KST 달력일자) → 그 다음 날 KST 00:00 의 UTC ISO 문자열.
+ * 종료일 포함 필터를 `printed_at < 다음날KST자정` 형태로 만들기 위함.
+ */
+function kstNextDayStartUtcIso(kstDate: string): string {
+  const start = new Date(`${kstDate}T00:00:00+09:00`);
+  return new Date(start.getTime() + 24 * 60 * 60 * 1000).toISOString();
+}
+
+/**
+ * timestamptz ISO → KST 기준 'YYYY-MM-DD'.
+ * UTC 값에 +9h 를 더한 뒤 getUTC* 로 추출 (프로젝트 확정 KST 변환 규칙).
+ */
+function toKstDateKey(iso: string): string {
+  const d = new Date(iso);
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  const y = kst.getUTCFullYear();
+  const m = String(kst.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(kst.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // ────────────────────────────────────────────────────────────
 // Hooks
 // ────────────────────────────────────────────────────────────
@@ -165,8 +195,10 @@ export function useShippingInvoices(
           .select('*')
           .eq('company_id', companyId!)
           .is('deleted_at', null);
-        if (filter?.dateFrom) q = q.gte('order_date', filter.dateFrom);
-        if (filter?.dateTo) q = q.lte('order_date', filter.dateTo);
+        // 화면에 보이는 '날짜' 는 printed_at (인쇄 클릭 시각) 기준.
+        // KST 달력일자 → UTC ISO 범위로 변환하여 timestamptz 비교.
+        if (filter?.dateFrom) q = q.gte('printed_at', kstStartOfDayUtcIso(filter.dateFrom));
+        if (filter?.dateTo) q = q.lt('printed_at', kstNextDayStartUtcIso(filter.dateTo));
         if (recipient) q = q.ilike('recipient_name', toLikePattern(recipient));
         if (customer) q = q.ilike('customer_name', toLikePattern(customer));
         return q.order('printed_at', { ascending: false });
@@ -233,14 +265,14 @@ export interface ShippingInvoiceStats {
 }
 
 /**
- * 발송 수량 통계 — order_date 기준으로 일별/월별 그룹핑.
+ * 발송 수량 통계 — printed_at (인쇄 클릭 시각) 을 KST 로 변환한 뒤 일별/월별 그룹핑.
  *
  * 각 행 = 1건의 발송 라벨(운송장). label_count 는 이미 복제되어 여러 행으로
  * 저장되어 있으므로 COUNT(*) 로 세면 됨. `SUM(label_count)` 는 이중 계산이라 금지.
  * `deleted_at IS NULL` 은 useShippingInvoices 와 동일 규칙.
  *
- * 응답 크기 축소 위해 select 는 order_date 만 요청 (PostgREST 는 GROUP BY 직접
- * 불가하니 원시 값 받아서 클라이언트에서 집계).
+ * 응답 크기 축소 위해 select 는 printed_at 만 요청 (PostgREST 는 GROUP BY 직접
+ * 불가하니 원시 값 받아서 클라이언트에서 KST 변환 후 집계).
  */
 export function useShippingInvoiceStats(
   companyId: string | null,
@@ -255,21 +287,21 @@ export function useShippingInvoiceStats(
     ],
     enabled: Boolean(companyId),
     queryFn: async () => {
-      const rows = await fetchAllRows<{ order_date: string }>(() => {
+      const rows = await fetchAllRows<{ printed_at: string }>(() => {
         let q = DB.from('shipping_invoices')
-          .select('order_date')
+          .select('printed_at')
           .eq('company_id', companyId!)
           .is('deleted_at', null);
-        if (filter?.dateFrom) q = q.gte('order_date', filter.dateFrom);
-        if (filter?.dateTo) q = q.lte('order_date', filter.dateTo);
-        return q.order('order_date', { ascending: true });
+        if (filter?.dateFrom) q = q.gte('printed_at', kstStartOfDayUtcIso(filter.dateFrom));
+        if (filter?.dateTo) q = q.lt('printed_at', kstNextDayStartUtcIso(filter.dateTo));
+        return q.order('printed_at', { ascending: true });
       });
 
       const dailyMap = new Map<string, number>();
       const monthlyMap = new Map<string, number>();
       for (const r of rows) {
-        const d = r.order_date; // 'YYYY-MM-DD'
-        if (!d) continue;
+        if (!r.printed_at) continue;
+        const d = toKstDateKey(r.printed_at); // 'YYYY-MM-DD' (KST)
         dailyMap.set(d, (dailyMap.get(d) ?? 0) + 1);
         const ym = d.slice(0, 7); // 'YYYY-MM'
         monthlyMap.set(ym, (monthlyMap.get(ym) ?? 0) + 1);

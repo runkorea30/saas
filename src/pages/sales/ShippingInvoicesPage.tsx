@@ -51,6 +51,20 @@ function toDateKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * timestamptz ISO → KST 기준 'YYYY-MM-DD'.
+ * printed_at (인쇄 클릭 시각) 을 화면 '날짜' 컬럼에 표시할 때 사용.
+ * +9h 후 getUTC* 로 추출 (프로젝트 확정 KST 변환 규칙, orderGrouping / calculations 와 동일).
+ */
+function printedAtKstDate(iso: string): string {
+  const d = new Date(iso);
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  const y = kst.getUTCFullYear();
+  const m = String(kst.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(kst.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 const PERIOD_OPTIONS: { id: PeriodKey; label: string }[] = [
   { id: 'today', label: '오늘' },
   { id: 'week', label: '이번 주' },
@@ -651,7 +665,7 @@ function InvoiceRow({
       <div>
         <input type="checkbox" checked={checked} onChange={onToggle} />
       </div>
-      <div style={{ fontFamily: 'var(--font-num)', color: 'var(--ink-2)' }}>{r.order_date}</div>
+      <div style={{ fontFamily: 'var(--font-num)', color: 'var(--ink-2)' }}>{printedAtKstDate(r.printed_at)}</div>
       <div>
         {r.recipient_name || <span style={{ color: 'var(--ink-3)' }}>(미지정)</span>}
         {r.is_direct && (
