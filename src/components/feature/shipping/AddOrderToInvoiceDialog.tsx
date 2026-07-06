@@ -101,7 +101,7 @@ export function AddOrderToInvoiceDialog({ open, onClose, companyId }: Props) {
   const { showToast } = useToast();
   const saveInvoicesMutation = useSaveShippingInvoices();
 
-  const [period, setPeriod] = useState<PeriodKey>('90d');
+  const [period, setPeriod] = useState<PeriodKey>('today');
   const [custom, setCustom] = useState<{ from: string; to: string }>(() => ({
     from: toDateKey(new Date()),
     to: toDateKey(new Date()),
@@ -115,7 +115,7 @@ export function AddOrderToInvoiceDialog({ open, onClose, companyId }: Props) {
     if (!open) {
       setCustomerInput('');
       setSelectedOrderId(null);
-      setPeriod('90d');
+      setPeriod('today');
     }
   }, [open]);
 
