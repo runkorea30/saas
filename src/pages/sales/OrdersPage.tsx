@@ -21,6 +21,7 @@ import {
   findPendingTransferConflicts,
   useSaveShippingInvoices,
   useTransferredOrderIds,
+  type ShippingInvoiceDbRow,
 } from '@/hooks/useShippingInvoices';
 import { useToast } from '@/components/ui/Toast';
 import { getSameDayCustomerOrderIds } from '@/utils/orderGrouping';
@@ -32,6 +33,7 @@ import {
 import { OrderListTable } from '@/components/feature/orders/OrderListTable';
 import { OrderDetailPane } from '@/components/feature/orders/OrderDetailPane';
 import { OrderBulkBar } from '@/components/feature/orders/OrderBulkBar';
+import { TransferConflictDialog } from '@/components/feature/orders/TransferConflictDialog';
 import {
   InvoicePrintView,
   type InvoiceCustomerGroup,
@@ -415,6 +417,16 @@ export function OrdersPage() {
   //  · 이관 전 중복 차단 (§D): 대상 order id 중 하나라도 미출력 대기 이관 행이
   //    이미 있으면 전체 액션 차단.
   //  · label_count 는 항상 1 로 INSERT (§B: xlsx 출력 시점에 반복 매수 지정).
+  //
+  // §48-확장 (2026-07-06): 일부만 이관된 상태에서 다시 배치 이관 시,
+  //  · 전부 이관된 경우 → 기존 방식(에러 토스트) 유지
+  //  · 일부만 겹치는 경우 → 다이얼로그로 "제외 후 진행" 옵션 제공
+
+  const [conflictDialog, setConflictDialog] = useState<{
+    conflicts: ShippingInvoiceDbRow[];
+    targetOrderIds: string[];
+    conflictedOrderIds: Set<string>;
+  } | null>(null);
 
   const runTransferToLedger = async (
     rows: ShippingInvoiceRow[],
@@ -438,17 +450,39 @@ export function OrdersPage() {
       showToast({ kind: 'error', text: `이관 전 확인 실패: ${msg}` });
       return;
     }
+
     if (conflicts.length > 0) {
-      const preview = conflicts
-        .slice(0, 3)
-        .map((c) => `${c.customer_name ?? '(?)'} · ${c.recipient_name ?? '(?)'}`)
-        .join(', ');
-      const more = conflicts.length > 3 ? ` 외 ${conflicts.length - 3}건` : '';
-      showToast({
-        kind: 'error',
-        text:
-          `이미 송장대장에 이관되어 출력 대기 중인 주문이 있습니다: ${preview}${more}. ` +
-          `송장대장에서 먼저 출력하거나 삭제한 뒤 다시 시도하세요.`,
+      // conflict 행의 source_order_ids 중 targetOrderIds 와 겹치는 주문 id 집합.
+      const targetSet = new Set(targetOrderIds);
+      const conflictedOrderIds = new Set<string>();
+      for (const row of conflicts) {
+        for (const oid of row.source_order_ids ?? []) {
+          if (targetSet.has(oid)) conflictedOrderIds.add(oid);
+        }
+      }
+      const remainingCount = targetOrderIds.length - conflictedOrderIds.size;
+
+      if (remainingCount <= 0) {
+        // 전체가 이미 이관됨 → 기존 방식(전체 차단 토스트) 유지.
+        const preview = conflicts
+          .slice(0, 3)
+          .map((c) => `${c.customer_name ?? '(?)'} · ${c.recipient_name ?? '(?)'}`)
+          .join(', ');
+        const more = conflicts.length > 3 ? ` 외 ${conflicts.length - 3}건` : '';
+        showToast({
+          kind: 'error',
+          text:
+            `이미 송장대장에 이관되어 출력 대기 중인 주문이 있습니다: ${preview}${more}. ` +
+            `송장대장에서 먼저 출력하거나 삭제한 뒤 다시 시도하세요.`,
+        });
+        return;
+      }
+
+      // 일부만 겹치는 경우 → 다이얼로그 오픈 (사용자가 취소/제외 진행 선택).
+      setConflictDialog({
+        conflicts,
+        targetOrderIds: [...targetOrderIds],
+        conflictedOrderIds,
       });
       return;
     }
@@ -462,6 +496,41 @@ export function OrdersPage() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : '저장 실패';
       showToast({ kind: 'error', text: `이관 실패: ${msg}` });
+    }
+  };
+
+  /**
+   * §48-확장: "이미 이관된 항목 제외하고 진행" 실행.
+   * conflictedOrderIds 를 뺀 나머지 targetOrderIds 로 rows 를 재빌드 후 INSERT.
+   */
+  const handleProceedExcludingConflicts = async () => {
+    if (!companyId || !conflictDialog) return;
+    const excludeSet = conflictDialog.conflictedOrderIds;
+    const remainingIds = conflictDialog.targetOrderIds.filter(
+      (id) => !excludeSet.has(id),
+    );
+    if (remainingIds.length === 0) {
+      setConflictDialog(null);
+      return;
+    }
+    const rows = buildShippingInvoiceRows(orders, customersList, remainingIds);
+    if (rows.length === 0) {
+      showToast({ kind: 'error', text: '제외 후 이관할 대상이 없습니다.' });
+      setConflictDialog(null);
+      return;
+    }
+    try {
+      const dbRows = await saveInvoicesMutation.mutateAsync({ companyId, rows });
+      const excludedCount = excludeSet.size;
+      showToast({
+        kind: 'success',
+        text: `송장대장으로 ${dbRows.length}건 이관 완료 (${excludedCount}건은 이미 이관되어 제외됨).`,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '저장 실패';
+      showToast({ kind: 'error', text: `이관 실패: ${msg}` });
+    } finally {
+      setConflictDialog(null);
     }
   };
 
@@ -843,6 +912,21 @@ export function OrdersPage() {
           onTransferOnlyThis={() => void handleTransferOnlyThisOrder(contextMenu.orderId)}
         />
       )}
+
+      <TransferConflictDialog
+        open={conflictDialog !== null}
+        onClose={() => setConflictDialog(null)}
+        conflicts={conflictDialog?.conflicts ?? []}
+        excludedCount={conflictDialog?.conflictedOrderIds.size ?? 0}
+        remainingCount={
+          conflictDialog
+            ? conflictDialog.targetOrderIds.length -
+              conflictDialog.conflictedOrderIds.size
+            : 0
+        }
+        onProceed={() => void handleProceedExcludingConflicts()}
+        busy={saveInvoicesMutation.isPending}
+      />
     </div>
   );
 }
