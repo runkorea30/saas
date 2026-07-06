@@ -26,22 +26,25 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { parseAngelusInvoiceText } from './_shared/invoice-local-parser.js';
 
-// ─── pdfjs worker 번들 포함 (§47-e) ─────────────────────────────────
+// ─── pdfjs worker 번들 포함 (§47-e/§47-f) ───────────────────────────
 //
 // pdfjs-dist 는 `workerSrc` 가 설정되지 않으면 fake worker 모드로 폴백하며
 // `pdf.worker.mjs` 를 동적 import 한다. 이 동적 import 는 Vercel 의 @vercel/nft
-// (파일 트레이싱) 이 정적 분석에서 못 잡아 배포 번들에서 워커 파일이 누락되는 문제:
+// (파일 트레이싱) 이 정적 분석에서 못 잡아 배포 번들에서 워커 파일이 누락됨:
 //    "Cannot find module '/var/task/.../pdf.worker.mjs' imported from ... pdf.mjs"
 //
-// 해결: `require.resolve(...)` 를 모듈 top-level 에 명시. nft 는 소스 문자열의
-// `require.resolve('literal')` 패턴을 감지해 해당 파일을 배포 번들에 포함시킨다.
-// 이 파일은 ESM 이므로 CJS `require` 를 `createRequire(import.meta.url)` 로 획득.
-// 런타임 값은 `pathToFileURL(...).href` (file:// URL) — pdfjs 가 워커 로드 시
-// `import(workerSrc)` 하므로 절대 URL 형식이 필요.
+// 최종 해결:
+//   ① `vercel.json` 의 `functions."api/analyze-invoice.ts".includeFiles` 로 워커
+//      파일을 명시적으로 배포 번들에 포함. (@vercel/nft 자동 트레이싱과 무관하게 강제)
+//   ② `require.resolve(...)` 로 런타임 절대 경로 획득. workerSrc 는 `file://` URL 로 설정.
+//      pdfjs 내부에서 워커 로드 시 `import(workerSrc)` 하므로 절대 URL 형식 필요.
+//
+// 🔴 (§47-f) require.resolve 호출은 **모듈 top-level 이 아니라 요청 handler 안에서만**
+//   실행. 이전 시도 (§47-e) 는 top-level 에서 호출해 콜드스타트 시 실패하면 프로세스
+//   자체가 죽어 try/catch 로 못 잡히던 문제 있음. handler 스코프로 옮기고 try/catch
+//   로 감싸면 실패해도 해당 요청만 500 반환 + 다른 요청/콜드스타트에 영향 없음.
+//   createRequire 자체는 실제 파일 해결을 안 하므로 top-level 안전.
 const require_ = createRequire(import.meta.url);
-const PDFJS_WORKER_URL = pathToFileURL(
-  require_.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs'),
-).href;
 
 // ─── DOM stub preload (§47-d) ──────────────────────────────────────
 //
@@ -120,8 +123,18 @@ interface PdfTextItem {
 async function extractTextFromPdf(buf: Buffer): Promise<string> {
   // 동적 import — Vercel 콜드스타트 시 top-level import 실패해도 handler 안에서 잡히도록.
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  // §47-e: 워커 경로를 명시해 fake-worker 폴백의 동적 import 를 안정화.
-  pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+
+  // §47-f: 워커 경로 해결을 요청 스코프 안 try/catch 로. 실패해도 프로세스 크래시 대신
+  //        해당 요청만 500 반환. `require.resolve` 는 리터럴 인자를 유지해야 @vercel/nft
+  //        가 정적 분석에서 워커 파일을 트레이스할 수 있음 (fallback 안전망).
+  try {
+    const workerPath = require_.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs');
+    pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(workerPath).href;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`PDF 파서 초기화 실패 (worker 모듈 해결 불가): ${msg}`);
+  }
+
   const doc = await pdfjs.getDocument({
     data: new Uint8Array(buf),
     // 워커/폰트 다운로드 불필요 — Node 환경.
