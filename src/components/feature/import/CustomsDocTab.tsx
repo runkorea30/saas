@@ -69,6 +69,28 @@ const CAT_ORDER = [
   '기타(슈트리)',
 ];
 
+/**
+ * 통관서류 엑셀 헤더 컬럼 동의어 그룹.
+ *
+ * Angelus 는 최소 2가지 템플릿을 사용:
+ *  · 템플릿 A (Acknowledgement/SalesOrd): Item / Description / Ordered / U/M / Rate / Amount
+ *  · 템플릿 B (Invoice):                  ITEM CODE / DESCRIPTION / QTY SHPD / U/M / PRICE / AMOUNT
+ *
+ * 매칭은 셀 텍스트를 trim().toLowerCase() 후 `includes()` 부분 포함 검사.
+ * 새 템플릿이 나오면 각 배열에 추가.
+ *
+ * ⚠ quantity 그룹: 단순히 'qty' 로만 매칭하면 템플릿 B 의 'QTY BO'(백오더 수량, 실제
+ * 출하 아님)까지 오매칭되므로 완전 문구 'qty shpd' 사용. 'ordered' 는 템플릿 A.
+ */
+const HEADER_SYNONYMS = {
+  itemCode:    ['item code', 'item'],
+  description: ['description'],
+  quantity:    ['qty shpd', 'ordered'],
+  unit:        ['u/m'],
+  price:       ['price', 'rate'],
+  amount:      ['amount'],
+} as const;
+
 // ── 유틸 ──────────────────────────────────────
 
 function getPrefix(itemCode: string): string {
@@ -86,12 +108,11 @@ function getMeta(itemCode: string, mappings: CodeMapping[]): CodeMapping | null 
 /**
  * 시트에서 품목 테이블을 파싱해 { itemCode, description, qty, um, price, amount } 배열로 반환.
  *
- * 알PDF 로 변환된 엑셀은 병합 셀 패턴이 파일마다 달라 컬럼 인덱스가 다르게 나타난다.
- * 헤더 행에서 "Item"/"Description"/"Ordered"/"U/M"/"Rate"/"Amount" 텍스트를 찾아
- * 컬럼 위치를 동적으로 매핑한다.
+ * Angelus 문서는 최소 2가지 템플릿을 사용하며 각 템플릿마다 헤더 텍스트가 다르다.
+ * 헤더 행을 HEADER_SYNONYMS 그룹으로 찾아 컬럼 위치를 동적으로 매핑한다.
  *
- * 헤더 판별: 같은 행에 "Item" 이 있고, 확증 컬럼("Description"/"Ordered"/"Rate"/"Amount")
- * 중 최소 하나가 함께 존재해야 헤더로 인정 — 우발적 오탐(주소 텍스트 등) 방지.
+ * 헤더 판별: 동일 행에서 itemCode 그룹과 amount 그룹이 모두 매칭되어야 헤더로 인정.
+ *  (두 그룹은 두 템플릿에 공통 존재 → 오탐 방지)
  * 헤더 미발견 시 해당 시트는 빈 결과 반환(스킵).
  *
  * 품목 행 판별: Item 컬럼이 비어있거나 "Sales Tax"/"Total"/"Subtotal" 같은 총계 텍스트로
@@ -103,12 +124,14 @@ function parseSheet(ws: XLSX.WorkSheet): Array<{
   const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null });
   const result: ReturnType<typeof parseSheet> = [];
 
-  // 특정 헤더 텍스트를 가진 컬럼 인덱스 반환 (없으면 -1).
-  const findCol = (row: unknown[], keyword: string): number => {
-    const target = keyword.toLowerCase();
+  // 그룹 동의어 중 하나에 부분 포함되는 셀의 컬럼 인덱스 반환 (없으면 -1).
+  const findColBySynonyms = (row: unknown[], synonyms: readonly string[]): number => {
     for (let c = 0; c < row.length; c++) {
       const v = String(row[c] ?? '').trim().toLowerCase();
-      if (v === target) return c;
+      if (!v) continue;
+      for (const syn of synonyms) {
+        if (v.includes(syn)) return c;
+      }
     }
     return -1;
   };
@@ -118,20 +141,16 @@ function parseSheet(ws: XLSX.WorkSheet): Array<{
 
   for (let r = 0; r < aoa.length; r++) {
     const row = aoa[r] as unknown[];
-    const iCol = findCol(row, 'Item');
-    if (iCol < 0) continue;
-    const dCol = findCol(row, 'Description');
-    const oCol = findCol(row, 'Ordered');
-    const rCol = findCol(row, 'Rate');
-    const aCol = findCol(row, 'Amount');
-    if (dCol < 0 && oCol < 0 && rCol < 0 && aCol < 0) continue;
+    const iCol = findColBySynonyms(row, HEADER_SYNONYMS.itemCode);
+    const aCol = findColBySynonyms(row, HEADER_SYNONYMS.amount);
+    if (iCol < 0 || aCol < 0) continue;
     headerIdx = r;
     itemCol = iCol;
-    descCol = dCol;
-    qtyCol = oCol;
-    umCol = findCol(row, 'U/M');
-    priceCol = rCol;
     amountCol = aCol;
+    descCol  = findColBySynonyms(row, HEADER_SYNONYMS.description);
+    qtyCol   = findColBySynonyms(row, HEADER_SYNONYMS.quantity);
+    umCol    = findColBySynonyms(row, HEADER_SYNONYMS.unit);
+    priceCol = findColBySynonyms(row, HEADER_SYNONYMS.price);
     break;
   }
 
