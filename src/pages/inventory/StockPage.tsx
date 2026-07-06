@@ -19,11 +19,14 @@ import { useInventoryStock } from '@/hooks/queries/useInventoryStock';
 import { useInventoryDetail } from '@/hooks/queries/useInventoryDetail';
 import { useCreateOpeningLot } from '@/hooks/queries/useCreateOpeningLot';
 import { useCreateAdjustment } from '@/hooks/queries/useCreateAdjustment';
+import { useIncomingQuantities } from '@/hooks/queries/useIncomingQuantities';
+import { usePurchaseForecast } from '@/hooks/queries/usePurchaseForecast';
 import { classifyStockStatus } from '@/utils/calculations';
 import { sortByCategory } from '@/utils/sortProducts';
 import {
   StockFilterBar,
   type StockFilterValue,
+  type StockQuickFilter,
 } from '@/components/feature/inventory/StockFilterBar';
 import {
   StockListTable,
@@ -53,11 +56,20 @@ export function StockPage() {
   // 데이터
   const productsQuery = useProducts(companyId);
   const stockQuery = useInventoryStock(companyId);
+  // 빠른필터용 훅 — 발주서 페이지와 캐시 공유(TanStack Query key 동일).
+  const incomingQ = useIncomingQuantities(companyId);
+  const forecastQ = usePurchaseForecast(companyId);
 
   // 필터 상태
   const [query, setQuery] = useState('');
   const [categorySel, setCategorySel] = useState<string[]>([]);
   const [stockFilter, setStockFilter] = useState<StockFilterValue>('all');
+  /**
+   * 빠른필터 — 기존 Segmented 와 별도 축.
+   * 'incoming': 미확정 인보이스검증(transfer_rows) 에 걸린 제품만
+   * 'reorder' : usePurchaseForecast().rows.status==='now' 인 제품만
+   */
+  const [quickFilter, setQuickFilter] = useState<StockQuickFilter>('none');
 
   // 선택 / 조정 상태
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -112,12 +124,33 @@ export function StockPage() {
     return Array.from(set).sort();
   }, [products]);
 
+  // 빠른필터 대상 제품 id 집합.
+  const incomingIds = useMemo(() => {
+    const set = new Set<string>();
+    const map = incomingQ.data?.totalByProduct;
+    if (!map) return set;
+    for (const [pid, qty] of map) {
+      if (qty > 0) set.add(pid);
+    }
+    return set;
+  }, [incomingQ.data]);
+
+  const reorderIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of forecastQ.rows) {
+      if (r.status === 'now') set.add(r.id);
+    }
+    return set;
+  }, [forecastQ.rows]);
+
   // ───── 필터 + 정렬 ─────
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = rows.filter((r) => {
       if (stockFilter !== 'all' && r.status !== stockFilter) return false;
       if (categorySel.length && !categorySel.includes(r.category)) return false;
+      if (quickFilter === 'incoming' && !incomingIds.has(r.id)) return false;
+      if (quickFilter === 'reorder' && !reorderIds.has(r.id)) return false;
       if (q) {
         const inCode = r.code.toLowerCase().includes(q);
         const inName = r.name.toLowerCase().includes(q);
@@ -127,7 +160,7 @@ export function StockPage() {
     });
     // 분류명 → 제품명 오름차순. sortProducts 공용 유틸 사용.
     return sortByCategory(list);
-  }, [rows, stockFilter, categorySel, query]);
+  }, [rows, stockFilter, categorySel, query, quickFilter, incomingIds, reorderIds]);
 
   // ───── 요약 ─────
   const summary = useMemo(() => {
@@ -156,6 +189,7 @@ export function StockPage() {
     setQuery('');
     setCategorySel([]);
     setStockFilter('all');
+    setQuickFilter('none');
   };
 
   const isLoading =
@@ -543,6 +577,10 @@ export function StockPage() {
           onCategoryChange={setCategorySel}
           stockFilter={stockFilter}
           onStockFilterChange={setStockFilter}
+          quickFilter={quickFilter}
+          onQuickFilterChange={setQuickFilter}
+          incomingCount={incomingIds.size}
+          reorderCount={reorderIds.size}
           categoryOptions={categoryOptions}
           totalFiltered={filtered.length}
           totalAll={rows.length}
