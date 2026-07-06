@@ -1,28 +1,32 @@
 /**
- * Angelus 인보이스 PDF → 구조화 JSON.
+ * Angelus 문서 PDF → 구조화 JSON.
  *
- * 🔴 (2026-07-06) 이전 방식(Claude Sonnet 문서 첨부 호출) 을 완전히 대체.
- *    실제 Angelus 인보이스 5건 샘플(72609, 74257, 75873, 76474, 76697) 의 텍스트
- *    레이아웃을 확인해 정규식 파서로 이식. Σamount 가 인보이스 하단 총합과 정확 일치.
+ * 🔴 (2026-07-06 §47-g) pdfjs-dist 실제 추출 원문을 근거로 두 문서 유형 모두 대응:
+ *   ① **Invoice** (예: Inv_81252) — INVOICE / `INVOICE # N` / `DATE M/D/YYYY` (한 줄)
+ *      컬럼 헤더: `ITEM CODE\tDESCRIPTION\tQTY SHPD\tPRICE\tAMOUNT\tU/M\tQTY BO`
+ *      아이템 tail: `qty price amount UNIT [BO]`
+ *   ② **Sales Order/Acknowledgement** (예: SalesOrd_67864) — ACKNOWLEDGEMENT /
+ *      `DOC NO.\nN` (두 줄) / `DATE\nM/D/YYYY` (두 줄)
+ *      컬럼 헤더: `Item\tDescription\tOrdered\tU/M\tRate\tAmount`
+ *      아이템 tail: **`qty UNIT price amount`** (UNIT 위치가 다름)
  *
  * 반환 스키마는 이전 Claude 프롬프트가 뽑아주던 JSON 과 동일:
  *   { invoice_no, invoice_date(YYYY-MM-DD), rows: [{item_code, description, unit, qty_shipped, price, amount}] }
  *
  * 감지 규칙:
- *   · 헤더 첫 3줄: `INVOICE` / `DATE M/D/YYYY` / `INVOICE # NNNNN`
- *   · 각 페이지는 `ITEM CODE DESCRIPTION\tQTY ... PRICE AMOUNT\t...QTY BO` 컬럼 헤더로 시작,
- *     `Page N` 로 끝남. 그 사이가 품목 영역.
- *   · **핵심 신호**: 라인의 오른쪽 끝에 `{qty} {price(N.NN)} {amount(N.NN,콤마)} [\tUNIT] [\tBO]`
- *     패턴이 있으면 그 라인은 "아이템 완결" 이다.
- *     · price/amount 는 반드시 소수점 2자리 → 설명 라인에 우연히 숫자가 있어도 이 패턴엔 안 맞음.
- *     · 라인의 그 앞 부분(있으면) + 이전 버퍼 = 코드 + 설명.
- *   · 코드/설명 분리(finalize 시점):
- *     ① `Misc sale ` 로 시작하면 code=`Misc sale`, 나머지가 설명.
- *     ② ` - `(space-hyphen-space) 가 있으면 그 앞이 code (예: `AGLET-BUL-GLD`, `Boot BLA63`,
- *        `XI Rope BLA45`), 뒤가 설명.
- *     ③ 그 외에는 첫 공백 토큰이 code (예: `720-01-162 Leather Paint Cream 1 oz.`).
- *   · 페이지 재출력되는 헤더(INVOICE~ITEM CODE) 는 무시.
- *   · 마지막 페이지 하단의 `$4,020.28 / $0.00` 총합 라인은 품목 아님 → 컬럼헤더~Page 사이에서만 파싱하므로 자연 제외.
+ *   · 헤더: `RE_DATE_INLINE` / `RE_INVOICE_NO_INLINE` 우선, 없으면 라벨-only 매치 후
+ *     다음 non-empty 라인에서 값 추출 (DOC NO. / DATE 두-줄 케이스).
+ *   · 각 페이지 컬럼 헤더는 `ITEM CODE DESCRIPTION` 또는 `Item Description` 둘 다 인정.
+ *   · **핵심 신호** (라인 tail):
+ *      `{qty} [UNIT] {price(N.NN)} {amount(N.NN)} [UNIT] [BO]`
+ *      UNIT 은 qty 뒤(Ack) 또는 amount 뒤(Invoice) 어느 쪽에 나와도 매치.
+ *      price/amount 는 반드시 소수점 2자리 → 설명 라인의 우연한 숫자에 매치되지 않음.
+ *   · 코드/설명 분리(finalize):
+ *     ① `Misc sale ` 로 시작 → code=`Misc sale`
+ *     ② ` - `(space-hyphen-space) 있으면 그 앞이 code
+ *     ③ 그 외에는 첫 공백 토큰이 code (예: `720-01-162`)
+ *   · Page 마커: `Page N` 뒤에 트레일링 텍스트 허용 (`^Page\s+\d+`).
+ *   · 마지막 페이지 하단의 `$2,893.34 / $0.00` 총합 라인은 컬럼헤더~Page 밖이므로 자연 제외.
  *
  * 유닛(DZ/EA/PT/…)은 최대한 캡처하지만 클라이언트 `normalizeInvoice` 가 DZ/EA 만 인정하고
  * 그 외는 DZ 로 재정규화하므로 여기서는 원값 유지.
@@ -45,26 +49,57 @@ export interface InvoiceParsed {
 
 // ─── 정규식 ──────────────────────────────────────────────────────
 
-const RE_DATE = /^DATE\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s*$/;
-const RE_INVOICE_NO = /^INVOICE\s*#\s*(\S+)\s*$/;
-const RE_HEADER_ITEMS = /^ITEM CODE\s+DESCRIPTION/;
-const RE_PAGE_END = /^Page\s+\d+\s*$/;
+/** Invoice: `DATE\t \t5/12/2026` (한 줄). */
+const RE_DATE_INLINE = /^DATE\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s*$/;
+/** Ack: `DATE` 라벨만 있는 줄 → 다음 non-empty 라인이 값. */
+const RE_DATE_LABEL = /^DATE\s*$/;
+/** 라벨 다음 줄의 순수 날짜 값. */
+const RE_DATE_VALUE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s*$/;
+
+/** Invoice: `INVOICE #\t \t81252` (한 줄). */
+const RE_INVOICE_NO_INLINE = /^INVOICE\s*#\s*(\S+)\s*$/i;
+/** Invoice or Ack 라벨만: `INVOICE #` / `DOC NO.` — 다음 non-empty 라인이 값. */
+const RE_DOC_LABEL = /^(?:INVOICE\s*#|DOC\s*NO\.?)\s*$/i;
+/** 라벨 다음 줄의 순수 문서번호 값. */
+const RE_DOC_VALUE = /^(\S+)\s*$/;
 
 /**
- * 라인 오른쪽 끝의 숫자 패턴. `m` 은 매치 그룹 1=qty 2=price 3=amount 4=unit? 5=bo?
- * 이 정규식이 매치되는 라인은 "아이템 완결" 이다.
+ * 컬럼 헤더 — Invoice 는 `ITEM CODE DESCRIPTION`, Ack 는 `Item Description`.
+ * 대소문자 무시 + `CODE` 는 선택.
+ */
+const RE_HEADER_ITEMS = /^item(?:\s+code)?\s+description/i;
+
+/** Page 마커. 트레일링 텍스트(예: `Page 1\tINVOICE\t...`) 허용. */
+const RE_PAGE_END = /^Page\s+\d+\b/;
+
+/**
+ * 라인 오른쪽 끝의 숫자 패턴 — 두 컬럼 순서 모두 대응:
+ *   Invoice: `qty price amount UNIT [BO]`
+ *   Ack:     `qty UNIT price amount`
  *
- *   ...(prefix, 코드+설명 부분)... {qty} {price(N.NN)} {amount(N.NN|N,NNN.NN)}[\t UNIT]?[\t BO]?
+ *   ...(prefix)... {qty} [UNIT_pre]? {price(N.NN)} {amount(N.NN)} [UNIT_post]? [BO]?
  *
- * `end-anchor` 로 라인 끝을 강하게 잡음. price 는 정수 대신 반드시 `.NN` 소수 2자리 요구
- * → 설명 라인 중간의 `5 1 Oz.` 같은 우연한 숫자에 매치되지 않음.
- *
- * 캡처: 1=qty 2=price 3=amount 4=unit(optional 2-3자리 대문자) 5=bo(optional 정수)
+ * 캡처: 1=qty 2=unit_pre? 3=price 4=amount 5=unit_post? 6=bo?
+ * → 실제 unit = m[2] ?? m[5]
  */
 const RE_NUMS_TAIL =
-  /(\d+)\s+(\d[\d,]*\.\d{2})\s+(\d[\d,]*\.\d{2})\s*(?:[\t ]+([A-Z]{2,3}))?\s*(?:[\t ]+(\d+))?\s*$/;
+  /(\d+)\s+(?:([A-Z]{2,3})\s+)?(\d[\d,]*\.\d{2})\s+(\d[\d,]*\.\d{2})\s*(?:[\t ]+([A-Z]{2,3}))?\s*(?:[\t ]+(\d+))?\s*$/;
 
 // ─── 파서 ────────────────────────────────────────────────────────
+
+/** `raw` 를 trim + 내부 연속 whitespace 정규화. 라벨 매칭용 (탭/공백 혼재 대비). */
+function normalizeLabel(raw: string): string {
+  return raw.trim().replace(/[\t ]+/g, ' ');
+}
+
+/** i 이후 첫 non-empty 라인(trimmed) 반환. 없으면 ''. */
+function findNextNonEmpty(lines: readonly string[], from: number): string {
+  for (let j = from + 1; j < lines.length; j += 1) {
+    const s = lines[j].trim();
+    if (s) return s;
+  }
+  return '';
+}
 
 function extractHeader(lines: readonly string[]): {
   invoice_no: string;
@@ -72,19 +107,36 @@ function extractHeader(lines: readonly string[]): {
 } {
   let invoice_no = '';
   let invoice_date = '';
-  for (const raw of lines) {
-    const line = raw.trim();
+  const fmtDate = (mm: string, dd: string, yyyy: string): string =>
+    `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = normalizeLabel(lines[i]);
+
+    // DATE — 한 줄 형식 우선, 없으면 라벨-only 매치 후 다음 라인이 값.
     if (!invoice_date) {
-      const m = RE_DATE.exec(line);
-      if (m) {
-        const [, mm, dd, yyyy] = m;
-        invoice_date = `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
+      const m1 = RE_DATE_INLINE.exec(line);
+      if (m1) {
+        invoice_date = fmtDate(m1[1], m1[2], m1[3]);
+      } else if (RE_DATE_LABEL.test(line)) {
+        const next = findNextNonEmpty(lines, i);
+        const m2 = RE_DATE_VALUE.exec(next);
+        if (m2) invoice_date = fmtDate(m2[1], m2[2], m2[3]);
       }
     }
+
+    // INVOICE # / DOC NO. — 한 줄 형식 우선, 없으면 라벨-only 매치 후 다음 라인이 값.
     if (!invoice_no) {
-      const m = RE_INVOICE_NO.exec(line);
-      if (m) invoice_no = m[1];
+      const m1 = RE_INVOICE_NO_INLINE.exec(line);
+      if (m1) {
+        invoice_no = m1[1];
+      } else if (RE_DOC_LABEL.test(line)) {
+        const next = findNextNonEmpty(lines, i);
+        const m2 = RE_DOC_VALUE.exec(next);
+        if (m2) invoice_no = m2[1];
+      }
     }
+
     if (invoice_no && invoice_date) break;
   }
   return { invoice_no, invoice_date };
@@ -95,6 +147,13 @@ function toNum(s: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * 코드-shape 판정 정규식 — Angelus 상품코드 형태.
+ *   `720-01-001`, `992E-00-PS...`, `992-00-KNI...`, `AGLET-BUL-GLD` 등.
+ *   `[영문/숫자 2-5자] (-[영문/숫자 1자 이상])+ (...)? `
+ */
+const RE_PRODUCT_CODE_SHAPED = /^[A-Z0-9]{2,5}(?:-[A-Z0-9]+)+(?:\.{3,})?$/i;
+
 /** `<prefix>` 를 `code + description` 으로 분할. */
 function splitCodeAndDesc(prefix: string): { code: string; description: string } {
   const trimmed = prefix.trim().replace(/\s+/g, ' ');
@@ -104,7 +163,21 @@ function splitCodeAndDesc(prefix: string): { code: string; description: string }
     const rest = trimmed.replace(/^Misc\s+sale\s*/i, '').trim();
     return { code: 'Misc sale', description: rest };
   }
-  // ② ` - `(space-hyphen-space) 우선 — Angelus 가 코드와 설명을 명확히 구분한 형태
+  // ② 🆕 첫 토큰이 상품코드 형태면 그것이 code, 나머지가 description.
+  //    설명 안의 ` - ` (space-hyphen-space) 와의 충돌 방지 —
+  //    예: `902-01-000 4-Coat - Matte 1 Oz.` → code 를 `902-01-000` 로 정확히 분리.
+  //    설명이 `- ` 로 시작하면 leading separator 제거.
+  const firstSpaceIdx = trimmed.indexOf(' ');
+  if (firstSpaceIdx > 0) {
+    const firstToken = trimmed.slice(0, firstSpaceIdx);
+    if (RE_PRODUCT_CODE_SHAPED.test(firstToken)) {
+      const rest = trimmed.slice(firstSpaceIdx + 1).trim();
+      const cleaned = rest.startsWith('- ') ? rest.slice(2).trim() : rest;
+      return { code: firstToken, description: cleaned };
+    }
+  }
+  // ③ ` - `(space-hyphen-space) — 코드에 하이픈이 없는 케이스 (`AGLET-BUL-GLD - Gold`,
+  //    `Boot BLA63 - ...`, `XI Rope BLA45 - ...`) 대응.
   const sepIdx = trimmed.indexOf(' - ');
   if (sepIdx > 0) {
     return {
@@ -112,18 +185,19 @@ function splitCodeAndDesc(prefix: string): { code: string; description: string }
       description: trimmed.slice(sepIdx + 3).trim(),
     };
   }
-  // ③ 첫 공백 토큰이 code (예: `720-01-162 Leather Paint Cream 1 oz.`)
-  const firstSpace = trimmed.indexOf(' ');
-  if (firstSpace < 0) return { code: trimmed, description: '' };
+  // ④ 그 외 — 첫 공백 토큰이 code (또는 공백 없으면 통째로).
+  if (firstSpaceIdx < 0) return { code: trimmed, description: '' };
   return {
-    code: trimmed.slice(0, firstSpace),
-    description: trimmed.slice(firstSpace + 1).trim(),
+    code: trimmed.slice(0, firstSpaceIdx),
+    description: trimmed.slice(firstSpaceIdx + 1).trim(),
   };
 }
 
 /**
- * 라인 오른쪽 끝의 숫자 패턴을 찾음. 매치되면 { prefix, numsGroups } 반환.
- * pdf-parse 는 탭을 그대로 보존하므로 tabs 도 인식.
+ * 라인 오른쪽 끝의 숫자 패턴을 찾음. 매치되면 { prefix, ... } 반환.
+ * pdfjs-dist 는 열 사이 구분자로 `\t \t` (tab-space-tab) 을 넣으므로 그대로 인식.
+ *
+ * unit 은 Invoice(amount 뒤) / Ack(qty 뒤) 어느 쪽에 있어도 하나로 수렴.
  */
 function matchNumsTail(line: string): {
   prefix: string;
@@ -132,10 +206,8 @@ function matchNumsTail(line: string): {
   amount: string;
   unit: string | undefined;
 } | null {
-  // 라인 오른쪽에서 numbers-tail 패턴 검색. 다중 매치 가능성 방지 위해 마지막 매치를 씀.
-  //   예: `10 162.63 1,626.30\tDZ 0` — 여기서 마지막 매치가 진짜.
-  // 정규식은 line-end anchor 를 가지고 있어 어차피 라인 끝에서 시작.
-  const normalized = line.replace(/[\t]+/g, '\t'); // 연속 탭 → 단일 탭 (안전 정규화)
+  // 연속 탭만 단일 탭으로 정규화. `\t \t` 는 whitespace class 로 이미 커버.
+  const normalized = line.replace(/[\t]+/g, '\t');
   const m = RE_NUMS_TAIL.exec(normalized);
   if (!m) return null;
   const matchStart = m.index;
@@ -143,9 +215,11 @@ function matchNumsTail(line: string): {
   return {
     prefix,
     qty: m[1],
-    price: m[2],
-    amount: m[3],
-    unit: m[4],
+    // Invoice: unit_pre 없음, unit_post(=m[5]) 존재 → unit=m[5]
+    // Ack:     unit_pre(=m[2]) 존재, unit_post 없음     → unit=m[2]
+    unit: m[2] ?? m[5],
+    price: m[3],
+    amount: m[4],
   };
 }
 
