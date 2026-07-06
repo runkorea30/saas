@@ -1,5 +1,5 @@
 /**
- * 송장인쇄용 행 생성 유틸.
+ * 송장대장 이관용 행 생성 유틸.
  *
  * 규칙(런코리아 승인):
  * - 선택된 주문들을 customer_id + order_date(KST 날짜만) 기준으로 그룹핑
@@ -9,7 +9,7 @@
  * - `product`(물품명) 는 항상 공란, `brand` 는 항상 '엔젤러스' (규칙 3,5)
  * - `credit`(결제유형) 은 직송/일반 상관없이 항상 '신용' (상수 취급 — brand 와 동일 원칙)
  *
- * 순수함수 — DB 접근 없음. saveShippingInvoices() 가 이 결과를 받아 INSERT.
+ * 순수함수 — DB 접근 없음. useSaveShippingInvoices() 가 이 결과를 받아 INSERT.
  */
 import { groupOrdersByCustomerAndDate } from '@/utils/orderGrouping';
 import type { Order, OrderShippingEntry } from '@/types/orders';
@@ -197,7 +197,7 @@ export function buildShippingInvoiceRows(
 }
 
 /**
- * 그룹핑을 건너뛰고 주문 1건만으로 송장 행을 계산 — "이 주문만 송장인쇄" 경로.
+ * 그룹핑을 건너뛰고 주문 1건만으로 송장 행을 계산 — "이 주문만 송장대장 이관" 경로.
  *
  * - 우클릭한 그 주문 하나만 대상. 같은 거래처+같은 날짜의 다른 주문(체크된 것 포함)
  *   은 완전히 무시.

@@ -18,8 +18,9 @@ import { useResizableSplit } from '@/hooks/useResizableSplit';
 import { useOrders } from '@/hooks/queries/useOrders';
 import { useCustomers } from '@/hooks/queries/useCustomers';
 import {
+  findPendingTransferConflicts,
   useSaveShippingInvoices,
-  useMarkShippingInvoicesDownloaded,
+  useTransferredOrderIds,
 } from '@/hooks/useShippingInvoices';
 import { useToast } from '@/components/ui/Toast';
 import { getSameDayCustomerOrderIds } from '@/utils/orderGrouping';
@@ -28,20 +29,9 @@ import {
   buildSingleOrderShippingInvoiceRows,
   type ShippingInvoiceRow,
 } from '@/utils/shippingInvoiceBuilder';
-import { buildLogenWorkbookArrayBuffer } from '@/utils/logenExcelExport';
-import {
-  LOGEN_EXPORT_FILENAME,
-  downloadBlobToUserFolder,
-  getLogenFolderHandle,
-  isFolderPickerSupported,
-  pickLogenFolder,
-  saveLogenFolderHandle,
-  writeLogenExcelFile,
-} from '@/utils/logenFolderStorage';
 import { OrderListTable } from '@/components/feature/orders/OrderListTable';
 import { OrderDetailPane } from '@/components/feature/orders/OrderDetailPane';
 import { OrderBulkBar } from '@/components/feature/orders/OrderBulkBar';
-import { PrintInvoiceQuantityModal } from '@/components/feature/orders/PrintInvoiceQuantityModal';
 import {
   InvoicePrintView,
   type InvoiceCustomerGroup,
@@ -152,11 +142,10 @@ export function OrdersPage() {
     range: { start: toIso(rangeStart), end: toIso(rangeEnd) },
   });
 
-  // 송장인쇄 시 일반 묶음 배송정보 소스로 사용 (전체 거래처 마스터).
+  // 송장대장 이관 시 일반 묶음 배송정보 소스로 사용 (전체 거래처 마스터).
   const { data: customersList = [] } = useCustomers(companyId);
   const { showToast } = useToast();
   const saveInvoicesMutation = useSaveShippingInvoices();
-  const markDownloadedMutation = useMarkShippingInvoicesDownloaded();
 
   // ───── 거래처 옵션 (로드된 주문에서 추출) ─────
   const customerOptions = useMemo(() => {
@@ -264,6 +253,9 @@ export function OrdersPage() {
   const pageIds = pageRows.map((o) => o.id);
   const allPageChecked = pageIds.length > 0 && pageIds.every((id) => checked[id]);
   const somePageChecked = pageIds.some((id) => checked[id]);
+
+  // §F: 현재 페이지 주문의 이관 여부 배치 조회. 배지 표시용.
+  const { data: transferredOrderIds } = useTransferredOrderIds(companyId, pageIds);
   const togglePage = () => {
     setChecked((c) => {
       const next = { ...c };
@@ -415,106 +407,62 @@ export function OrdersPage() {
     await queryClient.invalidateQueries({ queryKey: ['orders'] });
   };
 
-  // ───── 송장 인쇄 ─────
+  // ───── 송장대장 이관 ─────
   //
-  // 흐름 (송장인쇄 단일):
-  //  1. 우클릭한 주문의 같은 거래처+같은 날짜 묶음 전체 id 수집
-  //  2. buildShippingInvoiceRows() → 직송/일반 규칙에 맞는 행 배열
-  //  3. shipping_invoices INSERT (label_count=1)
-  //  4. 저장된 DB 행으로 xlsx workbook 생성
-  //  5. 로컬 폴더 handle 있으면 자동 저장, 없으면 최초 선택 유도 → 저장
-  //     (미지원 브라우저는 다운로드 폴백)
-  //  6. shipping_invoices.downloaded_at 업데이트
-  //  7. 완료 토스트
-  //
-  // 송장인쇄(다중): 2 다음에 수량 모달 → labelCounts 입력 → 3부터 반복.
+  // 🔴 (2026-07-06 §48) 워크플로우 2단계 분리:
+  //  · 여기(주문내역) 는 shipping_invoices INSERT 만 수행. xlsx 생성/폴더 저장/
+  //    downloaded_at UPDATE 는 송장대장 탭(ShippingInvoicesPage) 에서만.
+  //  · 이관 전 중복 차단 (§D): 대상 order id 중 하나라도 미출력 대기 이관 행이
+  //    이미 있으면 전체 액션 차단.
+  //  · label_count 는 항상 1 로 INSERT (§B: xlsx 출력 시점에 반복 매수 지정).
 
-  const [multiPrintRows, setMultiPrintRows] = useState<ShippingInvoiceRow[] | null>(null);
-  const [multiPrintSubmitting, setMultiPrintSubmitting] = useState(false);
-
-  /**
-   * 저장 → xlsx 생성 → 로컬 폴더 저장 → downloaded_at UPDATE 파이프라인.
-   * labelCounts 가 없으면 각 행 1건씩.
-   */
-  const runInvoicePipeline = async (
+  const runTransferToLedger = async (
     rows: ShippingInvoiceRow[],
-    labelCounts?: number[],
+    targetOrderIds: readonly string[],
   ): Promise<void> => {
     if (!companyId) {
       showToast({ kind: 'error', text: '회사 컨텍스트가 없습니다.' });
       return;
     }
     if (rows.length === 0) {
-      showToast({ kind: 'info', text: '선택된 주문이 없습니다.' });
+      showToast({ kind: 'info', text: '이관할 대상이 없습니다.' });
       return;
     }
 
-    // 1) INSERT
-    let dbRows;
+    // §D: 중복 이관 차단.
+    let conflicts;
     try {
-      dbRows = await saveInvoicesMutation.mutateAsync({
-        companyId,
-        rows,
-        labelCounts,
+      conflicts = await findPendingTransferConflicts(companyId, targetOrderIds);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '중복 확인 실패';
+      showToast({ kind: 'error', text: `이관 전 확인 실패: ${msg}` });
+      return;
+    }
+    if (conflicts.length > 0) {
+      const preview = conflicts
+        .slice(0, 3)
+        .map((c) => `${c.customer_name ?? '(?)'} · ${c.recipient_name ?? '(?)'}`)
+        .join(', ');
+      const more = conflicts.length > 3 ? ` 외 ${conflicts.length - 3}건` : '';
+      showToast({
+        kind: 'error',
+        text:
+          `이미 송장대장에 이관되어 출력 대기 중인 주문이 있습니다: ${preview}${more}. ` +
+          `송장대장에서 먼저 출력하거나 삭제한 뒤 다시 시도하세요.`,
+      });
+      return;
+    }
+
+    try {
+      const dbRows = await saveInvoicesMutation.mutateAsync({ companyId, rows });
+      showToast({
+        kind: 'success',
+        text: `송장대장으로 ${dbRows.length}건 이관되었습니다.`,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '저장 실패';
-      showToast({ kind: 'error', text: `송장 저장 실패: ${msg}` });
-      return;
+      showToast({ kind: 'error', text: `이관 실패: ${msg}` });
     }
-    if (dbRows.length === 0) {
-      showToast({ kind: 'error', text: '송장 저장 결과가 비어 있습니다.' });
-      return;
-    }
-
-    // 2) xlsx 생성
-    const buf = buildLogenWorkbookArrayBuffer(dbRows);
-
-    // 3) 로컬 폴더 저장 or 폴백 — 항상 LOGEN_EXPORT_FILENAME 에 덮어쓰기.
-    let savedTo: 'folder' | 'download' = 'download';
-    try {
-      if (isFolderPickerSupported()) {
-        let handle = await getLogenFolderHandle();
-        if (!handle) {
-          handle = await pickLogenFolder();
-          if (handle) await saveLogenFolderHandle(handle);
-        }
-        if (handle) {
-          await writeLogenExcelFile(handle, buf);
-          savedTo = 'folder';
-        } else {
-          downloadBlobToUserFolder(buf);
-        }
-      } else {
-        downloadBlobToUserFolder(buf);
-      }
-    } catch (e) {
-      // 폴더 저장 중 오류 → 다운로드 폴백
-      downloadBlobToUserFolder(buf);
-      const msg = e instanceof Error ? e.message : '';
-      showToast({
-        kind: 'error',
-        text: `폴더 저장 실패, 다운로드로 대체: ${msg}`,
-      });
-    }
-
-    // 4) downloaded_at UPDATE
-    try {
-      await markDownloadedMutation.mutateAsync({
-        companyId,
-        ids: dbRows.map((r) => r.id),
-      });
-    } catch {
-      // 실패해도 파일은 생성됨 — 조용히 무시하고 다음 로드 시 재조정.
-    }
-
-    showToast({
-      kind: 'success',
-      text:
-        savedTo === 'folder'
-          ? `송장 ${dbRows.length}건 저장 + ${LOGEN_EXPORT_FILENAME} 파일에 저장(덮어쓰기) 완료`
-          : `송장 ${dbRows.length}건 저장 + ${LOGEN_EXPORT_FILENAME} 다운로드 완료`,
-    });
   };
 
   /**
@@ -535,32 +483,23 @@ export function OrdersPage() {
     return getSameDayCustomerOrderIds(groupedOrders, orderId);
   };
 
-  /** 우클릭 → "송장인쇄". 즉시 저장 흐름. */
-  const handlePrintSingleShippingInvoice = async (orderId: string) => {
+  /**
+   * 우클릭 → "송장대장 이관".
+   * 같은 거래처+같은 날짜 묶음 전체를 이관 (체크박스 선택이 있으면 그것 우선).
+   */
+  const handleTransferGroup = async (orderId: string) => {
     setContextMenu(null);
     const ids = resolveShippingTargetIds(orderId);
     const rows = buildShippingInvoiceRows(orders, customersList, ids);
-    await runInvoicePipeline(rows);
-  };
-
-  /** 우클릭 → "송장인쇄(다중)". 수량 모달 오픈. */
-  const handleOpenMultiPrint = (orderId: string) => {
-    setContextMenu(null);
-    const ids = resolveShippingTargetIds(orderId);
-    const rows = buildShippingInvoiceRows(orders, customersList, ids);
-    if (rows.length === 0) {
-      showToast({ kind: 'info', text: '송장으로 만들 대상이 없습니다.' });
-      return;
-    }
-    setMultiPrintRows(rows);
+    await runTransferToLedger(rows, ids);
   };
 
   /**
-   * 우클릭 → "이 주문만 송장인쇄".
-   * 체크박스 그룹 자동선택을 무시하고 우클릭한 order id 하나만 대상.
-   * 같은 거래처+날짜의 다른 주문이 있어도 합치지 않음.
+   * 우클릭 → "이 주문만 송장대장 이관".
+   * 같은 거래처+날짜 묶음/체크박스 자동선택을 무시하고 우클릭한 order id 하나만 이관.
+   * 이미 이관 완료된 묶음에 뒤늦게 추가주문이 들어온 경우의 예외 처리 경로 (§48-3-3).
    */
-  const handlePrintOnlyThisOrder = async (orderId: string) => {
+  const handleTransferOnlyThisOrder = async (orderId: string) => {
     setContextMenu(null);
     const order = orders.find((o) => o.id === orderId);
     if (!order) {
@@ -568,18 +507,7 @@ export function OrdersPage() {
       return;
     }
     const rows = buildSingleOrderShippingInvoiceRows(order, customersList);
-    await runInvoicePipeline(rows);
-  };
-
-  const handleMultiPrintSubmit = async (labelCounts: number[]) => {
-    if (!multiPrintRows) return;
-    setMultiPrintSubmitting(true);
-    try {
-      await runInvoicePipeline(multiPrintRows, labelCounts);
-    } finally {
-      setMultiPrintSubmitting(false);
-      setMultiPrintRows(null);
-    }
+    await runTransferToLedger(rows, [order.id]);
   };
 
   return (
@@ -787,6 +715,7 @@ export function OrdersPage() {
         >
           <OrderListTable
             orders={pageRows}
+            transferredOrderIds={transferredOrderIds}
             selectedId={selectedId}
             onSelect={(id: string) => {
               const target = pageRows.find((o) => o.id === id);
@@ -910,19 +839,8 @@ export function OrdersPage() {
             handleChangeStatus(contextMenu.orderId, status)
           }
           onPrintInvoice={() => handlePrintSingleInvoice(contextMenu.orderId)}
-          onPrintShipping={() => void handlePrintSingleShippingInvoice(contextMenu.orderId)}
-          onPrintShippingMulti={() => handleOpenMultiPrint(contextMenu.orderId)}
-          onPrintShippingOnlyThis={() => void handlePrintOnlyThisOrder(contextMenu.orderId)}
-        />
-      )}
-
-      {multiPrintRows && (
-        <PrintInvoiceQuantityModal
-          open
-          rows={multiPrintRows}
-          submitting={multiPrintSubmitting}
-          onClose={() => setMultiPrintRows(null)}
-          onSubmit={(counts) => void handleMultiPrintSubmit(counts)}
+          onTransferGroup={() => void handleTransferGroup(contextMenu.orderId)}
+          onTransferOnlyThis={() => void handleTransferOnlyThisOrder(contextMenu.orderId)}
         />
       )}
     </div>
@@ -935,18 +853,16 @@ function OrderContextMenu({
   onClose,
   onChangeStatus,
   onPrintInvoice,
-  onPrintShipping,
-  onPrintShippingMulti,
-  onPrintShippingOnlyThis,
+  onTransferGroup,
+  onTransferOnlyThis,
 }: {
   x: number;
   y: number;
   onClose: () => void;
   onChangeStatus: (status: string) => void;
   onPrintInvoice: () => void;
-  onPrintShipping: () => void;
-  onPrintShippingMulti: () => void;
-  onPrintShippingOnlyThis: () => void;
+  onTransferGroup: () => void;
+  onTransferOnlyThis: () => void;
 }) {
   useEffect(() => {
     const handleClick = () => onClose();
@@ -1001,7 +917,7 @@ function OrderContextMenu({
       </button>
       <button
         type="button"
-        onClick={onPrintShipping}
+        onClick={onTransferGroup}
         style={{
           width: '100%',
           textAlign: 'left',
@@ -1015,11 +931,11 @@ function OrderContextMenu({
         onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
       >
-        송장인쇄
+        송장대장 이관
       </button>
       <button
         type="button"
-        onClick={onPrintShippingMulti}
+        onClick={onTransferOnlyThis}
         style={{
           width: '100%',
           textAlign: 'left',
@@ -1033,25 +949,7 @@ function OrderContextMenu({
         onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
       >
-        송장인쇄(다중)
-      </button>
-      <button
-        type="button"
-        onClick={onPrintShippingOnlyThis}
-        style={{
-          width: '100%',
-          textAlign: 'left',
-          padding: '7px 10px',
-          border: 'none',
-          background: 'transparent',
-          cursor: 'pointer',
-          borderRadius: 4,
-          color: 'var(--ink)',
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
-        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-      >
-        이 주문만 송장인쇄
+        이 주문만 송장대장 이관
       </button>
       <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
       <div style={{ padding: '4px 10px 2px', fontSize: 10.5, color: 'var(--ink-3)' }}>

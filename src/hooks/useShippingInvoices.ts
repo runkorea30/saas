@@ -39,50 +39,37 @@ export interface ShippingInvoiceDbRow {
 }
 
 /**
- * `rows` 각각을 `labelCounts` 만큼 복제하여 INSERT. `labelCounts` 가 없으면 전부 1건.
- * 반환: 저장된 DB 행 목록 (엑셀 파일 생성 및 downloaded_at 업데이트에 사용).
+ * `rows` 를 각각 1건씩 INSERT (복제 없음, label_count=1 기본).
  *
- * 방어적 검증: 응답 개수가 payload 개수와 다르면 명시적으로 throw 하여 조용한 부분
- * 저장/누락이 상위 파이프라인(엑셀 생성) 으로 흘러가는 것을 차단.
+ * 🔴 (2026-07-06 §48) 스펙 §B: label_count 만큼 물리적 복제하던 이전 방식 폐지.
+ *    출력 시점에 xlsx 반복으로만 해결. 라벨수 조정은 UPDATE 로 컬럼 값 갱신.
+ *
+ * 방어적 검증: 응답 개수 ≠ payload 개수면 throw.
  */
 async function insertShippingInvoices(
   companyId: string,
   rows: ShippingInvoiceRow[],
-  labelCounts?: number[],
 ): Promise<ShippingInvoiceDbRow[]> {
   if (rows.length === 0) return [];
-  if (labelCounts && labelCounts.length !== rows.length) {
-    throw new Error(
-      `labelCounts 길이 불일치: rows=${rows.length}, counts=${labelCounts.length}`,
-    );
-  }
   const payload: Array<
     Omit<ShippingInvoiceDbRow, 'id' | 'printed_at' | 'downloaded_at' | 'created_at' | 'deleted_at'>
-  > = [];
-  for (let i = 0; i < rows.length; i += 1) {
-    const r = rows[i];
-    const count = Math.max(1, Math.floor(labelCounts?.[i] ?? 1));
-    for (let n = 0; n < count; n += 1) {
-      payload.push({
-        company_id: companyId,
-        // 복제본끼리 배열 참조를 공유하면 후속 조작 시 위험 — 슬라이스로 분리.
-        source_order_ids: [...r.sourceOrderIds],
-        customer_id: r.customerId,
-        is_direct: r.isDirect,
-        order_date: r.orderDate,
-        recipient_name: r.recipientName || null,
-        phone: r.phone || null,
-        phone2: r.phone2 || null,
-        address: r.address || null,
-        zipcode: r.zipcode || null,
-        customer_name: r.customerName || null,
-        credit: r.credit || null,
-        brand: r.brand,
-        product: r.product || null,
-        label_count: count,
-      });
-    }
-  }
+  > = rows.map((r) => ({
+    company_id: companyId,
+    source_order_ids: [...r.sourceOrderIds],
+    customer_id: r.customerId,
+    is_direct: r.isDirect,
+    order_date: r.orderDate,
+    recipient_name: r.recipientName || null,
+    phone: r.phone || null,
+    phone2: r.phone2 || null,
+    address: r.address || null,
+    zipcode: r.zipcode || null,
+    customer_name: r.customerName || null,
+    credit: r.credit || null,
+    brand: r.brand,
+    product: r.product || null,
+    label_count: 1,
+  }));
   const { data, error } = await DB.from('shipping_invoices')
     .insert(payload)
     .select('*');
@@ -90,10 +77,45 @@ async function insertShippingInvoices(
   const dbRows = (data ?? []) as ShippingInvoiceDbRow[];
   if (dbRows.length !== payload.length) {
     throw new Error(
-      `INSERT 응답 개수 불일치: 요청 ${payload.length}건, 응답 ${dbRows.length}건. 저장이 부분 성공했을 수 있어 엑셀 생성을 중단합니다.`,
+      `INSERT 응답 개수 불일치: 요청 ${payload.length}건, 응답 ${dbRows.length}건.`,
     );
   }
   return dbRows;
+}
+
+/** 단일 행 label_count UPDATE. 라벨수 인라인 편집(§B). */
+async function updateShippingInvoiceLabelCount(
+  companyId: string,
+  id: string,
+  labelCount: number,
+): Promise<void> {
+  const value = Math.max(1, Math.floor(labelCount));
+  const { error } = await DB.from('shipping_invoices')
+    .update({ label_count: value })
+    .eq('id', id)
+    .eq('company_id', companyId);
+  if (error) throw error;
+}
+
+/**
+ * 대상 order id 들 중, 이미 shipping_invoices 로 이관되었으나 아직 미출력
+ * (`downloaded_at IS NULL`, `deleted_at IS NULL`) 상태로 대기 중인 행을 반환.
+ *
+ * §D: 중복 이관 차단용. 반환값이 비어있지 않으면 이관 자체를 실행하지 않는다.
+ */
+async function findPendingTransferConflicts(
+  companyId: string,
+  orderIds: readonly string[],
+): Promise<ShippingInvoiceDbRow[]> {
+  if (orderIds.length === 0) return [];
+  const { data, error } = await DB.from('shipping_invoices')
+    .select('*')
+    .eq('company_id', companyId)
+    .is('deleted_at', null)
+    .is('downloaded_at', null)
+    .overlaps('source_order_ids', orderIds as string[]);
+  if (error) throw error;
+  return (data ?? []) as ShippingInvoiceDbRow[];
 }
 
 /** downloaded_at = now() 로 다중 UPDATE. */
@@ -214,15 +236,34 @@ export function useSaveShippingInvoices() {
     mutationFn: async (args: {
       companyId: string;
       rows: ShippingInvoiceRow[];
-      labelCounts?: number[];
     }) => {
-      return insertShippingInvoices(args.companyId, args.rows, args.labelCounts);
+      return insertShippingInvoices(args.companyId, args.rows);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['shipping-invoices'] });
+      void qc.invalidateQueries({ queryKey: ['transferred-order-ids'] });
+    },
+  });
+}
+
+/** §B: 라벨수 인라인 편집 mutation. */
+export function useUpdateShippingInvoiceLabelCount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      companyId: string;
+      id: string;
+      labelCount: number;
+    }) => {
+      await updateShippingInvoiceLabelCount(args.companyId, args.id, args.labelCount);
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['shipping-invoices'] });
     },
   });
 }
+
+export { findPendingTransferConflicts };
 
 export function useMarkShippingInvoicesDownloaded() {
   const qc = useQueryClient();
@@ -244,6 +285,40 @@ export function useSoftDeleteShippingInvoices() {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['shipping-invoices'] });
+      void qc.invalidateQueries({ queryKey: ['transferred-order-ids'] });
+    },
+  });
+}
+
+/**
+ * §F: 주어진 주문 id 들 중 이미 shipping_invoices(소프트 삭제 제외) 로 이관된 것 반환.
+ *
+ * 화면 페이지 단위로 orderIds 를 넘겨 IN 절 배치 조회 — N+1 방지.
+ * 출력 완료 여부는 구분하지 않음(스펙 §F: 배지는 미출력/출력완료 구분 없이 동일).
+ */
+export function useTransferredOrderIds(
+  companyId: string | null,
+  orderIds: readonly string[],
+) {
+  const sortedKey = [...orderIds].sort().join(',');
+  return useQuery<Set<string>>({
+    queryKey: ['transferred-order-ids', companyId, sortedKey],
+    enabled: Boolean(companyId) && orderIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await DB.from('shipping_invoices')
+        .select('source_order_ids')
+        .eq('company_id', companyId!)
+        .is('deleted_at', null)
+        .overlaps('source_order_ids', orderIds as string[]);
+      if (error) throw error;
+      const set = new Set<string>();
+      const targetSet = new Set(orderIds);
+      for (const row of (data ?? []) as Array<{ source_order_ids: string[] }>) {
+        for (const oid of row.source_order_ids ?? []) {
+          if (targetSet.has(oid)) set.add(oid);
+        }
+      }
+      return set;
     },
   });
 }
@@ -265,14 +340,16 @@ export interface ShippingInvoiceStats {
 }
 
 /**
- * 발송 수량 통계 — printed_at (인쇄 클릭 시각) 을 KST 로 변환한 뒤 일별/월별 그룹핑.
+ * 발송(출력) 수량 통계.
  *
- * 각 행 = 1건의 발송 라벨(운송장). label_count 는 이미 복제되어 여러 행으로
- * 저장되어 있으므로 COUNT(*) 로 세면 됨. `SUM(label_count)` 는 이중 계산이라 금지.
- * `deleted_at IS NULL` 은 useShippingInvoices 와 동일 규칙.
+ * 🔴 (2026-07-06 §48-E) 실제 출력완료 기준으로 변경:
+ *   · 필터: `downloaded_at IS NOT NULL` (미출력 대기 행 제외)
+ *   · 그룹키: downloaded_at 을 KST 로 변환한 일별/월별
+ *   · 기간 범위(dateFrom/dateTo) 도 downloaded_at 기준으로 적용.
  *
- * 응답 크기 축소 위해 select 는 printed_at 만 요청 (PostgREST 는 GROUP BY 직접
- * 불가하니 원시 값 받아서 클라이언트에서 KST 변환 후 집계).
+ * 각 행 = 1건의 발송 대상. label_count 는 xlsx 반복 매수 (§B) 라 실제 발송된
+ * "라벨 매수" 를 세려면 SUM(label_count). "발송 건수"(주문 단위 기준) 로 세려면
+ * COUNT(*). 이 훅은 후자(건수) 를 반환 — 이전 semantics 유지.
  */
 export function useShippingInvoiceStats(
   companyId: string | null,
@@ -287,21 +364,22 @@ export function useShippingInvoiceStats(
     ],
     enabled: Boolean(companyId),
     queryFn: async () => {
-      const rows = await fetchAllRows<{ printed_at: string }>(() => {
+      const rows = await fetchAllRows<{ downloaded_at: string | null }>(() => {
         let q = DB.from('shipping_invoices')
-          .select('printed_at')
+          .select('downloaded_at')
           .eq('company_id', companyId!)
-          .is('deleted_at', null);
-        if (filter?.dateFrom) q = q.gte('printed_at', kstStartOfDayUtcIso(filter.dateFrom));
-        if (filter?.dateTo) q = q.lt('printed_at', kstNextDayStartUtcIso(filter.dateTo));
-        return q.order('printed_at', { ascending: true });
+          .is('deleted_at', null)
+          .not('downloaded_at', 'is', null);
+        if (filter?.dateFrom) q = q.gte('downloaded_at', kstStartOfDayUtcIso(filter.dateFrom));
+        if (filter?.dateTo) q = q.lt('downloaded_at', kstNextDayStartUtcIso(filter.dateTo));
+        return q.order('downloaded_at', { ascending: true });
       });
 
       const dailyMap = new Map<string, number>();
       const monthlyMap = new Map<string, number>();
       for (const r of rows) {
-        if (!r.printed_at) continue;
-        const d = toKstDateKey(r.printed_at); // 'YYYY-MM-DD' (KST)
+        if (!r.downloaded_at) continue;
+        const d = toKstDateKey(r.downloaded_at); // 'YYYY-MM-DD' (KST)
         dailyMap.set(d, (dailyMap.get(d) ?? 0) + 1);
         const ym = d.slice(0, 7); // 'YYYY-MM'
         monthlyMap.set(ym, (monthlyMap.get(ym) ?? 0) + 1);

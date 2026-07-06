@@ -47,6 +47,11 @@ const COLUMN_DEFS: ReadonlyArray<OrderColumnDef> = [
 
 export interface OrderListTableProps {
   orders: OrderWithGroupInfo[];
+  /**
+   * §48-F: 이 페이지에 표시된 주문 중 shipping_invoices 로 이관된 주문 id 집합.
+   * undefined 면 로딩 중 (배지 표시 없음). 미출력/출력완료 구분 없이 동일 배지.
+   */
+  transferredOrderIds?: Set<string>;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onContextMenu?: (e: React.MouseEvent, orderId: string) => void;
@@ -94,6 +99,7 @@ function pageBtnStyle(active: boolean, disabled: boolean): React.CSSProperties {
 export function OrderListTable(props: OrderListTableProps) {
   const {
     orders,
+    transferredOrderIds,
     selectedId,
     onSelect,
     onContextMenu,
@@ -227,6 +233,7 @@ export function OrderListTable(props: OrderListTableProps) {
             const showTrash = hoveredId === o.id || deletingId === o.id;
             const isAdd = o.isAdditional;
             const isImagePending = !!o.attachment_url && o.items.length === 0;
+            const isTransferred = transferredOrderIds?.has(o.id) ?? false;
             return (
               <div
                 key={o.id}
@@ -418,6 +425,7 @@ export function OrderListTable(props: OrderListTableProps) {
                       minWidth: 0,
                     }}
                   >
+                    {isTransferred && <TransferredBadge />}
                     {o.is_direct_shipping && (
                       <span
                         title="직송 주문"
@@ -495,6 +503,7 @@ export function OrderListTable(props: OrderListTableProps) {
                         직송
                       </span>
                     )}
+                    {isTransferred && <TransferredBadge />}
                     {hasReturn && (
                       <span
                         title="반품 포함"
@@ -681,6 +690,32 @@ export function OrderListTable(props: OrderListTableProps) {
 }
 
 // ───────────────────────────────────────────────────────────
+
+/**
+ * §48-F: 이관됨 배지. 미출력/출력완료 구분 없이 하나로 통일 (스펙 확정).
+ * 다운로드 상태 세부는 송장대장 탭에서만 확인.
+ */
+function TransferredBadge() {
+  return (
+    <span
+      title="송장대장으로 이관됨"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        fontSize: 9.5,
+        fontWeight: 600,
+        background: 'var(--brand-wash, #e0e7ff)',
+        color: 'var(--brand, #4338ca)',
+        padding: '1px 6px',
+        borderRadius: 999,
+        letterSpacing: '0.04em',
+        flexShrink: 0,
+      }}
+    >
+      이관됨
+    </span>
+  );
+}
 
 function HeaderCell({
   label,

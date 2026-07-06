@@ -22,6 +22,7 @@ import {
   useShippingInvoiceStats,
   useShippingInvoices,
   useSoftDeleteShippingInvoices,
+  useUpdateShippingInvoiceLabelCount,
   type ShippingInvoiceDbRow,
   type ShippingStatsBucket,
 } from '@/hooks/useShippingInvoices';
@@ -89,11 +90,17 @@ const btnBase: React.CSSProperties = {
   cursor: 'pointer',
 };
 
+/**
+ * 🔴 (2026-07-06 §49) 이전 `background: var(--accent)` 는 shadcn/ui 관례로 HSL 3-값
+ *    튜플(예: `17 51% 91%`) 로 정의돼 있어 `hsl(...)` 로 감싸지 않으면 브라우저가 색으로
+ *    파싱하지 못하고 초기값(투명) 으로 fallback → 밝은 부모 배경이 비쳐 "비활성 회색"
+ *    처럼 보이는 시각적 버그. `dangerBtn` 과 대칭되도록 `--brand` 유효 색상 토큰 사용.
+ */
 const primaryBtn: React.CSSProperties = {
   ...btnBase,
   border: 'none',
-  background: 'var(--accent)',
-  color: 'var(--surface)',
+  background: 'var(--brand)',
+  color: '#FDFAF4',
   fontWeight: 600,
 };
 
@@ -183,6 +190,7 @@ export function ShippingInvoicesPage() {
   );
   const markDownloadedMutation = useMarkShippingInvoicesDownloaded();
   const softDeleteMutation = useSoftDeleteShippingInvoices();
+  const updateLabelCountMutation = useUpdateShippingInvoiceLabelCount();
 
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [folderName, setFolderName] = useState<string | null>(null);
@@ -208,12 +216,21 @@ export function ShippingInvoicesPage() {
     showToast({ kind: 'success', text: `업로드 폴더 설정: ${handle.name}` });
   };
 
-  const handleRedownload = async () => {
+  /**
+   * §48-C: "송장출력" 통합 버튼.
+   *  · 선택 행 중 미출력(`downloaded_at IS NULL`) 이 하나라도 있으면 → 최초 출력
+   *  · 전부 이미 출력된 행이면 → 재출력
+   *  실제 파일 저장/UPDATE 로직은 동일 (xlsx 생성 → 폴더/다운로드 → downloaded_at=now()).
+   */
+  const handleExportShipping = async () => {
     if (!companyId) return;
     if (selectedRows.length === 0) {
-      showToast({ kind: 'info', text: '재다운로드할 행을 선택하세요.' });
+      showToast({ kind: 'info', text: '송장출력할 행을 선택하세요.' });
       return;
     }
+    const hasPending = selectedRows.some((r) => r.downloaded_at === null);
+    const actionLabel = hasPending ? '송장출력' : '송장 재출력';
+
     const buf = buildLogenWorkbookArrayBuffer(selectedRows);
     let savedTo: 'folder' | 'download' = 'download';
     try {
@@ -243,16 +260,28 @@ export function ShippingInvoicesPage() {
         ids: selectedRows.map((r) => r.id),
       });
     } catch {
-      // ignore
+      // 파일은 생성됨 — downloaded_at UPDATE 실패는 조용히 무시.
     }
     showToast({
       kind: 'success',
       text:
         savedTo === 'folder'
-          ? `${selectedRows.length}건 재다운로드 완료 (${LOGEN_EXPORT_FILENAME} 덮어쓰기)`
-          : `${selectedRows.length}건 재다운로드 완료 (${LOGEN_EXPORT_FILENAME})`,
+          ? `${selectedRows.length}건 ${actionLabel} 완료 (${LOGEN_EXPORT_FILENAME} 덮어쓰기)`
+          : `${selectedRows.length}건 ${actionLabel} 완료 (${LOGEN_EXPORT_FILENAME})`,
     });
     setChecked({});
+  };
+
+  /** §B: 라벨수 인라인 편집. onBlur 시 UPDATE 트리거. */
+  const handleUpdateLabelCount = async (id: string, next: number) => {
+    if (!companyId) return;
+    const clamped = Math.max(1, Math.floor(next));
+    try {
+      await updateLabelCountMutation.mutateAsync({ companyId, id, labelCount: clamped });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      showToast({ kind: 'error', text: `라벨수 저장 실패: ${msg}` });
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -399,11 +428,12 @@ export function ShippingInvoicesPage() {
             </button>
             <button
               type="button"
-              onClick={() => void handleRedownload()}
+              onClick={() => void handleExportShipping()}
               style={primaryBtn}
               disabled={selectedRows.length === 0}
+              title="선택 행을 로젠송장 xlsx 로 저장. 이미 출력된 행은 재출력."
             >
-              <RefreshCw size={13} /> 선택 재다운로드 ({selectedRows.length})
+              <RefreshCw size={13} /> 송장출력 ({selectedRows.length})
             </button>
             <button
               type="button"
@@ -459,7 +489,15 @@ export function ShippingInvoicesPage() {
               해당 조건의 송장 이력이 없습니다.
             </div>
           ) : (
-            rows.map((r) => <InvoiceRow key={r.id} r={r} checked={!!checked[r.id]} onToggle={() => setChecked((c) => ({ ...c, [r.id]: !c[r.id] }))} />)
+            rows.map((r) => (
+              <InvoiceRow
+                key={r.id}
+                r={r}
+                checked={!!checked[r.id]}
+                onToggle={() => setChecked((c) => ({ ...c, [r.id]: !c[r.id] }))}
+                onChangeLabelCount={(n) => void handleUpdateLabelCount(r.id, n)}
+              />
+            ))
           )}
         </div>
       ) : (
@@ -640,14 +678,71 @@ function StatsBarChart({
   );
 }
 
+/**
+ * §B: 라벨수 인라인 입력. 로컬 상태로 즉시 편집, 커밋(blur/Enter) 시에만 서버 UPDATE.
+ * 값이 실제로 바뀌었을 때만 콜백 발동 — 불필요한 write 방지.
+ */
+function LabelCountInput({
+  value,
+  onCommit,
+}: {
+  value: number;
+  onCommit: (n: number) => void;
+}) {
+  const [local, setLocal] = useState<string>(String(value));
+  useEffect(() => {
+    setLocal(String(value));
+  }, [value]);
+
+  const commit = () => {
+    const parsed = parseInt(local, 10);
+    const next = Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
+    if (next !== value) onCommit(next);
+    setLocal(String(next));
+  };
+
+  return (
+    <input
+      type="number"
+      min={1}
+      max={99}
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      style={{
+        width: 56,
+        height: 24,
+        padding: '2px 6px',
+        border: '1px solid var(--line)',
+        borderRadius: 4,
+        textAlign: 'right',
+        fontFamily: 'var(--font-num)',
+        fontSize: 12.5,
+        background: 'var(--surface)',
+        color: 'var(--ink)',
+        colorScheme: 'light dark',
+        outline: 'none',
+      }}
+    />
+  );
+}
+
 function InvoiceRow({
   r,
   checked,
   onToggle,
+  onChangeLabelCount,
 }: {
   r: ShippingInvoiceDbRow;
   checked: boolean;
   onToggle: () => void;
+  /** §B: 라벨수 인라인 편집 콜백. onBlur 및 Enter 시 트리거. */
+  onChangeLabelCount: (labelCount: number) => void;
 }) {
   return (
     <div
@@ -693,7 +788,9 @@ function InvoiceRow({
       <div style={{ fontFamily: 'var(--font-num)', color: 'var(--ink-2)' }}>{r.phone2 || '-'}</div>
       <div style={{ color: 'var(--ink-2)' }}>{r.brand}</div>
       <div style={{ color: 'var(--ink-2)' }}>{r.credit || '-'}</div>
-      <div style={{ textAlign: 'right', fontFamily: 'var(--font-num)' }}>{r.label_count}</div>
+      <div style={{ textAlign: 'right' }}>
+        <LabelCountInput value={r.label_count} onCommit={onChangeLabelCount} />
+      </div>
       <div style={{ textAlign: 'center' }}>
         {r.downloaded_at ? (
           <span

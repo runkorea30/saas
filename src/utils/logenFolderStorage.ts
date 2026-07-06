@@ -9,7 +9,7 @@
  *
  * 파일명 규칙(런코리아 요청):
  * - 항상 고정 파일명 `LOGEN_EXPORT_FILENAME` 하나만 사용.
- * - "송장인쇄" 클릭 시마다 동일 파일에 덮어쓰기 (createWritable 기본 동작).
+ * - "송장출력" 클릭 시마다 동일 파일에 덮어쓰기 (createWritable 기본 동작).
  * - 로젠 프로그램이 항상 같은 파일에서 최신 내용을 읽으면 되므로 파일 누적 X.
  *
  * IndexedDB DB 명: `logen-folder`, 스토어 `handles`, key `logen-upload-folder`.

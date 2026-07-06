@@ -50,22 +50,32 @@ export function sortShippingInvoiceRowsForExport<T extends ShippingInvoiceDbRow>
 /**
  * DB 행 목록을 로젠 양식 데이터 행 배열로 변환 (헤더 없음).
  * 순서 자체가 계약이므로 배열 리터럴로 명시.
+ *
+ * 🔴 (2026-07-06) label_count 만큼 xlsx 행을 반복 출력. 이전에는 INSERT 시 물리적으로
+ *    N 개 DB 행을 복제 삽입했지만, 스펙 §B 에 따라 DB 행은 1건 유지 + xlsx 생성 시
+ *    반복하는 방식으로 변경. 반복 위치는 정렬 후 각 원본 행 직후에 인접해 나오도록.
  */
 export function buildLogenExportRows(
   rows: readonly ShippingInvoiceDbRow[],
 ): string[][] {
-  return rows.map((r) => [
-    r.recipient_name ?? '',   // 1. 수취인명
-    r.zipcode ?? '',          // 2. 우편번호
-    r.address ?? '',          // 3. 주소
-    r.phone ?? '',            // 4. 연락처1
-    r.phone2 ?? '',           // 5. 연락처2
-    '',                       // 6. 빈칸 (고정)
-    '엔젤러스',                // 7. 브랜드 (발송인 고정값 — shipping_invoices 값과 무관)
-    r.customer_name ?? '',    // 8. 업체명
-    r.credit ?? '신용',       // 9. 신용 (builder 에서 항상 '신용' 이지만 legacy row 대비 폴백)
-    '',                       // 10. 배송메시지 (고정 공란)
-  ]);
+  const out: string[][] = [];
+  for (const r of rows) {
+    const n = Math.max(1, r.label_count ?? 1);
+    const row: string[] = [
+      r.recipient_name ?? '',   // 1. 수취인명
+      r.zipcode ?? '',          // 2. 우편번호
+      r.address ?? '',          // 3. 주소
+      r.phone ?? '',            // 4. 연락처1
+      r.phone2 ?? '',           // 5. 연락처2
+      '',                       // 6. 빈칸 (고정)
+      '엔젤러스',                // 7. 브랜드 (발송인 고정값 — shipping_invoices 값과 무관)
+      r.customer_name ?? '',    // 8. 업체명
+      r.credit ?? '신용',       // 9. 신용 (builder 에서 항상 '신용' 이지만 legacy row 대비 폴백)
+      '',                       // 10. 배송메시지 (고정 공란)
+    ];
+    for (let i = 0; i < n; i += 1) out.push(row.slice());
+  }
+  return out;
 }
 
 /**
