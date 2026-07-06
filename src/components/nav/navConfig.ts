@@ -46,7 +46,7 @@ export const navSections: NavSection[] = [
   {
     path: '/inventory',
     label: '재고매입',
-    indexRedirect: '/inventory/stock',
+    indexRedirect: '/inventory/purchase-orders',
     items: [
       { path: '/inventory/purchase-orders', label: '발주서' },
       { path: '/inventory/purchase', label: '수입/매입' },

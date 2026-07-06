@@ -106,7 +106,7 @@ function App() {
           </Route>
 
           <Route path="inventory">
-            <Route index element={<Navigate to="/inventory/stock" replace />} />
+            <Route index element={<Navigate to="/inventory/purchase-orders" replace />} />
             <Route path="stock" element={<StockPage />} />
             <Route path="purchase" element={<ImportReceivingPage />} />
             <Route path="purchase-orders" element={<PurchaseOrderPage />} />
