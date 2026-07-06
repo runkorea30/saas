@@ -1,5 +1,5 @@
 /**
- * 송장대장 내 주문 직접 추가 다이얼로그 (§48-v2 항목 2).
+ * 송장대장 내 주문 직접 추가 다이얼로그 (§48-v2 항목 2, v3 개선).
  *
  * 배경:
  *  - 이미 이관/출력 완료된 주문의 송장을 재발행해야 하는 경우가 있음
@@ -11,10 +11,14 @@
  *    `useSaveShippingInvoices` INSERT 만 사용 → 사용자의 명시적 재발행 의도 존중.
  *  - 주문내역 경로의 중복 검증 로직은 그대로 유지 (Do Not Touch).
  *
- * UX:
- *  - 거래처명 검색(디바운스 300ms) + 기간(Segmented, 기본 90일)
- *  - 결과 리스트에 이관 상태 배지 표시(이미 이관됨 인지 사용자 인지)
- *  - 라디오 단일 선택 → "이 주문 추가" 클릭 시 1건 INSERT
+ * UX (v3):
+ *  - 기본 기간 '오늘', 거래처명 검색(디바운스 300ms)
+ *  - 직송 주문은 거래처명 옆에 "→ 수취인명" (shipping_info[0].name) 표시,
+ *    여러 shipping_info 원소면 "→ 수취인명 외 N명"
+ *  - 체크박스 다중 선택 + 헤더 전체 선택 토글
+ *  - "선택한 N건 추가" 클릭 시 각 주문에 대해 buildSingleOrderShippingInvoiceRows
+ *    반복 호출 → flat 병합 → 한 번의 INSERT (원자 처리)
+ *  - 이관 상태 배지로 이미 이관된 주문 인지
  *  - 성공 후 다이얼로그 자동 닫힘 + shipping-invoices 캐시 자동 invalidate
  */
 import { useEffect, useMemo, useState } from 'react';
@@ -28,7 +32,10 @@ import {
 } from '@/hooks/useShippingInvoices';
 import { useToast } from '@/components/ui/Toast';
 import { Segmented, periodRange } from '@/components/feature/orders/primitives';
-import { buildSingleOrderShippingInvoiceRows } from '@/utils/shippingInvoiceBuilder';
+import {
+  buildSingleOrderShippingInvoiceRows,
+  type ShippingInvoiceRow,
+} from '@/utils/shippingInvoiceBuilder';
 import type { PeriodKey } from '@/types/orders';
 
 interface Props {
@@ -108,13 +115,13 @@ export function AddOrderToInvoiceDialog({ open, onClose, companyId }: Props) {
   }));
   const [customerInput, setCustomerInput] = useState('');
   const customerQuery = useDebounced(customerInput, 300).trim().toLowerCase();
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
 
   // 다이얼로그가 닫힐 때마다 상태 초기화 (재열림 시 이전 검색어/선택 남지 않도록).
   useEffect(() => {
     if (!open) {
       setCustomerInput('');
-      setSelectedOrderId(null);
+      setSelectedIds({});
       setPeriod('today');
     }
   }, [open]);
@@ -155,14 +162,49 @@ export function AddOrderToInvoiceDialog({ open, onClose, companyId }: Props) {
     orderIdsForBadge,
   );
 
+  const selectedCount = useMemo(
+    () => filtered.reduce((n, o) => n + (selectedIds[o.id] ? 1 : 0), 0),
+    [filtered, selectedIds],
+  );
+  const allFilteredSelected =
+    filtered.length > 0 && filtered.every((o) => selectedIds[o.id]);
+
+  const toggleAll = () => {
+    if (allFilteredSelected) {
+      setSelectedIds((prev) => {
+        const next = { ...prev };
+        filtered.forEach((o) => delete next[o.id]);
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = { ...prev };
+        filtered.forEach((o) => (next[o.id] = true));
+        return next;
+      });
+    }
+  };
+
+  const toggleOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = { ...prev };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      return next;
+    });
+  };
+
   const handleAdd = async () => {
-    if (!companyId || !selectedOrderId) return;
-    const order = orders.find((o) => o.id === selectedOrderId);
-    if (!order) {
+    if (!companyId || selectedCount === 0) return;
+    const selectedOrders = orders.filter((o) => selectedIds[o.id]);
+    if (selectedOrders.length === 0) {
       showToast({ kind: 'error', text: '선택한 주문을 찾을 수 없습니다.' });
       return;
     }
-    const rows = buildSingleOrderShippingInvoiceRows(order, customersList);
+    // 각 주문별로 rows 생성 후 flat 병합 (직송 shipping_info N원소는 N행으로 확장).
+    const rows: ShippingInvoiceRow[] = selectedOrders.flatMap((o) =>
+      buildSingleOrderShippingInvoiceRows(o, customersList),
+    );
     if (rows.length === 0) {
       showToast({ kind: 'error', text: '추가할 송장 행을 생성하지 못했습니다.' });
       return;
@@ -181,6 +223,7 @@ export function AddOrderToInvoiceDialog({ open, onClose, companyId }: Props) {
   };
 
   const busy = saveInvoicesMutation.isPending;
+  const canSubmit = !busy && selectedCount > 0;
 
   return (
     <Modal
@@ -210,15 +253,14 @@ export function AddOrderToInvoiceDialog({ open, onClose, companyId }: Props) {
               background: 'var(--brand)',
               color: '#FDFAF4',
               fontWeight: 500,
-              cursor:
-                busy || !selectedOrderId ? 'not-allowed' : 'pointer',
-              opacity: busy || !selectedOrderId ? 0.6 : 1,
+              cursor: canSubmit ? 'pointer' : 'not-allowed',
+              opacity: canSubmit ? 1 : 0.6,
               fontFamily: 'var(--font-kr)',
             }}
-            disabled={busy || !selectedOrderId}
+            disabled={!canSubmit}
             onClick={() => void handleAdd()}
           >
-            {busy ? '추가 중…' : '이 주문 추가'}
+            {busy ? '추가 중…' : `선택한 ${selectedCount}건 추가`}
           </button>
         </>
       }
@@ -304,8 +346,16 @@ export function AddOrderToInvoiceDialog({ open, onClose, companyId }: Props) {
             zIndex: 1,
           }}
         >
-          <div></div>
-          <div>거래처명</div>
+          <div>
+            <input
+              type="checkbox"
+              checked={allFilteredSelected}
+              onChange={toggleAll}
+              disabled={filtered.length === 0}
+              aria-label="전체 선택"
+            />
+          </div>
+          <div>거래처명 → 수취인명</div>
           <div>주문일</div>
           <div style={{ textAlign: 'right' }}>총액</div>
           <div style={{ textAlign: 'center' }}>이관 상태</div>
@@ -335,7 +385,14 @@ export function AddOrderToInvoiceDialog({ open, onClose, companyId }: Props) {
         ) : (
           filtered.map((o) => {
             const transferred = transferredSet?.has(o.id) ?? false;
-            const isSelected = selectedOrderId === o.id;
+            const isSelected = !!selectedIds[o.id];
+            // 직송 주문이면 shipping_info[0].name 을 수취인명으로 표시.
+            const shippingEntries = Array.isArray(o.shipping_info)
+              ? o.shipping_info
+              : [];
+            const firstRecipient =
+              shippingEntries[0]?.name?.trim() || null;
+            const extraRecipients = Math.max(0, shippingEntries.length - 1);
             return (
               <label
                 key={o.id}
@@ -356,15 +413,25 @@ export function AddOrderToInvoiceDialog({ open, onClose, companyId }: Props) {
                 <div>
                   <input
                     id={`add-order-${o.id}`}
-                    type="radio"
-                    name="add-order-selection"
+                    type="checkbox"
                     checked={isSelected}
-                    onChange={() => setSelectedOrderId(o.id)}
+                    onChange={() => toggleOne(o.id)}
                   />
                 </div>
                 <div>
                   {o.customer?.name ?? (
                     <span style={{ color: 'var(--ink-3)' }}>(미지정)</span>
+                  )}
+                  {o.is_direct_shipping && firstRecipient && (
+                    <span style={{ color: 'var(--ink-2)' }}>
+                      {' → '}
+                      {firstRecipient}
+                      {extraRecipients > 0 && (
+                        <span style={{ color: 'var(--ink-3)' }}>
+                          {' '}외 {extraRecipients}명
+                        </span>
+                      )}
+                    </span>
                   )}
                   {o.is_direct_shipping && (
                     <span
@@ -431,7 +498,7 @@ export function AddOrderToInvoiceDialog({ open, onClose, companyId }: Props) {
         }}
       >
         · 재발행 목적입니다. 이미 이관된 주문이라도 다시 추가할 수 있습니다.
-        <br />· 추가된 송장은 목록 최상단에 표시되며, 이후 송장출력 대상이 됩니다.
+        <br />· 여러 건을 한 번에 선택할 수 있으며, 직송의 경우 수취인 원소 수만큼 송장 행이 생성됩니다.
       </p>
     </Modal>
   );
