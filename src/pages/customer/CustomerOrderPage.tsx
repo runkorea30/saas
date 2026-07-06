@@ -1209,6 +1209,14 @@ function LeftPanel({
 
 // ───────────────────────────────────────────────────────────
 
+interface PortalNoticeItem {
+  id: string;
+  title: string;
+  body: string;
+  is_pinned: boolean;
+  created_at: string;
+}
+
 function NoticePanel({
   companyId,
   fontScale,
@@ -1218,40 +1226,119 @@ function NoticePanel({
 }) {
   const baseFont = 12 * fontScale;
 
-  const { data } = useQuery<{ title: string | null; body: string | null } | null>({
-    queryKey: ['portal-notice', companyId],
+  const { data } = useQuery<PortalNoticeItem[]>({
+    queryKey: ['portal-notices', companyId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('companies')
-        .select('notice_title, notice_body')
-        .eq('id', companyId)
-        .maybeSingle();
+      // portal_notices 는 자동생성 database.ts 타입에 아직 미반영 → as any 우회.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase as any)
+        .from('portal_notices')
+        .select('id, title, body, is_pinned, created_at')
+        .eq('company_id', companyId)
+        .eq('is_active', true)
+        .order('is_pinned', { ascending: false })
+        .order('created_at', { ascending: false });
       if (error) throw error;
-      return data
-        ? { title: data.notice_title ?? null, body: data.notice_body ?? null }
-        : null;
+      return (data ?? []) as PortalNoticeItem[];
     },
     staleTime: 60_000,
   });
 
-  const title = data?.title || '공지사항';
-  const body =
-    data?.body ||
-    '평일 오후 4시 이후 접수된 주문은 다음 영업일에 출고됩니다.\n긴급 건은 담당자에게 연락 바랍니다.';
+  const notices = data ?? [];
+  // 게시된 공지가 없으면 카드 자체를 숨긴다 (49번 작업 방식과 일관).
+  if (notices.length === 0) return null;
 
   return (
-    <Card title={title}>
+    <Card title="공지사항">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {notices.map((n) => (
+          <NoticeItem key={n.id} notice={n} baseFont={baseFont} />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function NoticeItem({
+  notice,
+  baseFont,
+}: {
+  notice: PortalNoticeItem;
+  baseFont: number;
+}) {
+  const d = new Date(notice.created_at);
+  const dateLabel = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+  return (
+    <div
+      style={{
+        padding: '10px 12px',
+        border: `1px solid ${notice.is_pinned ? 'var(--p-brand, var(--p-ink-3))' : 'var(--p-line)'}`,
+        borderRadius: 8,
+        // 고정 공지는 배경 살짝 강조. 브랜드 wash 토큰이 없으면 카드 배경(--p-card-bg) 유지.
+        background: notice.is_pinned
+          ? 'var(--p-notice-pinned-bg, var(--p-card-bg))'
+          : 'var(--p-card-bg)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          marginBottom: 6,
+          flexWrap: 'wrap',
+        }}
+      >
+        {notice.is_pinned && (
+          <span
+            style={{
+              display: 'inline-block',
+              padding: '1px 7px',
+              borderRadius: 999,
+              background: 'var(--p-brand, var(--p-ink-2))',
+              color: 'var(--p-on-brand, var(--p-card-bg))',
+              fontSize: baseFont - 2,
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+            }}
+          >
+            고정
+          </span>
+        )}
+        <span
+          style={{
+            fontSize: baseFont - 1,
+            fontWeight: 600,
+            color: 'var(--p-ink)',
+            flex: 1,
+            minWidth: 0,
+            wordBreak: 'break-word',
+          }}
+        >
+          {notice.title}
+        </span>
+        <span
+          style={{
+            fontSize: baseFont - 2,
+            color: 'var(--p-ink-3)',
+            fontFamily: 'var(--font-num)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {dateLabel}
+        </span>
+      </div>
       <div
         style={{
           fontSize: baseFont,
           color: 'var(--p-ink-2)',
-          lineHeight: 1.65,
+          lineHeight: 1.6,
           whiteSpace: 'pre-line',
         }}
       >
-        {body}
+        {notice.body}
       </div>
-    </Card>
+    </div>
   );
 }
 
