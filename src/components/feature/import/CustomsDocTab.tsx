@@ -83,27 +83,85 @@ function getMeta(itemCode: string, mappings: CodeMapping[]): CodeMapping | null 
 
 // ── 엑셀 파싱 ─────────────────────────────────
 
-const SKIP_FIRST = new Set(['QTY SHPD', 'Sales Tax (0.0%)', 'Total', '']);
-
+/**
+ * 시트에서 품목 테이블을 파싱해 { itemCode, description, qty, um, price, amount } 배열로 반환.
+ *
+ * 알PDF 로 변환된 엑셀은 병합 셀 패턴이 파일마다 달라 컬럼 인덱스가 다르게 나타난다.
+ * 헤더 행에서 "Item"/"Description"/"Ordered"/"U/M"/"Rate"/"Amount" 텍스트를 찾아
+ * 컬럼 위치를 동적으로 매핑한다.
+ *
+ * 헤더 판별: 같은 행에 "Item" 이 있고, 확증 컬럼("Description"/"Ordered"/"Rate"/"Amount")
+ * 중 최소 하나가 함께 존재해야 헤더로 인정 — 우발적 오탐(주소 텍스트 등) 방지.
+ * 헤더 미발견 시 해당 시트는 빈 결과 반환(스킵).
+ *
+ * 품목 행 판별: Item 컬럼이 비어있거나 "Sales Tax"/"Total"/"Subtotal" 같은 총계 텍스트로
+ * 시작하는 행은 스킵. qty/amount 는 유효 숫자여야 통과.
+ */
 function parseSheet(ws: XLSX.WorkSheet): Array<{
   itemCode: string; description: string; qty: number; um: string; price: number; amount: number;
 }> {
   const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null });
   const result: ReturnType<typeof parseSheet> = [];
-  for (let i = 6; i < aoa.length; i++) {
-    const row = aoa[i] as (string | number | null)[];
-    const first = String(row[0] ?? '').trim();
-    if (SKIP_FIRST.has(first)) continue;
-    const qty = Number(row[0]);
-    const price = Number(row[13]);
-    const amount = Number(row[15]);
-    if (isNaN(qty) || qty === 0 || isNaN(amount)) continue;
-    const itemCode = String(row[5] ?? '').trim();
-    const description = String(row[7] ?? '').replace(/\n/g, ' ').trim();
-    const um = String(row[2] ?? '').trim();
-    if (!itemCode) continue;
-    result.push({ itemCode, description, qty, um, price, amount });
+
+  // 특정 헤더 텍스트를 가진 컬럼 인덱스 반환 (없으면 -1).
+  const findCol = (row: unknown[], keyword: string): number => {
+    const target = keyword.toLowerCase();
+    for (let c = 0; c < row.length; c++) {
+      const v = String(row[c] ?? '').trim().toLowerCase();
+      if (v === target) return c;
+    }
+    return -1;
+  };
+
+  let headerIdx = -1;
+  let itemCol = -1, descCol = -1, qtyCol = -1, umCol = -1, priceCol = -1, amountCol = -1;
+
+  for (let r = 0; r < aoa.length; r++) {
+    const row = aoa[r] as unknown[];
+    const iCol = findCol(row, 'Item');
+    if (iCol < 0) continue;
+    const dCol = findCol(row, 'Description');
+    const oCol = findCol(row, 'Ordered');
+    const rCol = findCol(row, 'Rate');
+    const aCol = findCol(row, 'Amount');
+    if (dCol < 0 && oCol < 0 && rCol < 0 && aCol < 0) continue;
+    headerIdx = r;
+    itemCol = iCol;
+    descCol = dCol;
+    qtyCol = oCol;
+    umCol = findCol(row, 'U/M');
+    priceCol = rCol;
+    amountCol = aCol;
+    break;
   }
+
+  if (headerIdx < 0 || itemCol < 0 || qtyCol < 0 || amountCol < 0) {
+    return [];
+  }
+
+  for (let i = headerIdx + 1; i < aoa.length; i++) {
+    const row = aoa[i] as unknown[];
+    const itemCode = String(row[itemCol] ?? '').trim();
+    if (!itemCode) continue;
+    if (/^(sales tax|total|subtotal)/i.test(itemCode)) continue;
+    const qty = Number(row[qtyCol]);
+    const amount = Number(row[amountCol]);
+    if (isNaN(qty) || qty === 0 || isNaN(amount)) continue;
+    const priceRaw = priceCol >= 0 ? Number(row[priceCol]) : 0;
+    const description = descCol >= 0
+      ? String(row[descCol] ?? '').replace(/\n/g, ' ').trim()
+      : '';
+    const um = umCol >= 0 ? String(row[umCol] ?? '').trim() : '';
+    result.push({
+      itemCode,
+      description,
+      qty,
+      um,
+      price: isNaN(priceRaw) ? 0 : priceRaw,
+      amount,
+    });
+  }
+
   return result;
 }
 
