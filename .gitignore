@@ -53,6 +53,9 @@ supabase/.temp/
 .claude/
 .playwright-mcp/
 
+# 로컬 개인 데이터 (이메일 백업 zip, 참고용 PDF/xlsx 등) — 레포에 넣지 않음
+samples/
+
 # TypeScript
 *.tsbuildinfo
 
