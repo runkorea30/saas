@@ -15,7 +15,7 @@
  * 🔴 KST 규칙: getFullYear/getMonth/getDate 만 사용. toISOString().slice(0,10) 금지.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { BarChart3, Calendar, Download, Folder, FolderCheck, List, RefreshCw, Search, Trash2 } from 'lucide-react';
+import { BarChart3, Calendar, Download, Folder, FolderCheck, List, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import {
   useMarkShippingInvoicesDownloaded,
@@ -29,6 +29,7 @@ import {
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
 import { Segmented, periodRange } from '@/components/feature/orders/primitives';
+import { AddOrderToInvoiceDialog } from '@/components/feature/shipping/AddOrderToInvoiceDialog';
 import type { PeriodKey } from '@/types/orders';
 import { buildLogenWorkbookArrayBuffer } from '@/utils/logenExcelExport';
 import {
@@ -195,6 +196,7 @@ export function ShippingInvoicesPage() {
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [folderName, setFolderName] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   const selectedRows = useMemo(
     () => rows.filter((r) => checked[r.id]),
@@ -428,6 +430,14 @@ export function ShippingInvoicesPage() {
             </button>
             <button
               type="button"
+              onClick={() => setAddOpen(true)}
+              style={btnBase}
+              title="송장대장에 주문을 직접 추가 (재발행 등 목적)"
+            >
+              <Plus size={13} /> 주문 추가
+            </button>
+            <button
+              type="button"
               onClick={() => void handleExportShipping()}
               style={primaryBtn}
               disabled={selectedRows.length === 0}
@@ -526,6 +536,12 @@ export function ShippingInvoicesPage() {
             로젠 시스템에 이미 업로드된 송장이라면 그쪽에서도 별도로 취소해야 합니다.
           </>
         }
+      />
+
+      <AddOrderToInvoiceDialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        companyId={companyId}
       />
     </div>
   );
