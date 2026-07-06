@@ -82,11 +82,17 @@ export function TransferConflictDialog({
       }
     >
       <div style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.6 }}>
-        <p style={{ margin: '0 0 10px' }}>
-          선택하신 주문 중{' '}
-          <strong style={{ color: 'var(--ink)' }}>{excludedCount}건</strong>이
-          이미 송장대장에 이관되어 출력 대기 중입니다.
-        </p>
+        {remainingCount === 0 ? (
+          <p style={{ margin: '0 0 10px' }}>
+            선택하신 주문이 이미 송장대장에 이관되어 출력 대기 중입니다.
+          </p>
+        ) : (
+          <p style={{ margin: '0 0 10px' }}>
+            선택하신 주문 중{' '}
+            <strong style={{ color: 'var(--ink)' }}>{excludedCount}건</strong>이
+            이미 송장대장에 이관되어 출력 대기 중입니다.
+          </p>
+        )}
         <div
           style={{
             padding: '10px 12px',
@@ -109,11 +115,17 @@ export function TransferConflictDialog({
             </div>
           )}
         </div>
-        <p style={{ margin: 0 }}>
-          이미 이관된 항목을 제외하고{' '}
-          <strong style={{ color: 'var(--ink)' }}>{remainingCount}건</strong>만
-          이관하시겠습니까?
-        </p>
+        {remainingCount === 0 ? (
+          <p style={{ margin: 0 }}>
+            송장대장에서 먼저 출력하거나 삭제한 뒤 다시 시도하세요.
+          </p>
+        ) : (
+          <p style={{ margin: 0 }}>
+            이미 이관된 항목을 제외하고{' '}
+            <strong style={{ color: 'var(--ink)' }}>{remainingCount}건</strong>만
+            이관하시겠습니까?
+          </p>
+        )}
       </div>
     </Modal>
   );
