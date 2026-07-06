@@ -22,7 +22,26 @@
  * 🟡 에러: 400 body 는 `{ error: '문자열' }` 로 통일.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { parseAngelusInvoiceText } from './_shared/invoice-local-parser.js';
+
+// ─── pdfjs worker 번들 포함 (§47-e) ─────────────────────────────────
+//
+// pdfjs-dist 는 `workerSrc` 가 설정되지 않으면 fake worker 모드로 폴백하며
+// `pdf.worker.mjs` 를 동적 import 한다. 이 동적 import 는 Vercel 의 @vercel/nft
+// (파일 트레이싱) 이 정적 분석에서 못 잡아 배포 번들에서 워커 파일이 누락되는 문제:
+//    "Cannot find module '/var/task/.../pdf.worker.mjs' imported from ... pdf.mjs"
+//
+// 해결: `require.resolve(...)` 를 모듈 top-level 에 명시. nft 는 소스 문자열의
+// `require.resolve('literal')` 패턴을 감지해 해당 파일을 배포 번들에 포함시킨다.
+// 이 파일은 ESM 이므로 CJS `require` 를 `createRequire(import.meta.url)` 로 획득.
+// 런타임 값은 `pathToFileURL(...).href` (file:// URL) — pdfjs 가 워커 로드 시
+// `import(workerSrc)` 하므로 절대 URL 형식이 필요.
+const require_ = createRequire(import.meta.url);
+const PDFJS_WORKER_URL = pathToFileURL(
+  require_.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs'),
+).href;
 
 // ─── DOM stub preload (§47-d) ──────────────────────────────────────
 //
@@ -101,6 +120,8 @@ interface PdfTextItem {
 async function extractTextFromPdf(buf: Buffer): Promise<string> {
   // 동적 import — Vercel 콜드스타트 시 top-level import 실패해도 handler 안에서 잡히도록.
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  // §47-e: 워커 경로를 명시해 fake-worker 폴백의 동적 import 를 안정화.
+  pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
   const doc = await pdfjs.getDocument({
     data: new Uint8Array(buf),
     // 워커/폰트 다운로드 불필요 — Node 환경.
