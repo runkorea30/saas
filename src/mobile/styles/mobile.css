@@ -374,6 +374,62 @@ body.mobile-active #root {
   }
 }
 
+/* ─────────────────── 좁은 화면 상세 오버레이 ───────────────────
+   폴드 접힘/일반 폰(<601px)에서 카드 탭 시 목록 위로 슬라이드하는 풀스크린 오버레이.
+   z:22 = BottomNav(z:10) 위, 사진 모달(tailwind z:50) 아래.
+   폴드 펼침(≥601px)에서는 렌더 자체가 발생하지 않아 회귀 없음. */
+.m-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 22;
+  background: var(--m-bg);
+  display: flex;
+  flex-direction: column;
+  animation: m-detail-slide-in 0.18s ease-out;
+}
+@keyframes m-detail-slide-in {
+  from {
+    transform: translateX(12px);
+    opacity: 0.7;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+.m-detail-overlay-header {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--m-border);
+  display: flex;
+  align-items: center;
+  background: var(--m-bg);
+}
+.m-detail-overlay-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 16px 20px;
+  -webkit-overflow-scrolling: touch;
+}
+.m-detail-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  color: var(--m-text);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 10px 12px 10px 8px;
+  cursor: pointer;
+  min-height: 44px;
+  border-radius: 8px;
+}
+.m-detail-back:active {
+  background: var(--m-surface-2);
+}
+
 /* ─────────────────── 다크모드 토글 ─────────────────── */
 .m-theme-toggle {
   position: absolute;

@@ -7,7 +7,7 @@
  * 🔴 CLAUDE.md §5: 기존 useOrders 재사용 → fetchAllRows 자동 적용.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Camera, ExternalLink, X } from 'lucide-react';
+import { Camera, ChevronLeft, ExternalLink, X } from 'lucide-react';
 import { useCompany } from '@/hooks/useCompany';
 import { useOrders } from '@/hooks/queries/useOrders';
 import { useOrderPhotosByOrders, type OrderPhoto } from '@/hooks/queries/useOrderPhotos';
@@ -201,6 +201,15 @@ export function OrderListPage() {
 
   const showDetail = isUnfolded && detailOrders.length > 0;
 
+  // 🟠 좁은 화면(폴드 접힘/일반 폰) 상세 오버레이:
+  //    - effectiveViewSel 은 첫-그룹 폴백을 하므로, 자동 오픈 방지를 위해
+  //      원본 viewSel !== null 조건으로만 판별 (사용자가 카드를 탭했을 때만 오픈).
+  //    - 오버레이가 열려있는 동안 BottomNav(z:10) 위를 덮음 (CSS z:22).
+  //    - isUnfolded 로 전환되면 조건이 false 로 바뀌어 자연스럽게 언마운트,
+  //      viewSel 은 유지되어 우측 2열 패널에 그대로 반영.
+  const showNarrowOverlay =
+    !isUnfolded && viewSel !== null && detailOrders.length > 0;
+
   const handleSelectSingle = (orderId: string) =>
     setViewSel({ kind: 'single', orderId });
   const handleSelectGroup = (orderIds: string[]) =>
@@ -314,6 +323,36 @@ export function OrderListPage() {
           ) : (
             <OrderDetail order={detailOrders[0]!} />
           )}
+        </div>
+      )}
+
+      {/* 좁은 화면 상세 오버레이 — 폴드 접힘/일반 폰에서 카드 탭 시 목록 위를 덮음.
+          내용은 unfolded 우측 패널과 동일한 컴포넌트(OrderDetail/OrderGroupDetail) 재사용. */}
+      {showNarrowOverlay && (
+        <div
+          className="m-detail-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="주문 상세"
+        >
+          <div className="m-detail-overlay-header">
+            <button
+              type="button"
+              className="m-detail-back"
+              onClick={() => setViewSel(null)}
+              aria-label="목록으로 돌아가기"
+            >
+              <ChevronLeft size={20} strokeWidth={2} />
+              <span>목록</span>
+            </button>
+          </div>
+          <div className="m-detail-overlay-body m-hide-scrollbar">
+            {effectiveViewSel?.kind === 'group' ? (
+              <OrderGroupDetail orders={detailOrders} />
+            ) : (
+              <OrderDetail order={detailOrders[0]!} />
+            )}
+          </div>
         </div>
       )}
 
