@@ -325,6 +325,55 @@ body.mobile-active #root {
   background: var(--m-stock-out);
 }
 
+/* ─────────────────── 액션 버튼: 출고 사진 ───────────────────
+   OrderCard / OrderGroupCard 카드 하단 "출고 촬영 / 사진 보기·추가" 버튼.
+   색상 변형(primary/neutral)만 인라인 style 로 남기고 나머지는 이 클래스에서. */
+.m-photo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 0;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+/* ─────────────────── 반응형: 좁은 화면(일반 폰 접힘) ───────────────────
+   폴드 펼침(≥601px)에는 영향 없음. 일반 폰(≤430px)에서만 적용.
+   - 페이지 헤더/리스트/카드 패딩 축소 → 콘텐츠 폭 확보
+   - 필터 탭·출고 사진 버튼 터치 영역 확대 (한 손 조작, iOS 44px 권장 근접) */
+@media (max-width: 430px) {
+  .m-page-header {
+    padding: 10px 12px 6px;
+  }
+  .m-page-title {
+    font-size: 17px;
+  }
+  .m-list {
+    padding: 10px 12px 14px;
+    gap: 8px;
+  }
+  .m-card {
+    padding: 12px;
+    border-radius: 10px;
+  }
+  .m-tab {
+    padding: 10px 14px;
+    font-size: 13px;
+  }
+  .m-tab-row {
+    gap: 6px;
+  }
+  .m-photo-btn {
+    padding: 10px 14px;
+    font-size: 12px;
+    min-height: 40px;
+  }
+}
+
 /* ─────────────────── 다크모드 토글 ─────────────────── */
 .m-theme-toggle {
   position: absolute;

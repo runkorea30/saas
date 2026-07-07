@@ -734,23 +734,14 @@ function OrderGroupCard({
           )}
           <button
             type="button"
+            className="m-photo-btn"
             onClick={(e) => {
               e.stopPropagation();
               onOpenPhoto(targetOrder.id, targetOrder.customer?.id ?? null);
             }}
             style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              fontSize: 11,
-              fontWeight: 600,
-              padding: '4px 10px',
-              borderRadius: 999,
-              border: 0,
-              cursor: 'pointer',
               background: hasPhoto ? 'var(--m-border)' : 'var(--m-primary)',
               color: hasPhoto ? 'var(--m-text)' : '#ffffff',
-              flex: '0 0 auto',
             }}
           >
             <Camera size={12} />
@@ -950,23 +941,14 @@ function OrderCard({
         )}
         <button
           type="button"
+          className="m-photo-btn"
           onClick={(e) => {
             e.stopPropagation();
             onOpenPhoto();
           }}
           style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            fontSize: 11,
-            fontWeight: 600,
-            padding: '4px 10px',
-            borderRadius: 999,
-            border: 0,
-            cursor: 'pointer',
             background: hasPhoto ? 'var(--m-border)' : 'var(--m-primary)',
             color: hasPhoto ? 'var(--m-text)' : '#ffffff',
-            flex: '0 0 auto',
           }}
         >
           <Camera size={12} />
