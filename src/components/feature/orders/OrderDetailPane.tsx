@@ -6,9 +6,10 @@
  * 🔴 CLAUDE.md §2: 공급가/VAT 계산은 calcSupplyAmount 단일 진입점.
  * 🟠 편집 모드: useOrderItems 별도 fetch + draft 임시 모델. 저장 후 ['order-items', orderId] / ['orders'] 양쪽 invalidate.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ExternalLink, FileText, MessageSquare, MoreHorizontal, Tag, Trash2 } from 'lucide-react';
+import { ChevronDown, Copy, FileText, MessageSquare, MoreHorizontal, Tag, Trash2 } from 'lucide-react';
+import { copyToClipboard } from '@/utils/clipboard';
 import {
   CARRIERS,
   DEFAULT_CARRIER,
@@ -46,6 +47,7 @@ export function OrderDetailPane({
 }) {
   const { companyId } = useCompany();
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
 
   /** 거래처가 이미지를 보내 생성된 빈 주문(품목 0건 + attachment_url 존재) 판별. */
   const isImagePendingOrder =
@@ -624,45 +626,53 @@ export function OrderDetailPane({
             주문추가
           </button>
         </div>
-        {/* 메모 — 헤더 정보 바로 아래 상단 고정. 어떤 주문 상태(이미지대기/편집)에서도
-             스크롤 없이 즉시 노출. trim() 검사로 공백만 있는 값도 배제. */}
+        {/* 메모 — 헤더 정보 바로 아래 상단 고정. 짧은 메모가 대다수라 라벨+내용 한 줄 배치.
+             긴 메모는 ellipsis 로 자르고 title 로 전체 내용 hover 노출. */}
         {order.memo && order.memo.trim().length > 0 && (
           <div
             style={{
               marginTop: 10,
               marginBottom: 4,
-              padding: '10px 12px',
+              padding: '8px 12px',
               background: 'var(--surface-2)',
               border: '1px solid var(--line-strong)',
               borderRadius: 8,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              minWidth: 0,
             }}
+            title={order.memo}
           >
-            <div
+            <MessageSquare
+              size={13}
+              strokeWidth={1.8}
+              style={{ color: 'var(--ink-2)', flexShrink: 0 }}
+            />
+            <span
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                marginBottom: 6,
                 fontSize: 12,
                 fontWeight: 600,
                 color: 'var(--ink-2)',
+                flexShrink: 0,
               }}
             >
-              <MessageSquare size={13} strokeWidth={1.8} />
-              메모
-            </div>
-            <p
+              메모:
+            </span>
+            <span
               style={{
-                margin: 0,
+                flex: 1,
+                minWidth: 0,
                 fontSize: 12.5,
-                lineHeight: 1.55,
+                lineHeight: 1.4,
                 color: 'var(--ink)',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
               }}
             >
               {order.memo}
-            </p>
+            </span>
           </div>
         )}
         {order.attachment_url && (
@@ -736,6 +746,33 @@ export function OrderDetailPane({
             if (rows.length === 0) return null;
             const cell = (v: unknown): string =>
               v == null ? '' : String(v);
+            // 🟠 TSV: 탭·개행 포함 시 공백 치환해 엑셀 붙여넣기 파괴 방지.
+            const tsvCell = (v: unknown): string =>
+              cell(v).replace(/[\t\r\n]+/g, ' ');
+            const handleCopyDirectShipping = async () => {
+              // 🟠 헤더 제외, 데이터 행만 TSV 로 복사. 엑셀 붙여넣기 후 자체 컬럼과 합쳐 사용.
+              const lines = rows.map((row) => [
+                tsvCell(row.name ?? (row as Record<string, unknown>)['받는사람'] ?? row.recipient),
+                tsvCell(row.zipcode ?? (row as Record<string, unknown>)['우편번호'] ?? row.zipCode),
+                tsvCell(row.address ?? (row as Record<string, unknown>)['주소']),
+                tsvCell(row.phone1 ?? (row as Record<string, unknown>)['연락처1']),
+                tsvCell(row.phone2 ?? (row as Record<string, unknown>)['연락처2']),
+                tsvCell(row.blank ?? (row as Record<string, unknown>)['메모']),
+                tsvCell(row.product ?? (row as Record<string, unknown>)['제품']),
+                tsvCell(row.customer ?? (row as Record<string, unknown>)['거래처']),
+                tsvCell(row.credit ?? (row as Record<string, unknown>)['신용']),
+              ].join('\t'));
+              const tsv = lines.join('\n');
+              try {
+                await copyToClipboard(tsv);
+                showToast({
+                  kind: 'success',
+                  text: '직송정보를 클립보드에 복사했습니다.',
+                });
+              } catch {
+                showToast({ kind: 'error', text: '복사에 실패했습니다.' });
+              }
+            };
             return (
               <div className="mt-2">
                 <div className="mb-1.5 flex items-center gap-1.5">
@@ -745,6 +782,21 @@ export function OrderDetailPane({
                   <span className="text-[11.5px] font-semibold text-ink">
                     직송 정보 ({rows.length}건)
                   </span>
+                  <button
+                    type="button"
+                    onClick={handleCopyDirectShipping}
+                    title="직송정보를 엑셀 붙여넣기용 TSV로 복사 (헤더 제외)"
+                    className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium hover:bg-surface-2 transition-colors"
+                    style={{
+                      color: 'var(--info)',
+                      borderColor: 'var(--info)',
+                      background: 'var(--surface)',
+                      fontFamily: 'var(--font-kr)',
+                    }}
+                  >
+                    <Copy size={11} strokeWidth={2} />
+                    복사
+                  </button>
                 </div>
                 <div className="overflow-x-auto rounded border border-line">
                   <table className="w-full text-[11px]">
@@ -1541,136 +1593,147 @@ function TrackingNumberSection({
         송장번호{saving && ' · 저장중…'}
       </div>
 
-      {rows.map((row, idx) => {
-        const savedRow = savedSnapshot[idx];
-        const isPersisted =
-          !!savedRow &&
-          savedRow.carrier === row.carrier &&
-          savedRow.number === row.number &&
-          row.number.trim().length > 0;
-        const trackable =
-          isPersisted && !!getTrackingUrl(row.carrier, row.number);
-        return (
-          <div
-            key={idx}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            <select
-              value={row.carrier}
-              onChange={(e) =>
-                handleCarrierChange(idx, e.target.value as CarrierCode)
-              }
-              style={{
-                height: 28,
-                padding: '0 6px',
-                fontSize: 12,
-                border: '1px solid var(--tracking-input-border)',
-                borderRadius: 4,
-                background: 'var(--tracking-input-bg)',
-                color: 'var(--tracking-input-color)',
-                outline: 'none',
-                minWidth: 96,
-              }}
-            >
-              {CARRIERS.map((c) => (
-                <option key={c.code} value={c.code}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-            <input
-              type="text"
-              value={row.number}
-              onChange={(e) => handleNumberChange(idx, e.target.value)}
-              placeholder="운송장 번호 입력"
-              style={{
-                flex: 1,
-                height: 28,
-                padding: '0 8px',
-                fontSize: 12,
-                border: '1px solid var(--tracking-input-border)',
-                borderRadius: 4,
-                background: 'var(--tracking-input-bg)',
-                color: 'var(--tracking-input-color)',
-                outline: 'none',
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => handleOpenTracking(row)}
-              disabled={!trackable}
-              title={
-                trackable
-                  ? `${getCarrierLabel(row.carrier)} 조회 새 탭에서 열기`
-                  : '저장된 송장번호 + 조회 가능 택배사일 때만 활성'
-              }
-              style={{
-                width: 26,
-                height: 26,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                border: 'none',
-                background: 'transparent',
-                color: trackable ? '#2563EB' : '#CBD5E1',
-                cursor: trackable ? 'pointer' : 'not-allowed',
-              }}
-            >
-              <ExternalLink size={13} strokeWidth={1.8} />
-            </button>
-            <button
-              type="button"
-              onClick={() => handleRemoveRow(idx)}
-              style={{
-                width: 22,
-                height: 22,
-                border: 'none',
-                background: 'transparent',
-                color: '#94A3B8',
-                cursor: 'pointer',
-                fontSize: 13,
-              }}
-              title="삭제"
-            >
-              ×
-            </button>
-          </div>
-        );
-      })}
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2 }}>
-        <button
-          type="button"
-          onClick={handleAddRow}
-          style={{
-            fontSize: 11,
-            color: '#2563EB',
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            padding: '2px 0',
-          }}
-        >
-          + 송장번호 추가
-        </button>
-        <div style={{ flex: 1 }} />
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+        }}
+      >
+        {rows.map((row, idx) => {
+          const savedRow = savedSnapshot[idx];
+          const isPersisted =
+            !!savedRow &&
+            savedRow.carrier === row.carrier &&
+            savedRow.number === row.number &&
+            row.number.trim().length > 0;
+          const trackable =
+            isPersisted && !!getTrackingUrl(row.carrier, row.number);
+          return (
+            <Fragment key={idx}>
+              <select
+                value={row.carrier}
+                onChange={(e) =>
+                  handleCarrierChange(idx, e.target.value as CarrierCode)
+                }
+                style={{
+                  height: 28,
+                  padding: '0 6px',
+                  fontSize: 12,
+                  border: '1px solid var(--tracking-input-border)',
+                  borderRadius: 4,
+                  background: 'var(--tracking-input-bg)',
+                  color: 'var(--tracking-input-color)',
+                  outline: 'none',
+                  minWidth: 96,
+                }}
+              >
+                {CARRIERS.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={row.number}
+                onChange={(e) => handleNumberChange(idx, e.target.value)}
+                placeholder="운송장 번호 입력"
+                style={{
+                  width: 160,
+                  flex: '0 0 auto',
+                  height: 28,
+                  padding: '0 8px',
+                  fontSize: 12,
+                  border: '1px solid var(--tracking-input-border)',
+                  borderRadius: 4,
+                  background: 'var(--tracking-input-bg)',
+                  color: 'var(--tracking-input-color)',
+                  outline: 'none',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => handleOpenTracking(row)}
+                disabled={!trackable}
+                title={
+                  trackable
+                    ? `${getCarrierLabel(row.carrier)} 조회 새 탭에서 열기`
+                    : '저장된 송장번호 + 조회 가능 택배사일 때만 활성'
+                }
+                style={{
+                  height: 26,
+                  padding: '0 8px',
+                  fontSize: 11.5,
+                  border: '1px solid var(--tracking-input-border)',
+                  borderRadius: 4,
+                  background: 'transparent',
+                  color: trackable ? 'var(--info)' : 'var(--ink-3)',
+                  cursor: trackable ? 'pointer' : 'not-allowed',
+                  opacity: trackable ? 1 : 0.6,
+                  fontFamily: 'var(--font-kr)',
+                  fontWeight: 500,
+                }}
+              >
+                배송추적
+              </button>
+              <button
+                type="button"
+                onClick={() => handleRemoveRow(idx)}
+                title="삭제"
+                style={{
+                  height: 26,
+                  padding: '0 8px',
+                  fontSize: 11.5,
+                  border: '1px solid var(--tracking-input-border)',
+                  borderRadius: 4,
+                  background: 'transparent',
+                  color: 'var(--danger)',
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font-kr)',
+                }}
+              >
+                삭제
+              </button>
+            </Fragment>
+          );
+        })}
         <button
           type="button"
           onClick={handleSaveClick}
           disabled={!isDirty || saving}
+          // 🔴 이전 구현: dirty 시 background=var(--ink), disabled 시 var(--ink-3) →
+          //    다크모드에서 --ink 가 라이트 계열(#E8E8E6) 이라 흰 텍스트와 대비 소실 = "글자 안 보임".
+          //    프로젝트 표준 btn-base.primary 클래스 채택 (배경 --brand + cream 텍스트, disabled opacity 0.5).
+          //    사이즈만 컴팩트하게 인라인 오버라이드.
+          className="btn-base primary"
           style={{
             height: 26,
             padding: '0 12px',
             fontSize: 11.5,
-            fontWeight: 600,
-            color: '#fff',
-            background: !isDirty || saving ? '#94A3B8' : '#1C1917',
-            border: 'none',
             borderRadius: 4,
-            cursor: !isDirty || saving ? 'not-allowed' : 'pointer',
+            fontFamily: 'var(--font-kr)',
           }}
         >
           {saving ? '저장중…' : '저장하기'}
+        </button>
+        <button
+          type="button"
+          onClick={handleAddRow}
+          style={{
+            height: 26,
+            padding: '0 8px',
+            fontSize: 11.5,
+            color: 'var(--info)',
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            fontFamily: 'var(--font-kr)',
+            fontWeight: 500,
+          }}
+        >
+          + 송장번호 추가
         </button>
       </div>
     </div>
