@@ -12,7 +12,8 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Filter, LogOut } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Filter, LogOut, RefreshCw } from 'lucide-react';
 import { isSectionActive, navSections } from './navConfig';
 import { ThemeToggle } from './ThemeToggle';
 import { useCompany } from '@/hooks/useCompany';
@@ -40,6 +41,18 @@ export function TopNav({ onLogout }: { onLogout: () => Promise<void> }) {
     usePurchaseOrderExcluded();
   const [filterOpen, setFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await queryClient.invalidateQueries();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const { estimatedUsd, categories, isLoading } = useOrderNeedEstimate(
     companyId,
@@ -227,6 +240,21 @@ export function TopNav({ onLogout }: { onLogout: () => Promise<void> }) {
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              void handleRefresh();
+            }}
+            disabled={refreshing}
+            className="inline-flex items-center justify-center h-7 w-7 rounded-md border border-line text-ink-3 hover:text-ink hover:bg-surface-2 transition-colors disabled:cursor-wait"
+            title="새로고침"
+            aria-label="새로고침"
+          >
+            <RefreshCw
+              size={12}
+              className={refreshing ? 'animate-spin' : undefined}
+            />
+          </button>
           <ThemeToggle />
           <button
             type="button"

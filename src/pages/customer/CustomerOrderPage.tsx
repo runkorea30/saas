@@ -6,7 +6,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, LogOut, X } from 'lucide-react';
+import { Loader2, LogOut, RefreshCw, X } from 'lucide-react';
 import { useOrderPhotosByOrders, type OrderPhoto } from '@/hooks/queries/useOrderPhotos';
 import type { ShippingInfoRow } from '@/components/feature/orders/InvoicePrintView';
 // xlsx-js-style 은 SheetJS xlsx 의 fork — 동일 API + 셀 스타일(s) 지원.
@@ -338,14 +338,26 @@ function CustomerOrderShell({
   onLogout: () => void;
 }) {
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const [mode, setMode] = useState<'main' | 'input'>('main');
   const [fontScale, setFontScale] = useState(1);
+  const [refreshing, setRefreshing] = useState(false);
   // 메인 → 직접입력 전환 시 LeftPanel 이 넘겨준 message/shipping 을 임시 보관.
   //   CustomerOrderInput 에 initialMemo / initialShipping 으로 주입.
   const [handoffMemo, setHandoffMemo] = useState<string>('');
   const [handoffShipping, setHandoffShipping] = useState<ShippingRow[] | undefined>(
     undefined,
   );
+
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await queryClient.invalidateQueries();
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   if (mode === 'input') {
     return (
@@ -364,6 +376,10 @@ function CustomerOrderShell({
         customer={customer}
         fontScale={fontScale}
         onFontScaleChange={setFontScale}
+        onRefresh={() => {
+          void handleRefresh();
+        }}
+        refreshing={refreshing}
         onLogout={() => {
           onLogout();
           showToast({ kind: 'info', text: '로그아웃되었습니다.' });
@@ -406,11 +422,15 @@ function Header({
   customer,
   fontScale,
   onFontScaleChange,
+  onRefresh,
+  refreshing,
   onLogout,
 }: {
   customer: CustomerSession;
   fontScale: number;
   onFontScaleChange: (v: number) => void;
+  onRefresh: () => void;
+  refreshing: boolean;
   onLogout: () => void;
 }) {
   return (
@@ -502,6 +522,31 @@ function Header({
             );
           })}
         </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={refreshing}
+          title="새로고침"
+          aria-label="새로고침"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 32,
+            height: 32,
+            background: 'var(--p-surface)',
+            border: '1px solid var(--p-line-strong)',
+            borderRadius: 6,
+            cursor: refreshing ? 'wait' : 'pointer',
+            color: 'var(--p-ink-2)',
+            padding: 0,
+          }}
+        >
+          <RefreshCw
+            size={13}
+            className={refreshing ? 'animate-spin' : undefined}
+          />
+        </button>
         <PortalThemeToggle />
         <button
           type="button"
