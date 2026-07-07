@@ -921,7 +921,8 @@ function LeftPanel({
       }
 
       // 3) orders + order_items INSERT — 공급가 기준
-      //    엑셀에 supply_price 가 있으면 그대로 사용, 0/누락이면 등급 기반 계산으로 폴백.
+      //    엑셀에 supply_price 가 있으면 그대로 사용, 0/누락이면 등급 기반 계산.
+      //    🔴 판매가 폴백 금지 — 등급가 미설정 시 아래에서 저장 차단.
       interface MatchedItem extends ParsedExcelItem {
         product_id: string;
         unit_price_resolved: number;
@@ -944,6 +945,22 @@ function LeftPanel({
             unit_price_resolved: unitPrice,
           };
         });
+
+      // 🔴 등급가 미설정 검출 — 엑셀 supply_price 도 0 이고 등급 기반 계산도 0 이면
+      //    unit_price=0 으로 저장되는 것을 방지. alert 로 목록 노출 후 저장 중단.
+      //    파트너 포털이므로 문구는 "공급자에게 문의" — 거래처는 제품 관리 접근 불가.
+      const missingGrade = matched.filter((it) => it.unit_price_resolved === 0);
+      if (missingGrade.length > 0) {
+        const effectiveGrade =
+          (customer.grade ?? '').toString().toUpperCase() || '?';
+        const list = missingGrade
+          .map((it) => `- ${it.name} (${it.code})`)
+          .join('\n');
+        alert(
+          `아래 제품은 [${effectiveGrade}] 등급 공급가가 설정되지 않았습니다 — 공급자에게 문의해주세요.\n\n${list}`,
+        );
+        return;
+      }
       // 직송 행 — 사용자가 입력한 행만 추출. 1개 이상이면 직송 주문 으로 간주.
       const filledShipping = filledShippingForInsert(
         shipping,

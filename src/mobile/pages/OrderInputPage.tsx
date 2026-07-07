@@ -39,13 +39,13 @@ function fmtWon(n: number): string {
   return n.toLocaleString('ko-KR');
 }
 
+/**
+ * 공급가 계산 — grade 미지정 시 'a' 폴백.
+ * 🔴 판매가 폴백 금지 — 등급가 누락을 감춰 정가 청구 유발했음(2026-07-08).
+ *    grade rate 0/null → 0 반환. handleSave 에서 검출해 저장 차단.
+ */
 function computeSupply(p: Product, grade: string | null | undefined): number {
-  const supply = calcSupplyPriceByCustomerGrade(
-    p.sell_price,
-    grade ?? 'a',
-    p,
-  );
-  return supply > 0 ? supply : p.sell_price;
+  return calcSupplyPriceByCustomerGrade(p.sell_price, grade ?? 'a', p);
 }
 
 export function OrderInputPage() {
@@ -131,6 +131,24 @@ export function OrderInputPage() {
 
   const handleSave = async () => {
     if (!canSave || !companyId) return;
+
+    // 🔴 등급가 미설정 검출 — 판매가 폴백 없이 저장 차단.
+    //    products.grade_a~e 가 0/null 이면 unit_price=0 이 되므로 저장 진입 전 감지.
+    const effectiveGrade = (selectedCustomer?.grade ?? 'a').toUpperCase();
+    const missingRows = validRows.filter((r) => r.unit_price === 0);
+    if (missingRows.length > 0) {
+      const list = missingRows
+        .map((r) => {
+          const p = products.find((x) => x.id === r.product_id);
+          return `- ${p?.name ?? '(제품)'} (${p?.code ?? r.product_id})`;
+        })
+        .join('\n');
+      alert(
+        `이 제품은 [${effectiveGrade}] 등급 공급가가 설정되지 않았습니다 — 제품 관리에서 먼저 입력해주세요.\n\n${list}`,
+      );
+      return;
+    }
+
     setSaving(true);
     try {
       const { error } = await supabase.rpc('insert_order', {

@@ -121,15 +121,16 @@ function writeRecent(id: string): string[] {
 
 /**
  * 공급가 계산 — grade 미지정 시 DEFAULT_CUSTOMER_GRADE 폴백.
- * grade rate(`products.grade_a..e`) 가 null/0 이면 sell_price 폴백 — 매출 0원 저장 방지.
+ * 🔴 판매가 폴백 금지 — 이전 sell_price 폴백은 등급가 누락을 감춰 정가 청구
+ *    버그를 유발했음(2026-07-08 7993M2PK). grade rate 0/null 이면 0 반환하고
+ *    handleSave 에서 검출해 저장 자체를 차단 → 사용자에게 등급가 입력 요구.
  */
 function computeSupply(product: Product, grade: string | null | undefined): number {
-  const supply = calcSupplyPriceByCustomerGrade(
+  return calcSupplyPriceByCustomerGrade(
     product.sell_price,
     grade ?? DEFAULT_CUSTOMER_GRADE,
     product,
   );
-  return supply > 0 ? supply : product.sell_price;
 }
 
 export function OrderEntryPage() {
@@ -580,7 +581,7 @@ export function OrderEntryPage() {
     const itemsForRpc = adjusted;
 
     // 🟠 저장 직전 방어용 공급가 재계산 — applyProduct/Excel 파싱에서 누락된 경우 대비.
-    //    computeSupply 단일 진입점 사용 (grade 폴백 + sell_price 폴백 내장).
+    //    computeSupply 단일 진입점 사용 (grade 폴백만, 판매가 폴백 없음).
     const productById = new Map(products.map((p) => [p.id, p]));
     const finalItems = itemsForRpc.map((a) => {
       const product = productById.get(a.row.product_id);
@@ -588,6 +589,23 @@ export function OrderEntryPage() {
       const effective = computeSupply(product, selectedCustomer?.grade);
       return { ...a, row: { ...a.row, unit_price: effective } };
     });
+
+    // 🔴 등급가 미설정 검출 — 판매가 폴백 없이 저장 차단.
+    //    products.grade_a~e 가 0/null 이면 unit_price=0 이 되므로, 저장 진입 전에
+    //    감지해 사용자에게 등급가 입력을 요구. 반품행도 동일 검증 (매출 0원 방지).
+    const effectiveGrade = (
+      selectedCustomer?.grade ?? DEFAULT_CUSTOMER_GRADE
+    ).toUpperCase();
+    const missingGrade = finalItems.filter((a) => a.row.unit_price === 0);
+    if (missingGrade.length > 0) {
+      const list = missingGrade
+        .map((a) => `- ${a.row.product_name} (${a.row.product_code})`)
+        .join('\n');
+      alert(
+        `이 제품은 [${effectiveGrade}] 등급 공급가가 설정되지 않았습니다 — 제품 관리에서 먼저 입력해주세요.\n\n${list}`,
+      );
+      return;
+    }
 
     // 🔴 택배비 자동추가 — 거래처 포털과 동일한 4규칙 적용.
     //    이 주문에 이미 택배비 코드가 포함되어 있으면(직접 입력) 자동판단 생략.
