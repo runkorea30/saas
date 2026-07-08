@@ -36,9 +36,9 @@ import { InventoryAuditPage } from '@/pages/inventory/InventoryAuditPage';
 import { CustomerOrderPage } from '@/pages/customer/CustomerOrderPage';
 import { BankingPage } from '@/pages/finance/BankingPage';
 import { ReceivablesPage } from '@/pages/finance/ReceivablesPage';
+import { BillingPage } from '@/pages/finance/BillingPage';
 import { TaxInvoicesPage } from '@/pages/finance/TaxInvoicesPage';
 import { IncomeStatementPage } from '@/pages/finance/IncomeStatementPage';
-import { BillingPage } from '@/pages/sales/BillingPage';
 import { ShippingInvoicesPage } from '@/pages/sales/ShippingInvoicesPage';
 import { DocumentsPage } from '@/pages/documents/DocumentsPage';
 import { MobileApp } from '@/mobile/MobileApp';
@@ -103,7 +103,6 @@ function App() {
             <Route path="order-entry" element={<OrderEntryPage />} />
             <Route path="analysis" element={<SalesAnalysisPage />} />
             <Route path="invoices" element={<ShippingInvoicesPage />} />
-            <Route path="billing" element={<BillingPage />} />
           </Route>
 
           <Route path="inventory">
@@ -119,6 +118,7 @@ function App() {
             <Route index element={<Navigate to="/finance/receivables" replace />} />
             <Route path="receivables" element={<ReceivablesPage />} />
             <Route path="banking" element={<BankingPage />} />
+            <Route path="billing" element={<BillingPage />} />
             <Route path="tax-invoices" element={<TaxInvoicesPage />} />
             <Route path="pnl" element={<IncomeStatementPage />} />
           </Route>

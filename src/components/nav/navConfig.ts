@@ -40,7 +40,6 @@ export const navSections: NavSection[] = [
       { path: '/sales/order-entry', label: '수동주문입력' },
       { path: '/sales/analysis', label: '매출분석' },
       { path: '/sales/invoices', label: '송장대장' },
-      { path: '/sales/billing', label: '청구서' },
     ],
   },
   {
@@ -62,6 +61,7 @@ export const navSections: NavSection[] = [
     items: [
       { path: '/finance/receivables', label: '미수금' },
       { path: '/finance/banking', label: '은행거래' },
+      { path: '/finance/billing', label: '청구서' },
       { path: '/finance/tax-invoices', label: '세금계산서' },
       { path: '/finance/pnl', label: '손익계산서' },
     ],
