@@ -10,7 +10,6 @@
  * 🔴 금액: supply_amount = Math.floor(total/1.1) (훅 내부 splitAmounts).
  */
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import {
   ChevronLeft,
   ChevronRight,
@@ -21,7 +20,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useCompany } from '@/hooks/useCompany';
-import { supabase } from '@/lib/supabase';
+import { useCompanyProfile, type CompanyProfile } from '@/hooks/queries/useCompanyProfile';
 import {
   useTaxInvoiceRows,
   useCreateTaxInvoice,
@@ -32,33 +31,6 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
 import { fmtWon } from '@/components/feature/orders/primitives';
 import type { TaxInvoice, TaxInvoiceRow } from '@/types/taxInvoice';
-
-// ───────────────────────────────────────────────────────────
-// 공급자(자사) 정보 쿼리 — 엑셀 다운로드용
-// ───────────────────────────────────────────────────────────
-
-interface SupplierInfo {
-  id: string;
-  name: string;
-  business_number: string | null;
-}
-
-function useSupplierCompany(companyId: string | null) {
-  return useQuery<SupplierInfo | null>({
-    queryKey: ['supplier-company', companyId],
-    enabled: Boolean(companyId),
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('companies')
-        .select('id, name, business_number')
-        .eq('id', companyId!)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
-    },
-    staleTime: Infinity,
-  });
-}
 
 // ───────────────────────────────────────────────────────────
 // 국세청 전자세금계산서 일괄발급 엑셀 원서식 상수 (1~6행)
@@ -142,7 +114,7 @@ const HEADER_ROWS: (string | number)[][] = [
 //
 // 컬럼 매핑 (HEADER_ROWS Row 6 과 1:1 대응):
 //   A:invoice_type  B:작성일자(YYYYMMDD)  C:공급자 등록번호  D:종사업장(빈칸)
-//   E:공급자 상호  F~J: 빈칸(성명/주소/업태/종목/이메일)
+//   E:공급자 상호  F:성명(ceo_name)  G:사업장주소  H:업태  I:종목  J:이메일(tax_email)
 //   K:공급받는자 등록번호  L:종사업장(빈칸)  M:공급받는자 상호
 //   N:성명(ceo_name)  O:사업장주소  P:업태  Q:종목  R:이메일1  S:이메일2(빈칸)
 //   T:공급가액 합계  U:세액 합계  V:비고(빈칸)
@@ -154,21 +126,24 @@ const HEADER_ROWS: (string | number)[][] = [
 function buildExcelRow(
   row: TaxInvoiceRow,
   invoice: TaxInvoice,
-  supplierName: string,
-  supplierBrnRaw: string,
+  supplier: CompanyProfile,
   issueDateNum: number,
   dayStr: string,
 ): (string | number)[] {
   const buyerBrn = (row.subject.business_registration_number ?? '').replace(/-/g, '');
-  const supplierBrn = supplierBrnRaw.replace(/-/g, '');
+  const supplierBrn = (supplier.business_number ?? '').replace(/-/g, '');
 
   return [
     invoice.invoice_type || '01',                  // A
     issueDateNum,                                  // B (숫자)
     supplierBrn,                                   // C
     '',                                            // D
-    supplierName,                                  // E
-    '', '', '', '', '',                            // F~J
+    supplier.name,                                 // E
+    supplier.ceo_name ?? '',                        // F
+    supplier.business_address ?? '',                // G
+    supplier.business_type ?? '',                    // H
+    supplier.business_category ?? '',                // I
+    supplier.tax_email ?? '',                        // J
     buyerBrn,                                      // K
     '',                                            // L
     row.subject.name,                              // M
@@ -215,7 +190,7 @@ export function TaxInvoicesPage() {
 
   // ───── 데이터 ─────
   const rowsQuery = useTaxInvoiceRows(companyId, year, month);
-  const supplierQuery = useSupplierCompany(companyId);
+  const supplierQuery = useCompanyProfile(companyId);
   const createMut = useCreateTaxInvoice(companyId);
   const bulkMut = useCreateTaxInvoicesBulk(companyId);
   const deleteMut = useDeleteTaxInvoice(companyId);
@@ -366,7 +341,7 @@ export function TaxInvoicesPage() {
     const dayStr = String(lastDay).padStart(2, '0');
 
     const dataRows = issuedRows.map((r) =>
-      buildExcelRow(r, r.invoice!, supplier.name, supplier.business_number!, issueDateNum, dayStr),
+      buildExcelRow(r, r.invoice!, supplier, issueDateNum, dayStr),
     );
 
     // 1~6행 원서식 헤더 + 7행~ 실제 데이터
