@@ -34,9 +34,18 @@ import {
 
 // 주문서/인보이스/OPS 제품 코드 간 매칭용 정규화.
 // 공백·하이픈 제거 + 소문자 통일. (leading-zero 는 제거하지 않음 — 다른 SKU 가 충돌할 수 있음.)
+// 🔴 (2026-07-10) 끝에 붙는 점(.) 제거 추가 — 인보이스 PDF 파싱 시 코드가 잘리면
+//    "72204000H..." 처럼 끝에 점이 붙어 나오는 경우가 있음. 이 점이 안 지워지면
+//    OCR 오독 관리 탭에 등록한 교정 규칙("72204000h")과 문자열이 달라져 매칭에
+//    실패한다 (DB 실측으로 원인 확정).
 export function normalizeCode(code: string | number | null | undefined): string {
   if (code === null || code === undefined) return '';
-  return String(code).trim().replace(/-/g, '').replace(/\s/g, '').toLowerCase();
+  return String(code)
+    .trim()
+    .replace(/-/g, '')
+    .replace(/\s/g, '')
+    .replace(/\.+$/, '')
+    .toLowerCase();
 }
 
 // ───── 비교 결과 타입 ─────
