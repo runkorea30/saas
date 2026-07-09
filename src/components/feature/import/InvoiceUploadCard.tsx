@@ -34,7 +34,7 @@ import {
 
 // 주문서/인보이스/OPS 제품 코드 간 매칭용 정규화.
 // 공백·하이픈 제거 + 소문자 통일. (leading-zero 는 제거하지 않음 — 다른 SKU 가 충돌할 수 있음.)
-function normalizeCode(code: string | number | null | undefined): string {
+export function normalizeCode(code: string | number | null | undefined): string {
   if (code === null || code === undefined) return '';
   return String(code).trim().replace(/-/g, '').replace(/\s/g, '').toLowerCase();
 }
@@ -300,6 +300,32 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     return map;
   }, [products]);
 
+  // 🆕 OCR 오독 코드 교정 — "OCR 오독 관리" 탭(CodeCorrectionsTab)에서 등록한
+  //    잘못된 코드 → 올바른 코드 매핑. compareOrderInvoice 에서 인보이스 코드 매칭 전에
+  //    선(先) 치환한다. code_corrections 테이블은 자동생성 타입에 아직 미반영이라
+  //    좁은 캐스팅으로 우회.
+  const codeCorrectionsQuery = useQuery({
+    queryKey: ['code-corrections', companyId],
+    enabled: Boolean(companyId),
+    queryFn: async () => {
+      const { data, error } = await (
+        supabase as unknown as { from: (t: string) => any }
+      )
+        .from('code_corrections')
+        .select('wrong_code, correct_code')
+        .eq('company_id', companyId);
+      if (error) throw error;
+      return (data ?? []) as Array<{ wrong_code: string; correct_code: string }>;
+    },
+  });
+  const codeCorrections = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of codeCorrectionsQuery.data ?? []) {
+      map.set(c.wrong_code, c.correct_code);
+    }
+    return map;
+  }, [codeCorrectionsQuery.data]);
+
   const canCompare =
     Boolean(orderFile && invoiceFile) &&
     !parsing &&
@@ -539,7 +565,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
         throw new Error('인보이스 데이터가 없습니다. 인보이스를 다시 업로드해 주세요.');
       }
 
-      const rows = compareOrderInvoice(orderRows, invoice, productNameByCode, productCategoryByCode);
+      const rows = compareOrderInvoice(orderRows, invoice, productNameByCode, productCategoryByCode, codeCorrections);
       setComparison({
         rows,
         orderRows,
@@ -763,6 +789,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
         },
         productNameByCode,
         productCategoryByCode,
+        codeCorrections,
       );
       return {
         ...prev,
@@ -2086,6 +2113,7 @@ function rebuildComparisonFromEdits(
   },
   productNameByCode: ReadonlyMap<string, string>,
   productCategoryByCode: ReadonlyMap<string, string>,
+  codeCorrections: ReadonlyMap<string, string> = new Map(),
 ): {
   rows: ComparisonRow[];
   orderRows: OrderSheetRow[];
@@ -2136,6 +2164,7 @@ function rebuildComparisonFromEdits(
     invoice,
     productNameByCode,
     productCategoryByCode,
+    codeCorrections,
   );
   return { rows, orderRows: revisedOrderRows, invoiceRows: revisedInvoiceRows };
 }
@@ -2145,6 +2174,7 @@ function compareOrderInvoice(
   invoice: InvoiceParsed,
   productNameByCode: ReadonlyMap<string, string> = new Map(),
   productCategoryByCode: ReadonlyMap<string, string> = new Map(),
+  codeCorrections: ReadonlyMap<string, string> = new Map(),
 ): ComparisonRow[] {
   // 정규화된 코드 → 주문 행. (대소문자/공백/하이픈 차이로 매칭 누락되던 문제 해결)
   const orderByCode = new Map<string, OrderSheetRow>();
@@ -2164,7 +2194,10 @@ function compareOrderInvoice(
 
   // 인보이스 기준 1차 패스
   for (const inv of invoice.rows) {
-    const normInv = normalizeCode(inv.item_code);
+    // 🆕 OCR 오독 교정 우선 적용 — "OCR 오독 관리" 탭에 등록된 잘못된 코드는
+    //    매칭 전에 올바른 코드로 치환한다. (화면에 표시되는 원본 코드는 그대로 유지)
+    const rawNormInv = normalizeCode(inv.item_code);
+    const normInv = codeCorrections.get(rawNormInv) ?? rawNormInv;
     let ord = orderByCode.get(normInv);
     let prefixMatched = false;
     let matchedNorm = normInv;

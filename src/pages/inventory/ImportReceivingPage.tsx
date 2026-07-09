@@ -44,6 +44,7 @@ import { ImportRowsTable } from '@/components/feature/import/ImportRowsTable';
 import { InvoiceUploadCard } from '@/components/feature/import/InvoiceUploadCard';
 import { RecentInvoicesSection } from '@/components/feature/import/RecentInvoicesSection';
 import { CustomsDocTab } from '@/components/feature/import/CustomsDocTab';
+import { CodeCorrectionsTab } from '@/components/feature/import/CodeCorrectionsTab';
 import { parseInvoicePDF } from '@/utils/invoiceParser';
 
 // ───────────────────────────────────────────────────────────
@@ -70,7 +71,7 @@ function createEmptyRow(): ImportRowInput {
   };
 }
 
-type TabKey = 'verification' | 'customs' | 'receiving' | 'portal';
+type TabKey = 'verification' | 'customs' | 'receiving' | 'portal' | 'code-corrections';
 
 const DEFAULT_HEADER: ImportInvoiceHeader = {
   invoiceNumber: '',
@@ -487,9 +488,52 @@ export function ImportReceivingPage() {
   };
 
   // ───── 초기화 ─────
+  //
+  // 🔴 (2026-07-06) 버그수정: 이전엔 로컬 rowInputs 만 리셋했더니 새로고침 시
+  //    invoice_verifications.transfer_rows 에서 다시 복원되어 데이터가 되돌아왔음.
+  //    이제 현재 폼에 로드된 세션(가장 최근 미확정 & transfer_saved_at DESC 순 1건)
+  //    의 transfer_rows/transfer_saved_at 을 DB 에서도 비워 새로고침 후에도 유지.
+  //    다른 미확정 세션은 절대 건드리지 않음 (id 로 좁힘).
   const onConfirmReset = () => {
     setRowInputs([createEmptyRow()]);
     setConfirmReset(false);
+    if (!companyId) return;
+    void (async () => {
+      try {
+        // 페이지 로드에서 복원한 것과 동일한 세션 = 가장 최근 미확정 + 이관본 있는 행.
+        const { data: target, error: selErr } = await supabase
+          .from('invoice_verifications')
+          .select('id')
+          .eq('company_id', companyId)
+          .is('resolved_at', null)
+          .order('transfer_saved_at', { ascending: false, nullsFirst: false })
+          .limit(1)
+          .maybeSingle();
+        if (selErr) throw selErr;
+        if (!target?.id) return; // 활성 세션 없음 — 로컬 리셋만
+        const { error: updErr } = await supabase
+          .from('invoice_verifications')
+          .update({
+            transfer_rows: [] as unknown as Json,
+            transfer_saved_at: null,
+          })
+          .eq('id', target.id);
+        if (updErr) throw updErr;
+        queryClient.invalidateQueries({
+          queryKey: ['invoice-verifications-pending', companyId],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ['incoming-quantities', companyId],
+        });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('[onConfirmReset]', e);
+        showToast({
+          kind: 'error',
+          text: `DB 초기화 실패: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      }
+    })();
   };
 
   const busy = createMut.isPending;
@@ -752,6 +796,11 @@ export function ImportReceivingPage() {
             onClick={() => setActiveTab('portal')}
             label="거래처 안내 설정"
           />
+          <TabButton
+            active={activeTab === 'code-corrections'}
+            onClick={() => setActiveTab('code-corrections')}
+            label="OCR 오독 관리"
+          />
         </div>
 
         {productsQuery.error && (
@@ -789,6 +838,8 @@ export function ImportReceivingPage() {
         )}
 
         {activeTab === 'customs' && <CustomsDocTab />}
+
+        {activeTab === 'code-corrections' && <CodeCorrectionsTab />}
 
         {activeTab === 'receiving' && (
           <>
