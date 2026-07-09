@@ -683,14 +683,22 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       const safeQty = Number.isFinite(newQty) ? Math.max(0, Math.floor(newQty)) : 0;
       const nextRows = prev.rows.map((row) => {
         if (row.id !== rowId) return row;
+        // 🔴 주문수량을 직접 입력한다는 건 "이 행에 주문 데이터가 생겼다"는 뜻이다.
+        //    orderPrice 가 아직 undefined(=애초에 주문 자체가 없던 인보이스만 행)로
+        //    남아있으면 calcStatus 가 금액 비교를 스킵해버려, 실제 금액이 달라도
+        //    수량만 같으면 "일치"로 오판정하는 버그가 있었다(2026-07-10 실측:
+        //    73204141 사례). 화면엔 이미 "0"으로 표시되고 있었으므로 시각적 변화
+        //    없이 내부값만 0으로 확정해 금액 비교가 정상 동작하게 한다.
+        const nextOrderPrice = row.orderPrice ?? 0;
         return {
           ...row,
           orderQty: safeQty,
+          orderPrice: nextOrderPrice,
           status: calcStatus(
             safeQty,
             row.invoiceQty,
             row.invoicePrice,
-            row.orderPrice,
+            nextOrderPrice,
             row.isInOps,
           ),
         };
