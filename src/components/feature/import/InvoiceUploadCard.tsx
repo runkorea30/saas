@@ -272,6 +272,12 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
   const [dbLoaded, setDbLoaded] = useState(false);
   // DB 자동 저장 useEffect 가 마운트 직후/DB 복원 직후에 한 번 트리거되는 것을 막기 위함.
   const skipNextAutoSave = useRef(true);
+  // 🔴 레이스 컨디션 방지: 마운트 시 DB 복원 fetch가 진행 중인 상태에서 사용자가
+  //    바로 파일을 올리고 "비교 시작"을 눌러버리면, 복원 fetch가 나중에 도착해
+  //    방금 만든 비교 결과를 예전 데이터로 덮어써버리는 문제가 있었다(2026-07-10 실측:
+  //    수동 업로드 + 비교 후 탭 전환 시 파일이 사라지는 버그). handleCompare 시작 시
+  //    이 플래그를 true 로 세워, 늦게 도착하는 복원 결과는 무시하도록 한다.
+  const restoreObsolete = useRef(false);
   /**
    * 현재 편집 중인 세션 행의 PK id.
    * 🔴 스키마 변경(2026-07-05) 이후 다중 세션 지원. 회사당 유일하지 않으므로
@@ -411,6 +417,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     const current = pendingSessions[0];
     if (!current) return; // 미확정 세션 없음 — 빈 상태 유지 (첫 저장 시 INSERT)
     setSessionId(current.id);
+    restoreObsolete.current = false;
 
     void supabase
       .from('invoice_verifications')
@@ -418,7 +425,10 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       .eq('id', current.id)
       .maybeSingle()
       .then(({ data }) => {
-        if (!data) return;
+        // 이 fetch 가 도착하기 전에 사용자가 이미 새로 비교를 시작했다면
+        // (handleCompare 가 restoreObsolete 를 true 로 세움), 낡은 복원 데이터로
+        // 방금 만든 비교 결과를 덮어쓰지 않도록 무시한다.
+        if (!data || restoreObsolete.current) return;
         // 복원으로 인한 setComparison/setActiveTabs 으로 자동저장 useEffect 가 다시
         // 트리거되어 방금 로드한 데이터를 그대로 재저장하는 것을 막음.
         skipNextAutoSave.current = true;
@@ -444,13 +454,14 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
    */
   const switchToSession = async (targetId: string) => {
     if (!targetId || targetId === sessionId) return;
+    restoreObsolete.current = false;
     const { data, error } = await supabase
       .from('invoice_verifications')
       .select('*')
       .eq('id', targetId)
       .maybeSingle();
-    if (error || !data) {
-      showToast({ kind: 'error', text: '세션 불러오기 실패' });
+    if (error || !data || restoreObsolete.current) {
+      if (error || !data) showToast({ kind: 'error', text: '세션 불러오기 실패' });
       return;
     }
     skipNextAutoSave.current = true;
@@ -517,6 +528,9 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
 
   const handleCompare = async () => {
     if (!orderFile || !invoiceFile) return;
+    // 🔴 마운트 시 DB 복원 fetch 가 아직 진행 중일 수 있음 — 그게 나중에 도착해서
+    //    지금부터 만들 비교 결과를 덮어쓰지 않도록 미리 무효화 표시.
+    restoreObsolete.current = true;
     setError(null);
     setParsing(true);
     try {
