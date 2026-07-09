@@ -23,16 +23,27 @@
  *  - SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (신규 — 서버 전용 write)
  *  - EMAIL_INGEST_COMPANY_ID (신규 — dogfooding 대상 회사 UUID)
  */
+import crypto from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { ImapFlow } from 'imapflow';
-import { simpleParser, type Attachment as MailAttachment } from 'mailparser';
+import { simpleParser } from 'mailparser';
 import { createClient } from '@supabase/supabase-js';
+import {
+  ANGELUS_PROMPT,
+  FEDEX_PROMPT,
+  type AngelusMeta,
+  type FedexMeta,
+  type MatchedCategory,
+  callClaude,
+  classifySender,
+  parseJsonLoose,
+  pdfAttachments,
+  safeFileName,
+} from './_shared/emailIngest';
 
 export const config = {
   maxDuration: 60,
 };
-
-type MatchedCategory = 'import_declaration' | 'angelus_invoice';
 
 const IMAP_HOST = 'imap.gmail.com';
 const IMAP_PORT = 993;
@@ -48,48 +59,6 @@ const SENDER_FILTERS: Array<{
   { category: 'angelus_invoice', imapFrom: '@angelusshoepolish.com' },
 ];
 
-const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
-const ANTHROPIC_VERSION = '2023-06-01';
-const CLAUDE_MODEL = 'claude-sonnet-4-6';
-
-const FEDEX_PROMPT = `이 페덱스 수입 관련 PDF에서 아래 필드를 추출해 JSON 하나만 응답하세요.
-{
-  "doc_no": "수입신고번호 (없으면 null)",
-  "doc_date": "신고일자 YYYY-MM-DD (없으면 null)",
-  "transport_type": "air | sea | null",
-  "mawb_hawb": "MAWB 또는 HAWB 번호 (없으면 null)"
-}
-찾을 수 없으면 null. 마크다운/설명 없이 { 로 시작 } 로 끝나는 JSON 만 출력.`;
-
-const ANGELUS_PROMPT = `이 엔젤러스 인보이스 PDF에서 아래 필드를 추출해 JSON 하나만 응답하세요.
-{
-  "invoice_no": "인보이스 번호 (없으면 null)",
-  "po_reference": "PO/주문 참조번호 (없으면 null)",
-  "doc_subtype": "proforma | revised | final | unknown",
-  "has_amount": true,
-  "has_freight": false
-}
-분류 근거:
- - 문서 상단 제목("Proforma Invoice" → proforma, "Revised" 표시 → revised, "Commercial Invoice" 이면서 Freight 포함 → final).
- - 운송비(Freight/Shipping) 항목이 있으면 has_freight=true, 최종본일 가능성 높음.
- - 판단 불가 시 doc_subtype="unknown".
-찾을 수 없으면 null. 마크다운/설명 없이 { 로 시작 } 로 끝나는 JSON 만 출력.`;
-
-interface FedexMeta {
-  doc_no: string | null;
-  doc_date: string | null;
-  transport_type: 'air' | 'sea' | null;
-  mawb_hawb: string | null;
-}
-
-interface AngelusMeta {
-  invoice_no: string | null;
-  po_reference: string | null;
-  doc_subtype: 'proforma' | 'revised' | 'final' | 'unknown' | null;
-  has_amount: boolean | null;
-  has_freight: boolean | null;
-}
-
 interface RunSummary {
   scanned: number;
   processed: number;
@@ -97,87 +66,6 @@ interface RunSummary {
   errors: number;
   hasMore: boolean;
   details: Array<{ uid: number; status: string; note?: string }>;
-}
-
-function classifySender(from: string): MatchedCategory | null {
-  const lower = from.toLowerCase();
-  if (lower.includes('fedex')) return 'import_declaration';
-  if (/@angelusshoepolish\.com>?/.test(lower)) return 'angelus_invoice';
-  return null;
-}
-
-function safeFileName(name: string): string {
-  return name
-    .replace(/[\\/:*?"<>|]/g, '_')
-    .replace(/\s+/g, '_')
-    .slice(0, 120);
-}
-
-function pdfAttachments(atts: MailAttachment[] | undefined): MailAttachment[] {
-  if (!atts) return [];
-  return atts.filter((a) => {
-    const ct = (a.contentType ?? '').toLowerCase();
-    const name = (a.filename ?? '').toLowerCase();
-    return ct === 'application/pdf' || name.endsWith('.pdf');
-  });
-}
-
-async function callClaude(
-  apiKey: string,
-  pdfBase64: string,
-  prompt: string,
-): Promise<string | null> {
-  try {
-    const res = await fetch(ANTHROPIC_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-      },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        max_tokens: 1024,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'document',
-                source: {
-                  type: 'base64',
-                  media_type: 'application/pdf',
-                  data: pdfBase64,
-                },
-              },
-              { type: 'text', text: prompt },
-            ],
-          },
-        ],
-      }),
-    });
-    if (!res.ok) return null;
-    const json = (await res.json()) as {
-      content?: Array<{ type: string; text?: string }>;
-    };
-    const text = json.content?.find((c) => c.type === 'text')?.text;
-    return text ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function parseJsonLoose<T>(text: string | null): T | null {
-  if (!text) return null;
-  const trimmed = text.trim();
-  const start = trimmed.indexOf('{');
-  const end = trimmed.lastIndexOf('}');
-  if (start < 0 || end <= start) return null;
-  try {
-    return JSON.parse(trimmed.slice(start, end + 1)) as T;
-  } catch {
-    return null;
-  }
 }
 
 export default async function handler(
@@ -194,7 +82,10 @@ export default async function handler(
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const supabaseUrl =
     process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  // 신규 opaque 키 규칙(SUPABASE_SECRET_KEY) 또는 레거시 JWT(SUPABASE_SERVICE_ROLE_KEY) 둘 다 허용.
+  const supabaseServiceKey =
+    process.env.SUPABASE_SECRET_KEY ??
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
   const companyId = process.env.EMAIL_INGEST_COMPANY_ID;
 
   const missing: string[] = [];
@@ -202,7 +93,7 @@ export default async function handler(
   if (!gmailPass) missing.push('GMAIL_APP_PASSWORD');
   if (!anthropicKey) missing.push('ANTHROPIC_API_KEY');
   if (!supabaseUrl) missing.push('SUPABASE_URL');
-  if (!supabaseServiceKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseServiceKey) missing.push('SUPABASE_SECRET_KEY');
   if (!companyId) missing.push('EMAIL_INGEST_COMPANY_ID');
   if (missing.length > 0) {
     res
@@ -337,10 +228,15 @@ export default async function handler(
           for (let i = 0; i < pdfs.length; i++) {
             const att = pdfs[i];
             const rawName = att.filename ?? `attachment-${i + 1}.pdf`;
-            const filename = safeFileName(rawName);
-            const storagePath = `email-auto/${companyId}/${encodeURIComponent(
-              messageId,
-            )}/${i}-${filename}`;
+            const safeBase = safeFileName(rawName) || 'file.pdf';
+            // Message-ID 는 <...@...> 형태라 URL 인코딩해도 Storage key 제약 위반.
+            //   → sha256 앞 16자로 안전한 경로 세그먼트 생성.
+            const msgHash = crypto
+              .createHash('sha256')
+              .update(messageId)
+              .digest('hex')
+              .slice(0, 16);
+            const storagePath = `email-auto/${companyId}/${msgHash}/${i}-${safeBase}`;
 
             const { error: upErr } = await supabase.storage
               .from(STORAGE_BUCKET)

@@ -55,6 +55,12 @@ export interface ProductCreateInput {
   is_active: boolean;
   safety_stock: number | null;
   reorder_point: number | null;
+  // 거래처 등급(A~E)별 공급율. unit_price × grade_X → 공급가(원). null/0 이면 미설정.
+  grade_a?: number | null;
+  grade_b?: number | null;
+  grade_c?: number | null;
+  grade_d?: number | null;
+  grade_e?: number | null;
 }
 
 export interface ProductUpdateArgs {

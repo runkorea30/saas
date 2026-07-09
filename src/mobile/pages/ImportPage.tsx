@@ -390,9 +390,48 @@ export function ImportPage() {
     );
   };
 
+  // 🔴 (2026-07-06) 데스크톱과 동일 버그수정: 로컬 state 만 리셋 → 새로고침 시 되돌아옴.
+  //    이제 현재 폼에 로드된 세션의 transfer_rows/transfer_saved_at 을 DB 에서도 비움.
+  //    다른 미확정 세션은 절대 건드리지 않음 (id 로 좁힘).
   const onConfirmReset = () => {
     setRowInputs([createEmptyRow()]);
     setConfirmReset(false);
+    if (!companyId) return;
+    void (async () => {
+      try {
+        const { data: target, error: selErr } = await supabase
+          .from('invoice_verifications')
+          .select('id')
+          .eq('company_id', companyId)
+          .is('resolved_at', null)
+          .order('transfer_saved_at', { ascending: false, nullsFirst: false })
+          .limit(1)
+          .maybeSingle();
+        if (selErr) throw selErr;
+        if (!target?.id) return;
+        const { error: updErr } = await supabase
+          .from('invoice_verifications')
+          .update({
+            transfer_rows: [] as unknown as Json,
+            transfer_saved_at: null,
+          })
+          .eq('id', target.id);
+        if (updErr) throw updErr;
+        queryClient.invalidateQueries({
+          queryKey: ['invoice-verifications-pending', companyId],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ['incoming-quantities', companyId],
+        });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('[onConfirmReset]', e);
+        showToast({
+          kind: 'error',
+          text: `DB 초기화 실패: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      }
+    })();
   };
 
   const busy = createMut.isPending;

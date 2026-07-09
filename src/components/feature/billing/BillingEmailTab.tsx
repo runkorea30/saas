@@ -25,6 +25,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
+import { copyToClipboard } from '@/utils/clipboard';
 import {
   sendBillingEmail,
   type BillingEmailAttachment,
@@ -429,19 +430,11 @@ export function BillingEmailTab({
 
   const handleKakaoCopy = async () => {
     try {
-      await navigator.clipboard.writeText(kakaoMessage);
+      await copyToClipboard(kakaoMessage);
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
     } catch {
-      // 클립보드 API 미지원 환경 폴백.
-      const ta = document.createElement('textarea');
-      ta.value = kakaoMessage;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      setCopySuccess(true);
-      setTimeout(() => setCopySuccess(false), 2000);
+      // 성공/실패 UX 는 기존과 동일하게 유지 — 실패 시 표시 안 함.
     }
   };
 

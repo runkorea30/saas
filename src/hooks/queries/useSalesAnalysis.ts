@@ -297,9 +297,11 @@ export function pivotByProduct(
   customerFilter: string | null,
   categoryFilter: string | null,
   searchQuery: string,
+  customerNameQuery: string = '',
 ): ProductSalesRow[] {
   const monthSet = new Set(monthFilter);
   const q = searchQuery.trim().toLowerCase();
+  const cnq = customerNameQuery.trim().toLowerCase();
   const map = new Map<string, ProductSalesRow>();
 
   for (const r of rows) {
@@ -307,6 +309,8 @@ export function pivotByProduct(
     // 🟠 수량 분석은 정상 출고만. (SQL 단계의 is_return 필터 제거 후 JS 단계 가드)
     if (r.is_return) continue;
     if (customerFilter && r.customer_id !== customerFilter) continue;
+    // 🟠 제품별판매 탭 전용 자유 텍스트 업체명 검색 — 부분 문자열, 대소문자 무시.
+    if (cnq && !r.customer_name.toLowerCase().includes(cnq)) continue;
     if (categoryFilter && r.product_category !== categoryFilter) continue;
     if (
       q &&

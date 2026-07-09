@@ -38,6 +38,11 @@ interface FormState {
   safety_stock: string;
   reorder_point: string;
   is_active: boolean;
+  grade_a: string;
+  grade_b: string;
+  grade_c: string;
+  grade_d: string;
+  grade_e: string;
 }
 
 type FieldError = Partial<Record<keyof FormState | 'category', string>>;
@@ -109,6 +114,26 @@ export function ProductForm({
       initial?.reorder_point !== null && initial?.reorder_point !== undefined
         ? String(initial.reorder_point)
         : '',
+    grade_a:
+      initial?.grade_a !== null && initial?.grade_a !== undefined
+        ? String(initial.grade_a)
+        : '',
+    grade_b:
+      initial?.grade_b !== null && initial?.grade_b !== undefined
+        ? String(initial.grade_b)
+        : '',
+    grade_c:
+      initial?.grade_c !== null && initial?.grade_c !== undefined
+        ? String(initial.grade_c)
+        : '',
+    grade_d:
+      initial?.grade_d !== null && initial?.grade_d !== undefined
+        ? String(initial.grade_d)
+        : '',
+    grade_e:
+      initial?.grade_e !== null && initial?.grade_e !== undefined
+        ? String(initial.grade_e)
+        : '',
     is_active: initial?.is_active ?? true,
   });
   const [errors, setErrors] = useState<FieldError>({});
@@ -175,6 +200,23 @@ export function ProductForm({
       else if (rp < 0) e.reorder_point = '발주점은 0 이상이어야 합니다';
       else if (!Number.isInteger(rp)) e.reorder_point = '발주점은 정수여야 합니다';
     }
+
+    const gradeFields: Array<[keyof FormState, string]> = [
+      ['grade_a', form.grade_a],
+      ['grade_b', form.grade_b],
+      ['grade_c', form.grade_c],
+      ['grade_d', form.grade_d],
+      ['grade_e', form.grade_e],
+    ];
+    for (const [key, val] of gradeFields) {
+      if (!val.trim()) continue;
+      const n = toNumberOrNaN(val);
+      if (!Number.isFinite(n)) {
+        e[key] = '숫자로 입력해 주세요 (예: 0.65)';
+      } else if (n < 0) {
+        e[key] = '0 이상이어야 합니다';
+      }
+    }
     return e;
   };
 
@@ -195,6 +237,11 @@ export function ProductForm({
       safety_stock: toNumberOrNull(form.safety_stock),
       reorder_point: toNumberOrNull(form.reorder_point),
       is_active: form.is_active,
+      grade_a: toNumberOrNull(form.grade_a),
+      grade_b: toNumberOrNull(form.grade_b),
+      grade_c: toNumberOrNull(form.grade_c),
+      grade_d: toNumberOrNull(form.grade_d),
+      grade_e: toNumberOrNull(form.grade_e),
     };
     onSubmit(values);
   };
@@ -404,6 +451,67 @@ export function ProductForm({
           }}
         />
       </Field>
+
+      {/* 거래처 등급별 공급율 (A~E) */}
+      <div>
+        <div
+          style={{
+            fontSize: 11.5,
+            color: 'var(--ink-2)',
+            fontWeight: 500,
+            marginBottom: 4,
+          }}
+        >
+          거래처 등급별 공급율 (A~E, 선택)
+        </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(5, 1fr)',
+            gap: 8,
+          }}
+        >
+          {(
+            [
+              ['grade_a', 'A'],
+              ['grade_b', 'B'],
+              ['grade_c', 'C'],
+              ['grade_d', 'D'],
+              ['grade_e', 'E'],
+            ] as const
+          ).map(([key, label]) => (
+            <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <div style={{ fontSize: 10.5, color: 'var(--ink-3)', textAlign: 'center' }}>
+                {label}등급
+              </div>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={form[key]}
+                disabled={busy}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, [key]: e.target.value }))
+                }
+                placeholder="0.65"
+                style={{
+                  ...inputStyle(!!errors[key], !!busy),
+                  textAlign: 'center',
+                  padding: '0 6px',
+                }}
+              />
+              {errors[key] && (
+                <div style={{ fontSize: 10, color: 'var(--danger)' }}>
+                  {errors[key]}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
+          공급가 = 판매가 × 이 값. 예: 0.65 = 판매가의 65%. 비워두면 해당 등급 거래처에는
+          공급가 0으로 계산됩니다.
+        </div>
+      </div>
 
       {/* 안전재고 · 발주점 */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

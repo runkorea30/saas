@@ -47,9 +47,12 @@ export function SalesAnalysisPage() {
   const [tab, setTab] = useState<TabKey>('monthly');
   const [year, setYear] = useState<number>(now.getFullYear());
   const [monthFilter, setMonthFilter] = useState<number[]>([]); // 빈 배열 = 전체
-  const [customerFilter, setCustomerFilter] = useState<string>(''); // 빈 문자열 = 전체
+  const [customerFilter, setCustomerFilter] = useState<string>(''); // 빈 문자열 = 전체 (월별·일별 탭용, id 정확 매칭)
   const [categoryFilter, setCategoryFilter] = useState<string>(''); // 탭3 전용
   const [searchQuery, setSearchQuery] = useState(''); // 탭3 전용
+  // 🟠 제품별판매 탭 전용 자유 텍스트 업체명 검색 — datalist 자동완성 + 부분 문자열 매칭.
+  //    다른 탭 전환 시에도 값 유지 (기존 customerFilter/categoryFilter/searchQuery 도 유지되는 패턴 동일).
+  const [customerNameQuery, setCustomerNameQuery] = useState('');
 
   const {
     data: rawRows = [],
@@ -73,11 +76,14 @@ export function SalesAnalysisPage() {
       pivotByProduct(
         rawRows,
         monthFilter,
-        customerFilter || null,
+        // 🟠 제품별판매 탭에서는 3탭 공용 customerFilter(id) 는 무시하고
+        //    자유 텍스트 customerNameQuery 로만 필터.
+        null,
         categoryFilter || null,
         searchQuery,
+        customerNameQuery,
       ),
-    [rawRows, monthFilter, customerFilter, categoryFilter, searchQuery],
+    [rawRows, monthFilter, categoryFilter, searchQuery, customerNameQuery],
   );
 
   const itemCount =
@@ -210,18 +216,35 @@ export function SalesAnalysisPage() {
           <MonthMultiSelect value={monthFilter} onChange={setMonthFilter} />
 
           <FilterLabel>거래처</FilterLabel>
-          <select
-            value={customerFilter}
-            onChange={(e) => setCustomerFilter(e.target.value)}
-            style={{ ...selectStyle, minWidth: 140 }}
-          >
-            <option value="">전체</option>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          {tab === 'product' ? (
+            <>
+              <input
+                list="sales-customers"
+                value={customerNameQuery}
+                onChange={(e) => setCustomerNameQuery(e.target.value)}
+                placeholder="업체명 검색 (직접 입력 가능)"
+                style={{ ...selectStyle, minWidth: 200, width: 220 }}
+              />
+              <datalist id="sales-customers">
+                {customers.map((c) => (
+                  <option key={c.id} value={c.name} />
+                ))}
+              </datalist>
+            </>
+          ) : (
+            <select
+              value={customerFilter}
+              onChange={(e) => setCustomerFilter(e.target.value)}
+              style={{ ...selectStyle, minWidth: 140 }}
+            >
+              <option value="">전체</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          )}
 
           {tab === 'product' && (
             <>
