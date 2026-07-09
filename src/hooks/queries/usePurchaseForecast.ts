@@ -34,6 +34,7 @@ import { SALES_LOOKBACK_DAYS } from '@/constants/leadTimes';
 import {
   resolveLeadTimeDays,
   useLeadTimeSettings,
+  type LeadTimeSettings,
 } from '@/hooks/useLeadTimeSettings';
 
 export interface ForecastRow extends Product {
@@ -94,11 +95,23 @@ function todayLocal(): Date {
  * 화면의 "상태/발주필요일/권장구매수량" 은 항상 최신 daily_avg 로 다시 계산.
  * (재계산 버튼 미클릭 상태에서도 화면은 최신값으로 안내.)
  */
-export function usePurchaseForecast(companyId: string | null) {
+/**
+ * 🔴 (2026-07-10 §49) leadTimeSettingsOverride: 호출부가 이미 useLeadTimeSettings 를
+ *    갖고 있다면(예: PurchaseOrderPage 상단 해상/FedEx 입력창) 그 값을 그대로 넘겨야 한다.
+ *    이 훅이 내부에서 또 useLeadTimeSettings 를 호출하면 서로 다른 React state 인스턴스가
+ *    생겨, 호출부 쪽 입력값이 바뀌어도 이 훅 쪽 계산에는 반영되지 않는 버그가 있었다
+ *    (새로고침해야만 반영). 파라미터 생략 시(다른 화면에서 단독 사용)에는 기존처럼
+ *    내부 인스턴스를 사용 — 하위호환 유지.
+ */
+export function usePurchaseForecast(
+  companyId: string | null,
+  leadTimeSettingsOverride?: LeadTimeSettings,
+) {
   const productsQ = useProducts(companyId);
   const stockQ = useInventoryStock(companyId);
   const incomingQ = useIncomingQuantities(companyId);
-  const leadTimeSettings = useLeadTimeSettings(companyId);
+  const internalLeadTimeSettings = useLeadTimeSettings(companyId);
+  const leadTimeSettings = leadTimeSettingsOverride ?? internalLeadTimeSettings;
   const salesQ = useQuery({
     queryKey: ['sales-per-day-by-product', companyId, SALES_LOOKBACK_DAYS],
     enabled: Boolean(companyId),
@@ -276,9 +289,13 @@ function writeLastCalcAt(companyId: string, iso: string): void {
  *  - `staleTime` 개념은 localStorage TTL 로 대체 — react-query 자체 pollng 이나
  *    focus refetch 로 실행되지 않도록 useEffect 내부에서만 트리거.
  */
-export function useAutoRecalcReorderPoints(companyId: string | null): void {
+export function useAutoRecalcReorderPoints(
+  companyId: string | null,
+  leadTimeSettingsOverride?: LeadTimeSettings,
+): void {
   const recalcMut = useRecalcReorderPoints(companyId);
-  const { sea, fedex } = useLeadTimeSettings(companyId);
+  const internalLeadTimeSettings = useLeadTimeSettings(companyId);
+  const { sea, fedex } = leadTimeSettingsOverride ?? internalLeadTimeSettings;
   const attemptedRef = useRef<string | null>(null);
 
   useEffect(() => {

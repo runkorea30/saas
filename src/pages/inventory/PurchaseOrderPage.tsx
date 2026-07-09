@@ -114,10 +114,16 @@ export function PurchaseOrderPage() {
   const { excluded: excludedCategories, toggle: toggleExcluded } =
     usePurchaseOrderExcluded();
 
+  // 리드타임(해상/FedEx) 사용자 조정값 — 상태/리드타임수량/발주수량/RPC 전부 이 값 사용.
+  // 🔴 (2026-07-10 §49) usePurchaseForecast/useAutoRecalcReorderPoints 보다 먼저 선언하고
+  //    아래에서 파라미터로 넘겨야 한다. 각자 내부에서 useLeadTimeSettings 를 또 호출하면
+  //    이 입력값(leadTime)과 서로 다른 React state 가 되어, 여기서 값을 바꿔도 리드타임수량/
+  //    상태/재고소진예상일 계산에 즉시 반영되지 않는 버그가 있었다(새로고침해야 반영).
+  const leadTime = useLeadTimeSettings(companyId);
   // 재주문점 기반 예측(입고예정/재고소진일/상태) — 25번 통합. 표시 전용.
-  const { rows: forecastRows } = usePurchaseForecast(companyId);
+  const { rows: forecastRows } = usePurchaseForecast(companyId, leadTime);
   // 하루 1회 자동 재계산 (localStorage TTL). 사용자 조작 불필요.
-  useAutoRecalcReorderPoints(companyId);
+  useAutoRecalcReorderPoints(companyId, leadTime);
   const forecastById = useMemo(() => {
     const map = new Map<string, ForecastRow>();
     for (const r of forecastRows) map.set(r.id, r);
@@ -130,8 +136,6 @@ export function PurchaseOrderPage() {
   const incomingSourcesByProduct =
     incomingQ.data?.sourcesByProduct ??
     new Map<string, { invoice_no: string; qty: number }[]>();
-  // 리드타임(해상/FedEx) 사용자 조정값 — 상태/리드타임수량/발주수량/RPC 전부 이 값 사용.
-  const leadTime = useLeadTimeSettings(companyId);
   const urgentCount = useMemo(
     () => forecastRows.filter((r) => r.status === 'now').length,
     [forecastRows],

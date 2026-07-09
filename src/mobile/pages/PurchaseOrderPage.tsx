@@ -107,10 +107,14 @@ export function PurchaseOrderPage() {
 
   // 발주 예상 제외 카테고리 — TopNav 위젯과 동일 localStorage 공유.
   const { excluded: excludedCategories } = usePurchaseOrderExcluded();
+  // 리드타임 설정 — 데스크톱과 동일 localStorage.
+  // 🔴 (2026-07-10 §49) usePurchaseForecast/useAutoRecalcReorderPoints 보다 먼저 선언하고
+  //    파라미터로 전달 — 이유는 데스크톱 PurchaseOrderPage.tsx 동일 지시서 §3 주석 참고.
+  const leadTime = useLeadTimeSettings(companyId);
   // 재주문점 기반 예측 — 상태/입고예정 배지 등 정보 표시에만 사용.
-  const forecastQ = usePurchaseForecast(companyId);
+  const forecastQ = usePurchaseForecast(companyId, leadTime);
   // 하루 1회 자동 재계산 (localStorage TTL). 데스크탑/모바일 공유.
-  useAutoRecalcReorderPoints(companyId);
+  useAutoRecalcReorderPoints(companyId, leadTime);
   const forecastById = useMemo(() => {
     const map = new Map<string, ForecastRow>();
     for (const r of forecastQ.rows) map.set(r.id, r);
@@ -120,8 +124,6 @@ export function PurchaseOrderPage() {
   const incomingQ = useIncomingQuantities(companyId);
   const incomingByProduct =
     incomingQ.data?.totalByProduct ?? new Map<string, number>();
-  // 리드타임 설정 — 데스크톱과 동일 localStorage.
-  const leadTime = useLeadTimeSettings(companyId);
   const [leadTimeModalOpen, setLeadTimeModalOpen] = useState(false);
   // 데스크탑 TopNav 위젯과 동일 계산식 (판매량 기준 + 입고예정 반영).
   const { estimatedUsd: needEstimateUsd } = useOrderNeedEstimate(
