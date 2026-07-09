@@ -105,6 +105,72 @@
 
 ---
 
+## 오늘 추가된 작업 요약 (2026-07-09~10, 주문상세 수량편집 개선 + 인보이스검증 대대적 버그수정 + OCR 오독 관리 신규)
+
+### 1. 주문상세 패널 — 재고음수 방지 · 전체선택 · 자동저장 제거 (완료, commit `040759c`)
+- 기존 주문 품목 수량을 인라인으로 수정할 때 blur 시 자동저장되던 것을 제거하고
+  "저장하기" 버튼으로 통일. 저장 시 재고 초과분은 신규 행 추가와 동일한 로직으로
+  자동 축소(원래 요청 수량은 `original_quantity` 에 남겨 취소선 표시) — 재고가
+  음수로 내려가는 것을 방지.
+- 수량 입력창 클릭 시 기존 값이 전체선택되도록 `onFocus` 에 `select()` 추가.
+- 파일: `src/components/feature/orders/OrderDetailPane.tsx`
+
+### 2. 인보이스검증 — 파일 삭제해도 재업로드되는 문제 (완료, commit `46459c2`)
+- 원인 A: 주문서/인보이스 파일 카드의 X 버튼이 로컬 상태만 지우고 DB에 반영 안 됨.
+- 원인 B: 발주서 페이지에서 엑셀 다운로드할 때마다 미확정 세션이 무제한 중복 적재
+  (실측: 동일 파일명 미확정 세션 3개 발견).
+- 재발방지 코드 수정 완료. 기존에 쌓여있던 중복 세션 2건 + Storage 고아 PDF 33개는
+  Claude(웹)가 Supabase MCP + Storage API로 직접 정리 완료 (코드 변경 아님).
+- 파일: `src/components/feature/import/InvoiceUploadCard.tsx`, `src/lib/invoiceVerification.ts`
+
+### 3. 인보이스검증 — 필터 버튼 다중선택 (완료, commit `1e47c9f`)
+- 라디오 방식 단일 `tab` state → `activeTabs`(Set) 다중선택 + OR 필터링으로 전환.
+- DB `last_tab`(text 컬럼)엔 콤마로 이어붙인 문자열로 저장/복원 (`serializeTabs`/`parseLastTab`).
+
+### 4. OCR 오독 코드 관리 신규 페이지 (완료, commit `60a6564`)
+- 인보이스 PDF 파싱 시 제품코드가 잘못 인식되는 문제(OCR 오독 백로그와 동일 종류) 전체를
+  관리하는 용도. "잘못된 코드 ↔ 올바른 코드" 수동 1:1 등록 방식, 한 번 등록하면 이후
+  모든 인보이스 비교에 자동 적용.
+- 신규 테이블 `mochicraft_demo.code_corrections` (company_id, wrong_code, correct_code,
+  note, UNIQUE(company_id, wrong_code)) — Claude(웹)가 Supabase MCP로 직접 생성.
+  RLS: `company_anon_access` (FOR ALL USING true), anon에 SELECT/INSERT/UPDATE/DELETE GRANT 완료.
+- 신규 탭 "OCR 오독 관리" — `src/components/feature/import/CodeCorrectionsTab.tsx` (신규 파일).
+- `compareOrderInvoice` 매칭 직전에 등록된 규칙으로 인보이스 코드를 선치환하도록 통합.
+- `normalizeCode` 를 `InvoiceUploadCard.tsx` 에서 export 로 변경해 새 탭에서 재사용.
+- 실사용 등록 규칙 4건 이미 등록됨(2-하드/2-소프트 관련, `72201000h/s`, `72204000h/s`).
+
+### 5. 인보이스검증 — "비교 시작" 직후 결과가 사라지는 레이스컨디션 (완료, commit `d8529d8`)
+- 마운트 시 진행 중이던 DB 복원 fetch가 사용자가 방금 만든 비교 결과보다 늦게
+  도착해 예전 데이터로 덮어쓰는 버그. `restoreObsolete` ref 추가로 방지
+  (`handleCompare` 시작 시 무효화 표시, 두 복원 경로 모두에서 체크).
+- 잔여 엣지케이스 있음(파싱이 세션목록 로딩보다 오래 걸리는 아주 드문 경우) —
+  재현되면 복원 effect에 "비교 진행 중이면 스킵" 가드 추가 필요.
+
+### 6. OCR 오독 매칭 실패 — 코드 끝에 점(...) 미제거 (완료, commit `f69ff4f`)
+- 인보이스 PDF 파싱 시 코드가 잘리면 `"72204000H..."` 처럼 끝에 점이 붙어 나오는데
+  `normalizeCode` 가 점을 제거하지 않아 등록된 교정 규칙(`72204000h`)과 문자열이
+  달라 매칭 실패. `normalizeCode` 에 끝점 제거(`.replace(/\.+$/, '')`) 추가.
+
+### 7. 주문수량 직접입력 시 금액비교 스킵되어 오판정 (완료, commit `4a7070a`)
+- "인보이스만" 행에서 `orderPrice` 가 `undefined`(주문 데이터 자체가 없던 상태)로
+  남아있으면 `calcStatus` 가 금액 비교를 스킵하고 수량만 같으면 "일치"로 오판정.
+  `handleOrderQtyChange` 에서 주문수량 직접 입력 시 `orderPrice` 를 그 순간 0으로
+  확정하도록 수정 (화면엔 이미 "0"으로 보이고 있어 시각적 변화 없음).
+
+### ⏸ 보류 중 — 코드 병합 직후 순간적 "일치" 오표시 의심 사례
+- `720PT105`(정상 금액불일치 표시) 인접의 `72001004` 행이 코드 편집으로 주문서와
+  병합된 직후 화면엔 "일치"로 보였으나, DB에 저장된 실제 데이터는 `amount_diff` 로
+  정상이었음(Claude 웹이 직접 조회 확인). 계산 로직(`calcStatus`)도 이 케이스에서
+  정확하다는 것을 코드로 재검증함. 스스로 바로잡히는 화면 표시 지연/깜빡임일 가능성.
+  **다시 재현되면 추가 조사 필요** — 발생 시 어느 조작(코드 편집 vs 수량 편집) 직후인지,
+  화면이 계속 "일치"로 남아있는지 vs 잠깐 그랬다가 바뀌는지 확인 필요.
+
+### 참고 — 코드 변경 아닌 데이터 정리 작업 (Claude 웹이 Supabase MCP/Storage API로 직접 처리)
+- `invoice_verifications` 중복 미확정 세션 2건 삭제 (동일 파일명, 인보이스 미첨부 상태)
+- `documents` Storage 버킷의 고아 PDF 33개 삭제 (DB에서 참조 안 되는 파일들)
+
+---
+
 ## 오늘 추가된 작업 요약 (2026-07-03, 보안 사고 대응 + 인보이스 PDF 자동 이관 + 안내 제품 wipe 재발 방지)
 
 ### 1. 보안 사고 대응 (완료)
