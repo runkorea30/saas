@@ -38,6 +38,19 @@ export async function resetInvoiceVerificationForNewOrder(params: {
 }): Promise<{ id: string }> {
   const { companyId, orderRows, orderFileName } = params;
   const nowIso = new Date().toISOString();
+
+  // 🔴 재발방지: 인보이스가 아직 첨부되지 않은(=작업 시작 전) 미확정 세션은 새 다운로드로
+  //    대체한다. 그렇지 않으면 다운로드할 때마다 계속 쌓여 "삭제해도 재업로드된 것처럼
+  //    보이는" 중복 세션 문제가 재발한다 (2026-07-09 실측: 동일 파일명 미확정 세션 3개 발견,
+  //    Claude 웹이 Supabase MCP로 정리 완료). 인보이스가 이미 붙은 진행 중 세션은
+  //    이 조건(invoice_file_name IS NULL)에 걸리지 않으므로 절대 건드리지 않는다.
+  await supabase
+    .from('invoice_verifications')
+    .delete()
+    .eq('company_id', companyId)
+    .is('resolved_at', null)
+    .is('invoice_file_name', null);
+
   const { data, error } = await supabase
     .from('invoice_verifications')
     .insert({

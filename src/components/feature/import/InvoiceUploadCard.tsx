@@ -901,6 +901,53 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     });
   };
 
+  /** 주문서 슬롯만 제거 — 로컬 상태뿐 아니라 DB 세션 행도 함께 정리한다 (재업로드 방지). */
+  const handleOrderFileChange = (file: File | null) => {
+    if (file) {
+      setOrderFile(file);
+      return;
+    }
+    setOrderFile(null);
+    if (companyId && sessionId) {
+      void supabase
+        .from('invoice_verifications')
+        .update({ order_file_name: null, order_rows: [] as unknown as Json })
+        .eq('id', sessionId)
+        .then(() => {
+          queryClient.invalidateQueries({
+            queryKey: ['invoice-verifications-pending', companyId],
+          });
+        });
+    }
+  };
+
+  /** 인보이스 슬롯만 제거 — Storage 원본 PDF 도 함께 삭제한다 (재업로드 방지 + 고아파일 방지). */
+  const handleInvoiceFileChange = (file: File | null) => {
+    if (file) {
+      setInvoiceFile(file);
+      return;
+    }
+    setInvoiceFile(null);
+    const orphanedPath = invoiceFilePath;
+    setInvoiceFilePath(null);
+    if (orphanedPath) void removeInvoicePdfSilently(orphanedPath);
+    if (companyId && sessionId) {
+      void supabase
+        .from('invoice_verifications')
+        .update({
+          invoice_file_name: null,
+          invoice_file_path: null,
+          invoice_rows: [] as unknown as Json,
+        })
+        .eq('id', sessionId)
+        .then(() => {
+          queryClient.invalidateQueries({
+            queryKey: ['invoice-verifications-pending', companyId],
+          });
+        });
+    }
+  };
+
   const handleReset = () => {
     // 자동 저장 useEffect 가 comparison=null 로 빈 행을 저장하는 것을 막고, DB 행을 삭제.
     skipNextAutoSave.current = true;
@@ -978,7 +1025,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
           icon="excel"
           accept=".xlsx,.xls"
           file={orderFile}
-          onChange={setOrderFile}
+          onChange={handleOrderFileChange}
           disabled={parsing || disabled}
         />
         <FileSlot
@@ -986,7 +1033,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
           icon="pdf"
           accept=".pdf"
           file={invoiceFile}
-          onChange={setInvoiceFile}
+          onChange={handleInvoiceFileChange}
           disabled={parsing || disabled}
         />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
