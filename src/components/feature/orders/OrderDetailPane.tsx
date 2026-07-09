@@ -152,43 +152,21 @@ export function OrderDetailPane({
 
   const d = new Date(order.order_date);
 
-  // ───── 인라인 수량 편집 (기존 행) — blur 시 자동저장 ─────
+  // 🔴 기존 행 수량을 수정했지만 아직 저장 전인 상태 — editMode 가 아니어도
+  //    "저장하기/취소" 버튼을 노출해 자동저장 없이 명시적으로 저장하도록 함.
+  const hasPendingQtyEdits = Object.keys(qtyOverrides).length > 0;
+
+  // ───── 인라인 수량 편집 (기존 행) — "저장하기" 버튼을 눌러야 실제 저장됨 (자동저장 아님) ─────
   const handleQtyInput = (id: string, raw: number) => {
     setQtyOverrides((prev) => ({ ...prev, [id]: Math.max(0, Math.floor(raw)) }));
   };
 
-  const handleQtyBlur = async (id: string) => {
-    if (!order || !companyId) return;
+  // blur 시에는 값이 원래와 같으면 오버라이드만 정리. 실제 저장은 handleSave 에서 일괄 처리.
+  const handleQtyBlur = (id: string) => {
     const nextQty = qtyOverrides[id];
     if (nextQty === undefined) return;
     const item = orderItems.find((i) => i.id === id);
     if (!item || item.quantity === nextQty) {
-      // 변경 없음 — 오버라이드만 제거
-      setQtyOverrides((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      return;
-    }
-    try {
-      const { error } = await supabase
-        .from('order_items')
-        .update({
-          quantity: nextQty,
-          amount: nextQty * item.unit_price,
-        })
-        .eq('id', id)
-        .eq('company_id', companyId);
-      if (error) throw error;
-      // 🔴 아이템 변경 시 orders.total_amount 재동기화 (DB SUM 기준).
-      await syncOrderTotal({ companyId, orderId: order.id });
-      await queryClient.invalidateQueries({ queryKey: ['order-items', order.id] });
-      await queryClient.invalidateQueries({ queryKey: ['orders'] });
-    } catch (err) {
-      console.error('수량 자동저장 실패:', err);
-      alert('수량 저장 중 오류가 발생했습니다.');
-    } finally {
       setQtyOverrides((prev) => {
         const next = { ...prev };
         delete next[id];
@@ -197,10 +175,11 @@ export function OrderDetailPane({
     }
   };
 
-  // ───── 새 행 추가 모드 ─────
+  // ───── 새 행 추가 모드 + 기존 행 수량 편집 취소 ─────
   const handleCancel = () => {
     setDraftItems([]);
     setEditMode(false);
+    setQtyOverrides({});
   };
 
   const handleQtyChange = (id: string, qty: number) => {
@@ -405,6 +384,32 @@ export function OrderDetailPane({
     });
     const adjustedById = new Map(adjustedNewRows.map((a) => [a.item.id, a]));
 
+    // 🔴 기존 행 수량 수정 — qtyOverrides 기준. "저장하기" 버튼을 눌러야 반영됨(자동저장 아님).
+    //    재고보다 많이 입력하면 (기존수량 + 가용재고) 만큼으로 축소하고
+    //    original_quantity 에 요청수량을 기록한다. stockOf() 는 이미 이 품목의
+    //    기존수량만큼 차감된 값이므로, 상한을 구하려면 기존수량을 다시 더해줘야 한다.
+    const existingEdits = Object.entries(qtyOverrides)
+      .map(([id, nextQty]) => {
+        const item = orderItems.find((i) => i.id === id);
+        return item && item.quantity !== nextQty ? { item, nextQty } : null;
+      })
+      .filter((x): x is { item: OrderItemRow; nextQty: number } => x !== null);
+
+    const adjustedExistingEdits = existingEdits.map(({ item, nextQty }) => {
+      if (item.is_return || !item.product_id) {
+        return { item, finalQty: nextQty, originalQty: null as number | null };
+      }
+      const stock = stockOf(item.product_id);
+      const maxAllowed = item.quantity + stock;
+      if (nextQty > maxAllowed) {
+        shortageMsgs.push(
+          `[${item.product_name}] 재고 부족으로 수량이 ${nextQty}개 → ${maxAllowed}개로 조정되었습니다.`,
+        );
+        return { item, finalQty: maxAllowed, originalQty: nextQty };
+      }
+      return { item, finalQty: nextQty, originalQty: null };
+    });
+
     setIsSaving(true);
     try {
       const dirtyItems = draftItems.filter((item) => item._dirty);
@@ -453,6 +458,25 @@ export function OrderDetailPane({
         }
       }
 
+      // 🔴 기존 행 수량 수정 저장 — "저장하기" 버튼을 눌러야 반영 (더 이상 blur 자동저장 아님).
+      for (const { item, finalQty, originalQty } of adjustedExistingEdits) {
+        const { error } = await supabase
+          .from('order_items')
+          // 🟠 original_quantity 컬럼은 자동생성 타입에 아직 미반영 → payload 단언 우회
+          //    (기존 신규-행 insert 패턴과 동일: 캐스팅 타입에서 original_quantity 제외).
+          .update({
+            quantity: finalQty,
+            amount: finalQty * item.unit_price,
+            original_quantity: originalQty,
+          } as unknown as {
+            quantity: number;
+            amount: number;
+          })
+          .eq('id', item.id)
+          .eq('company_id', companyId);
+        if (error) throw error;
+      }
+
       // 🔴 orders.total_amount 재동기화 — DB 의 order_items.amount SUM 기준.
       //    이전: 클라이언트 reduce 로 계산했으나 staleness/부분 실패 시 어긋났음.
       await syncOrderTotal({ companyId, orderId: order.id });
@@ -465,6 +489,7 @@ export function OrderDetailPane({
       setEditMode(false);
       setDraftItems([]);
       setAutoFocus(null);
+      setQtyOverrides({});
 
       if (shortageMsgs.length > 0) {
         alert(
@@ -871,8 +896,9 @@ export function OrderDetailPane({
           <span>{displayRows.length}개 라인</span>
         </div>
 
-        {/* 편집 모드 액션 — 행 추가는 헤더 우측 버튼에서. 수량은 항상 인라인 편집(blur autosave). */}
-        {editMode && (
+        {/* 편집 모드 액션 또는 기존 행 수량 수정 대기중 — 행 추가는 헤더 우측 버튼에서.
+            수량 수정은 "저장하기" 버튼을 눌러야 반영됨(더 이상 자동저장 아님). */}
+        {(editMode || hasPendingQtyEdits) && (
           <div className="flex gap-2 mb-3">
             <button
               type="button"
@@ -1086,6 +1112,8 @@ export function OrderDetailPane({
                                 onFocus={(e) => {
                                   e.currentTarget.style.border =
                                     '1px solid var(--brand)';
+                                  // 🟢 클릭 시 기존 값 전체선택 — 바로 새 수량을 입력할 수 있게.
+                                  e.currentTarget.select();
                                 }}
                                 onBlurCapture={(e) => {
                                   e.currentTarget.style.border =
