@@ -1,6 +1,9 @@
 /**
  * CustomsDocTab — 통관서류 탭
- * - 엑셀(다중 시트) 업로드 → SheetJS 파싱 + 시트 통합
+ * - 인보이스 PDF 원본 업로드 → parseInvoicePDF (Vercel 서버리스 /api/analyze-invoice,
+ *   pdfjs 텍스트 추출 + 정규식 파서) 로 파싱 (2026-07-10 §48: 알PDF 엑셀 변환 단계 제거)
+ * - code_corrections 테이블로 OCR 오독 코드 자동 교정 (인보이스검증 탭과 동일 소스 공유,
+ *   화면에는 교정된 코드만 표시 — 원본 OCR 코드는 노출하지 않음)
  * - DB customs_code_mappings prefix 매핑
  * - 분류별 합계 + 품목 테이블 (인라인 편집)
  * - sessionStorage 유지
@@ -8,11 +11,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, FileUp, Loader2, Trash2 } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { Download, FileText, Loader2, Trash2, FileUp } from 'lucide-react';
+import * as XLSX from 'xlsx'; // downloadExcel(엑셀 다운로드 기능)에서만 계속 사용
 import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
 import { useToast } from '@/components/ui/Toast';
+import { parseInvoicePDF, type InvoiceParsedRow } from '@/utils/invoiceParser';
+import { normalizeCode } from './InvoiceUploadCard';
 
 // ── 타입 ──────────────────────────────────────
 
@@ -69,28 +74,6 @@ const CAT_ORDER = [
   '기타(슈트리)',
 ];
 
-/**
- * 통관서류 엑셀 헤더 컬럼 동의어 그룹.
- *
- * Angelus 는 최소 2가지 템플릿을 사용:
- *  · 템플릿 A (Acknowledgement/SalesOrd): Item / Description / Ordered / U/M / Rate / Amount
- *  · 템플릿 B (Invoice):                  ITEM CODE / DESCRIPTION / QTY SHPD / U/M / PRICE / AMOUNT
- *
- * 매칭은 셀 텍스트를 trim().toLowerCase() 후 `includes()` 부분 포함 검사.
- * 새 템플릿이 나오면 각 배열에 추가.
- *
- * ⚠ quantity 그룹: 단순히 'qty' 로만 매칭하면 템플릿 B 의 'QTY BO'(백오더 수량, 실제
- * 출하 아님)까지 오매칭되므로 완전 문구 'qty shpd' 사용. 'ordered' 는 템플릿 A.
- */
-const HEADER_SYNONYMS = {
-  itemCode:    ['item code', 'item'],
-  description: ['description'],
-  quantity:    ['qty shpd', 'ordered'],
-  unit:        ['u/m'],
-  price:       ['price', 'rate'],
-  amount:      ['amount'],
-} as const;
-
 // ── 유틸 ──────────────────────────────────────
 
 function getPrefix(itemCode: string): string {
@@ -101,87 +84,6 @@ function getPrefix(itemCode: string): string {
 function getMeta(itemCode: string, mappings: CodeMapping[]): CodeMapping | null {
   const prefix = getPrefix(itemCode);
   return mappings.find((m) => m.code_prefix === prefix) ?? null;
-}
-
-// ── 엑셀 파싱 ─────────────────────────────────
-
-/**
- * 시트에서 품목 테이블을 파싱해 { itemCode, description, qty, um, price, amount } 배열로 반환.
- *
- * Angelus 문서는 최소 2가지 템플릿을 사용하며 각 템플릿마다 헤더 텍스트가 다르다.
- * 헤더 행을 HEADER_SYNONYMS 그룹으로 찾아 컬럼 위치를 동적으로 매핑한다.
- *
- * 헤더 판별: 동일 행에서 itemCode 그룹과 amount 그룹이 모두 매칭되어야 헤더로 인정.
- *  (두 그룹은 두 템플릿에 공통 존재 → 오탐 방지)
- * 헤더 미발견 시 해당 시트는 빈 결과 반환(스킵).
- *
- * 품목 행 판별: Item 컬럼이 비어있거나 "Sales Tax"/"Total"/"Subtotal" 같은 총계 텍스트로
- * 시작하는 행은 스킵. qty/amount 는 유효 숫자여야 통과.
- */
-function parseSheet(ws: XLSX.WorkSheet): Array<{
-  itemCode: string; description: string; qty: number; um: string; price: number; amount: number;
-}> {
-  const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: null });
-  const result: ReturnType<typeof parseSheet> = [];
-
-  // 그룹 동의어 중 하나에 부분 포함되는 셀의 컬럼 인덱스 반환 (없으면 -1).
-  const findColBySynonyms = (row: unknown[], synonyms: readonly string[]): number => {
-    for (let c = 0; c < row.length; c++) {
-      const v = String(row[c] ?? '').trim().toLowerCase();
-      if (!v) continue;
-      for (const syn of synonyms) {
-        if (v.includes(syn)) return c;
-      }
-    }
-    return -1;
-  };
-
-  let headerIdx = -1;
-  let itemCol = -1, descCol = -1, qtyCol = -1, umCol = -1, priceCol = -1, amountCol = -1;
-
-  for (let r = 0; r < aoa.length; r++) {
-    const row = aoa[r] as unknown[];
-    const iCol = findColBySynonyms(row, HEADER_SYNONYMS.itemCode);
-    const aCol = findColBySynonyms(row, HEADER_SYNONYMS.amount);
-    if (iCol < 0 || aCol < 0) continue;
-    headerIdx = r;
-    itemCol = iCol;
-    amountCol = aCol;
-    descCol  = findColBySynonyms(row, HEADER_SYNONYMS.description);
-    qtyCol   = findColBySynonyms(row, HEADER_SYNONYMS.quantity);
-    umCol    = findColBySynonyms(row, HEADER_SYNONYMS.unit);
-    priceCol = findColBySynonyms(row, HEADER_SYNONYMS.price);
-    break;
-  }
-
-  if (headerIdx < 0 || itemCol < 0 || qtyCol < 0 || amountCol < 0) {
-    return [];
-  }
-
-  for (let i = headerIdx + 1; i < aoa.length; i++) {
-    const row = aoa[i] as unknown[];
-    const itemCode = String(row[itemCol] ?? '').trim();
-    if (!itemCode) continue;
-    if (/^(sales tax|total|subtotal)/i.test(itemCode)) continue;
-    const qty = Number(row[qtyCol]);
-    const amount = Number(row[amountCol]);
-    if (isNaN(qty) || qty === 0 || isNaN(amount)) continue;
-    const priceRaw = priceCol >= 0 ? Number(row[priceCol]) : 0;
-    const description = descCol >= 0
-      ? String(row[descCol] ?? '').replace(/\n/g, ' ').trim()
-      : '';
-    const um = umCol >= 0 ? String(row[umCol] ?? '').trim() : '';
-    result.push({
-      itemCode,
-      description,
-      qty,
-      um,
-      price: isNaN(priceRaw) ? 0 : priceRaw,
-      amount,
-    });
-  }
-
-  return result;
 }
 
 // ── 엑셀 다운로드 ─────────────────────────────
@@ -591,11 +493,11 @@ export function CustomsDocTab() {
 
   function cancelEdit() { setEditingCell(null); }
 
-  // 파일 처리
+  // 파일 처리 — 인보이스 PDF 직접 업로드 → parseInvoicePDF → OCR 오독 교정 → 분류 매핑
   async function handleFile(file: File) {
     const ext = file.name.split('.').pop()?.toLowerCase();
-    if (!['xlsx', 'xls'].includes(ext ?? '')) {
-      setErrorMsg('엑셀 파일(.xlsx / .xls)만 업로드 가능합니다.');
+    if (ext !== 'pdf') {
+      setErrorMsg('인보이스 PDF 파일만 업로드 가능합니다.');
       setStatus('error');
       return;
     }
@@ -604,17 +506,45 @@ export function CustomsDocTab() {
     setErrorMsg('');
     setRows([]);
     try {
-      const buffer = await file.arrayBuffer();
-      const wb = XLSX.read(buffer, { type: 'array' });
-      const allItems: ReturnType<typeof parseSheet> = [];
-      for (const sheetName of wb.SheetNames) {
-        allItems.push(...parseSheet(wb.Sheets[sheetName]));
+      const parsed = await parseInvoicePDF(file);
+      if (parsed.rows.length === 0) {
+        throw new Error('파싱된 품목이 없습니다. 인보이스 레이아웃을 확인하세요.');
       }
-      if (allItems.length === 0) throw new Error('파싱된 품목이 없습니다. 파일 형식을 확인하세요.');
-      const mapped: CustomsRow[] = allItems.map((item, idx) => {
-        const meta = getMeta(item.itemCode, mappings);
+
+      // OCR 오독 코드 교정 — "OCR 오독 관리" 탭(CodeCorrectionsTab)에서 등록한
+      // 잘못된 코드 → 올바른 코드 매핑을 조회한다. 인보이스검증 탭과 동일한 테이블을
+      // 공유하므로 별도 등록 없이 자동 적용된다. 화면/분류매핑 모두 교정된 코드만 사용.
+      // (wrong_code·correct_code 는 normalizeCode 로 소문자 저장 → 표시는 대문자로 복원.
+      //  code_prefix 는 3자리 숫자 또는 99E 라 대소문자 무관하게 getPrefix 매칭이 유지됨.)
+      const correctionMap = new Map<string, string>();
+      if (companyId) {
+        const { data, error } = await (
+          supabase as unknown as { from: (t: string) => any }
+        )
+          .from('code_corrections')
+          .select('wrong_code, correct_code')
+          .eq('company_id', companyId);
+        if (error) throw error;
+        for (const c of (data ?? []) as Array<{ wrong_code: string; correct_code: string }>) {
+          correctionMap.set(c.wrong_code, c.correct_code);
+        }
+      }
+
+      const mapped: CustomsRow[] = parsed.rows.map((item: InvoiceParsedRow, idx) => {
+        const rawNorm = normalizeCode(item.item_code);
+        // 교정 대상이면 교정 코드, 아니면 원본 파싱 코드(item.item_code)를 사용하되
+        // 표시는 항상 대문자(통관 문서 관례 · 기존 엑셀 경로 표기 유지).
+        const corrected = correctionMap.get(rawNorm);
+        const itemCode = corrected ? corrected.toUpperCase() : item.item_code.toUpperCase();
+        const meta = getMeta(itemCode, mappings);
         return {
-          no: idx + 1, ...item,
+          no: idx + 1,
+          itemCode,
+          description: item.description,
+          qty: item.qty_shipped,
+          um: item.unit,
+          price: item.price,
+          amount: item.amount,
           category: meta?.product_category ?? '',
           hsCode: meta?.hs_code ?? '',
           importReqNo: meta?.import_req_no ?? '',
@@ -624,10 +554,10 @@ export function CustomsDocTab() {
       setRows(mapped);
       setStatus('done');
       try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(mapped)); } catch { /* ignore */ }
-      const match = file.name.match(/(\d{4,})/);
-      const inv = match?.[1] ?? '';
-      setInvoiceNo(inv);
-      try { sessionStorage.setItem(SESSION_INV_KEY, inv); } catch { /* ignore */ }
+      // 🔴 (2026-07-10) 기존엔 파일명에서 숫자를 정규식으로 추출했으나, PDF 파서가
+      //    이미 인보이스 본문에서 실제 INVOICE # / DOC NO. 를 뽑아내므로 그 값을 사용한다.
+      setInvoiceNo(parsed.invoice_no ?? '');
+      try { sessionStorage.setItem(SESSION_INV_KEY, parsed.invoice_no ?? ''); } catch { /* ignore */ }
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
       setStatus('error');
@@ -685,7 +615,7 @@ export function CustomsDocTab() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".xlsx,.xls"
+            accept=".pdf"
             style={{ display: 'none' }}
             onChange={handleInputChange}
           />
@@ -693,12 +623,12 @@ export function CustomsDocTab() {
             <div style={{ color: 'var(--ink-2)', fontSize: 12 }}>⏳ 파싱 중…</div>
           ) : (
             <>
-              <div style={{ fontSize: 22, marginBottom: 6 }}>📊</div>
+              <FileText style={{ width: 22, height: 22, marginBottom: 6, color: 'var(--ink-2)' }} />
               <div style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--ink)' }}>
-                엑셀 업로드
+                인보이스 PDF 업로드
               </div>
               <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>
-                .xlsx / .xls · 다중 시트 OK
+                드래그하거나 클릭 · .pdf 원본
               </div>
               {fileName && (
                 <div style={{
@@ -799,7 +729,7 @@ export function CustomsDocTab() {
                 color: 'var(--ink-3)', fontSize: 12.5,
                 padding: '14px 0',
               }}>
-                엑셀 파일을 업로드하면 분류별 합계가 표시됩니다
+                인보이스 PDF를 업로드하면 분류별 합계가 표시됩니다
               </div>
               {/* 원산지증명서 — idle 상태에도 항상 표시 */}
               <CooSection
