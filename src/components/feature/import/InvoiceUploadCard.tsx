@@ -100,7 +100,14 @@ interface Props {
   products?: ReadonlyArray<{ code: string; name: string; category: string }>;
 }
 
-type Tab = 'all' | CompareStatus;
+/** 필터 다중선택 지원 — DB(`last_tab`, text 컬럼)엔 콤마로 이어붙인 문자열로 저장/복원. */
+function serializeTabs(tabs: Set<CompareStatus>): string {
+  return tabs.size === 0 ? 'all' : Array.from(tabs).join(',');
+}
+function parseLastTab(value: string | null | undefined): Set<CompareStatus> {
+  if (!value || value === 'all') return new Set();
+  return new Set(value.split(',').filter(Boolean) as CompareStatus[]);
+}
 
 // '금액불일치' 는 테마 토큰에 별도 orange 가 없어 hex 직접 지정 (amber 와 구분).
 const STATUS_META: Record<
@@ -249,7 +256,16 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     invoiceNo: string;
     invoiceDate: string;
   } | null>(null);
-  const [tab, setTab] = useState<Tab>('all');
+  // 다중선택 필터 — 빈 Set = "전체"(필터 없음). 여러 상태를 동시에 켜면 OR 조건으로 표시.
+  const [activeTabs, setActiveTabs] = useState<Set<CompareStatus>>(new Set());
+  const toggleTab = (t: CompareStatus) => {
+    setActiveTabs((prev) => {
+      const next = new Set(prev);
+      if (next.has(t)) next.delete(t);
+      else next.add(t);
+      return next;
+    });
+  };
   // 현재 포커스된 input 의 rowId — 코드/수량 셀 포커스 하이라이트용
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [dbSaving, setDbSaving] = useState(false);
@@ -377,8 +393,8 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       .maybeSingle()
       .then(({ data }) => {
         if (!data) return;
-        // 복원으로 인한 setComparison/setTab 으로 자동저장 useEffect 가 다시 트리거되어
-        // 방금 로드한 데이터를 그대로 재저장하는 것을 막음.
+        // 복원으로 인한 setComparison/setActiveTabs 으로 자동저장 useEffect 가 다시
+        // 트리거되어 방금 로드한 데이터를 그대로 재저장하는 것을 막음.
         skipNextAutoSave.current = true;
         setComparison({
           rows: (data.comparison_rows as unknown as ComparisonRow[]) ?? [],
@@ -387,7 +403,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
           invoiceNo: data.invoice_no ?? '',
           invoiceDate: data.invoice_date ?? '',
         });
-        setTab((data.last_tab as Tab) ?? 'all');
+        setActiveTabs(parseLastTab(data.last_tab));
         // 파일명 복원 (File 객체 자체는 복원 불가 — 표시 목적)
         if (data.order_file_name) setOrderFile({ name: data.order_file_name } as File);
         if (data.invoice_file_name) setInvoiceFile({ name: data.invoice_file_name } as File);
@@ -420,7 +436,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       invoiceNo: data.invoice_no ?? '',
       invoiceDate: data.invoice_date ?? '',
     });
-    setTab((data.last_tab as Tab) ?? 'all');
+    setActiveTabs(parseLastTab(data.last_tab));
     setOrderFile(data.order_file_name ? ({ name: data.order_file_name } as File) : null);
     setInvoiceFile(data.invoice_file_name ? ({ name: data.invoice_file_name } as File) : null);
     setInvoiceFilePath(data.invoice_file_path ?? null);
@@ -456,7 +472,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [products]);
 
-  // ── comparison/tab 변경 시 DB 자동 저장 ──
+  // ── comparison/필터 변경 시 DB 자동 저장 ──
   useEffect(() => {
     if (skipNextAutoSave.current) {
       skipNextAutoSave.current = false;
@@ -465,13 +481,13 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     if (!comparison || !companyId) return;
     void saveToDb(
       comparison,
-      tab,
+      serializeTabs(activeTabs),
       orderFile?.name,
       invoiceFile?.name,
       invoiceFilePath,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comparison, tab]);
+  }, [comparison, activeTabs]);
 
   const handleCompare = async () => {
     if (!orderFile || !invoiceFile) return;
@@ -531,7 +547,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
         invoiceNo: invoice.invoice_no,
         invoiceDate: invoice.invoice_date,
       });
-      setTab('all');
+      setActiveTabs(new Set());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -713,7 +729,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       if (!prev) return prev;
       return { ...prev, rows: [newRow, ...prev.rows] };
     });
-    setTab('all');
+    setActiveTabs(new Set());
   };
 
   // 코드 셀 입력 변경 — 화면 표시만 즉시 반영 (재매칭은 blur 에서).
@@ -764,9 +780,9 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
 
   const visibleRows = useMemo(() => {
     if (!comparison) return [];
-    if (tab === 'all') return comparison.rows;
-    return comparison.rows.filter((r) => r.status === tab);
-  }, [comparison, tab]);
+    if (activeTabs.size === 0) return comparison.rows;
+    return comparison.rows.filter((r) => activeTabs.has(r.status));
+  }, [comparison, activeTabs]);
 
   const handleFill = async () => {
     if (!comparison) return;
@@ -955,7 +971,7 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
     setInvoiceFile(null);
     setComparison(null);
     setError(null);
-    setTab('all');
+    setActiveTabs(new Set());
     // 세션 리셋 시 세션 소유의 Storage 원본 인보이스 파일도 함께 삭제.
     // 이미 안내 설정 쪽으로 이관됐다면 그건 별도 경로로 복사돼 있어 영향 없음.
     const orphanedPath = invoiceFilePath;
@@ -1111,36 +1127,36 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
               </span>
             </span>
             <TabButton
-              active={tab === 'all'}
-              onClick={() => setTab('all')}
+              active={activeTabs.size === 0}
+              onClick={() => setActiveTabs(new Set())}
               label={`전체 ${counts.all}`}
             />
             <TabButton
-              active={tab === 'qty_diff'}
-              onClick={() => setTab('qty_diff')}
+              active={activeTabs.has('qty_diff')}
+              onClick={() => toggleTab('qty_diff')}
               label={`수량불일치 ${counts.qty_diff}`}
               tone="warning"
             />
             <TabButton
-              active={tab === 'amount_diff'}
-              onClick={() => setTab('amount_diff')}
+              active={activeTabs.has('amount_diff')}
+              onClick={() => toggleTab('amount_diff')}
               label={`금액불일치 ${counts.amount_diff}`}
               tone="warning"
             />
             <TabButton
-              active={tab === 'order_only'}
-              onClick={() => setTab('order_only')}
+              active={activeTabs.has('order_only')}
+              onClick={() => toggleTab('order_only')}
               label={`주문서만 ${counts.order_only}`}
               tone="danger"
             />
             <TabButton
-              active={tab === 'invoice_only'}
-              onClick={() => setTab('invoice_only')}
+              active={activeTabs.has('invoice_only')}
+              onClick={() => toggleTab('invoice_only')}
               label={`인보이스만 ${counts.invoice_only}`}
             />
             <TabButton
-              active={tab === 'unknown'}
-              onClick={() => setTab('unknown')}
+              active={activeTabs.has('unknown')}
+              onClick={() => toggleTab('unknown')}
               label={`미확인 ${counts.unknown}`}
             />
             {counts.edited > 0 && (
