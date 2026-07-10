@@ -1,15 +1,19 @@
 /**
  * 발주 예상에서 제외할 카테고리 목록 — 공용 훅.
  *
- * TopNav 헤더 위젯과 발주서 페이지가 동일 localStorage key 를 공유하여
- * 어디서 토글하든 새로고침 후 양쪽에 일관 반영된다.
- *
- * 🟠 cross-tab/cross-component 실시간 동기화는 하지 않음 — 페이지 진입(마운트)
- *    시점에 localStorage 를 읽는 것으로 충분.
+ * 🔴 (2026-07-11 §50) Zustand 전역 스토어로 교체 — 이유는 `useLeadTimeSettings.ts`
+ *    상단 주석과 동일(TopNav ↔ 발주서 페이지 형제 컴포넌트 간 실시간 미동기화 문제).
+ *    기존 localStorage 키(`purchaseOrderExcludedCategories`)의 값은 스토어 최초 생성 시
+ *    1회 마이그레이션해서 그대로 이어받는다.
+ * 🟢 훅의 공개 시그니처(`usePurchaseOrderExcluded()`)와 반환 타입은 기존과 동일 —
+ *    호출부(TopNav/PurchaseOrderPage 등) 수정 불필요.
  */
-import { useState } from 'react';
+import { useMemo } from 'react';
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
-const STORAGE_KEY = 'purchaseOrderExcludedCategories';
+const LEGACY_KEY = 'purchaseOrderExcludedCategories';
+const STORE_KEY = 'purchaseOrderExcludedCategories-store';
 
 /** 초기값 — 해상(선박) 수입 카테고리 3종. */
 export const DEFAULT_EXCLUDED: readonly string[] = [
@@ -18,26 +22,43 @@ export const DEFAULT_EXCLUDED: readonly string[] = [
   '3-1.디글레이저',
 ];
 
-function load(): Set<string> {
-  if (typeof window === 'undefined') return new Set(DEFAULT_EXCLUDED);
+/** 기존(비-Zustand) 저장 방식으로 남아있던 값을 1회성으로 읽어온다. */
+function migrateLegacy(): string[] {
+  if (typeof window === 'undefined') return [...DEFAULT_EXCLUDED];
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw == null) return new Set(DEFAULT_EXCLUDED);
+    const raw = window.localStorage.getItem(LEGACY_KEY);
+    if (raw == null) return [...DEFAULT_EXCLUDED];
     const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return new Set(DEFAULT_EXCLUDED);
-    return new Set(arr.filter((v): v is string => typeof v === 'string'));
+    if (!Array.isArray(arr)) return [...DEFAULT_EXCLUDED];
+    return arr.filter((v): v is string => typeof v === 'string');
   } catch {
-    return new Set(DEFAULT_EXCLUDED);
+    return [...DEFAULT_EXCLUDED];
   }
 }
 
-function save(set: Set<string>): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(set)));
-  } catch {
-    /* localStorage 사용 불가 환경 — 무시. */
-  }
+interface ExcludedStore {
+  excludedArr: string[];
+  toggle: (cat: string) => void;
+  includeAll: () => void;
+  restoreDefault: () => void;
 }
+
+const useExcludedStore = create<ExcludedStore>()(
+  persist(
+    (set, get) => ({
+      excludedArr: migrateLegacy(),
+      toggle: (cat) => {
+        const cur = new Set(get().excludedArr);
+        if (cur.has(cat)) cur.delete(cat);
+        else cur.add(cat);
+        set({ excludedArr: Array.from(cur) });
+      },
+      includeAll: () => set({ excludedArr: [] }),
+      restoreDefault: () => set({ excludedArr: [...DEFAULT_EXCLUDED] }),
+    }),
+    { name: STORE_KEY },
+  ),
+);
 
 export interface UsePurchaseOrderExcludedResult {
   excluded: Set<string>;
@@ -47,29 +68,13 @@ export interface UsePurchaseOrderExcludedResult {
 }
 
 export function usePurchaseOrderExcluded(): UsePurchaseOrderExcludedResult {
-  const [excluded, setExcluded] = useState<Set<string>>(load);
+  const excludedArr = useExcludedStore((s) => s.excludedArr);
+  const toggle = useExcludedStore((s) => s.toggle);
+  const includeAll = useExcludedStore((s) => s.includeAll);
+  const restoreDefault = useExcludedStore((s) => s.restoreDefault);
 
-  const toggle = (cat: string) => {
-    setExcluded((prev) => {
-      const next = new Set(prev);
-      if (next.has(cat)) next.delete(cat);
-      else next.add(cat);
-      save(next);
-      return next;
-    });
-  };
-
-  const includeAll = () => {
-    const next = new Set<string>();
-    save(next);
-    setExcluded(next);
-  };
-
-  const restoreDefault = () => {
-    const next = new Set(DEFAULT_EXCLUDED);
-    save(next);
-    setExcluded(next);
-  };
+  // excludedArr 참조가 실제로 바뀔 때만 새 Set 생성 — 불필요한 리렌더 방지.
+  const excluded = useMemo(() => new Set(excludedArr), [excludedArr]);
 
   return { excluded, toggle, includeAll, restoreDefault };
 }

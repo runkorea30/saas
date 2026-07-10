@@ -1,22 +1,30 @@
 /**
  * 리드타임(해상/FedEx) 설정 단일 진입점.
  *
- * localStorage 에 회사별로 저장 (`leadTimeDaysOverride_{companyId}`). 기본값은
- * `constants/leadTimes.ts` 의 상수 (`SEA_LEAD_TIME_DAYS`=90, `FEDEX_LEAD_TIME_DAYS`=15).
- *
- * 🔴 프로젝트 내 리드타임 참조는 모두 이 훅을 거칠 것. 기존 `getLeadTimeDays`
- *    카테고리 헬퍼는 "기본값 상수" 역할로만 남기고 실계산은 여기서 나온 값으로 대체.
+ * 🔴 (2026-07-11 §50) Zustand 전역 스토어로 교체. 기존엔 컴포넌트별 독립 useState +
+ *    localStorage 직접 읽기/쓰기 방식이라, 같은 화면에 동시에 마운트된 형제 컴포넌트
+ *    (예: TopNav ↔ PurchaseOrderPage) 끼리는 한쪽에서 값을 바꿔도 다른 쪽에 새로고침
+ *    전까지 반영되지 않는 문제가 있었다. Zustand 스토어 하나를 모든 컴포넌트가 구독하는
+ *    구조로 바꿔 어디서 바꾸든 즉시 전체 화면에 반영되도록 함. 영속(localStorage 저장)은
+ *    zustand `persist` 미들웨어가 대신 처리.
+ * 🔴 회사별 설정 유지: 기존 키 `leadTimeDaysOverride_{companyId}` 데이터는 스토어
+ *    최초 생성 시 1회 마이그레이션(아래 `migrateLegacy()`)해서 그대로 이어받음.
  * 🟠 값 범위: [1, 365]. 0 이하 입력은 1 로 clamp 해 divide-by-zero 계산 사고 방지.
- * 🟡 cross-tab 실시간 동기화는 하지 않음 — 새로고침 시 반영 정도로 충분.
+ * 🟢 훅의 공개 시그니처(`useLeadTimeSettings(companyId)`)와 반환 타입은 기존과 동일 —
+ *    호출부(usePurchaseForecast/useAutoRecalcReorderPoints/PurchaseOrderPage/TopNav 등)
+ *    수정 불필요.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import {
   SEA_LEAD_TIME_DAYS,
   FEDEX_LEAD_TIME_DAYS,
   SEA_IMPORT_CATEGORIES,
 } from '@/constants/leadTimes';
 
-const STORAGE_KEY_PREFIX = 'leadTimeDaysOverride_';
+const LEGACY_KEY_PREFIX = 'leadTimeDaysOverride_';
+const STORE_KEY = 'leadTimeDaysOverride-store';
 
 export interface LeadTimeSettings {
   sea: number;
@@ -33,28 +41,68 @@ function clamp(n: number): number {
   return Math.max(1, Math.min(365, Math.round(n)));
 }
 
-function readFromStorage(companyId: string | null): LeadTimeSettings {
-  if (!companyId || typeof window === 'undefined') return DEFAULT_SETTINGS;
+/** 기존(비-Zustand) 저장 방식으로 남아있던 회사별 설정을 1회성으로 읽어온다. */
+function migrateLegacy(): Record<string, LeadTimeSettings> {
+  if (typeof window === 'undefined') return {};
+  const result: Record<string, LeadTimeSettings> = {};
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY_PREFIX + companyId);
-    if (!raw) return DEFAULT_SETTINGS;
-    const parsed = JSON.parse(raw);
-    return {
-      sea: clamp(Number(parsed?.sea ?? DEFAULT_SETTINGS.sea)),
-      fedex: clamp(Number(parsed?.fedex ?? DEFAULT_SETTINGS.fedex)),
-    };
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (!key || !key.startsWith(LEGACY_KEY_PREFIX)) continue;
+      const companyId = key.slice(LEGACY_KEY_PREFIX.length);
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw);
+      result[companyId] = {
+        sea: clamp(Number(parsed?.sea ?? DEFAULT_SETTINGS.sea)),
+        fedex: clamp(Number(parsed?.fedex ?? DEFAULT_SETTINGS.fedex)),
+      };
+    }
   } catch {
-    return DEFAULT_SETTINGS;
+    /* 마이그레이션 실패 시 빈 값 — 기본값으로 폴백됨 */
   }
+  return result;
 }
 
-function writeToStorage(companyId: string, s: LeadTimeSettings): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY_PREFIX + companyId, JSON.stringify(s));
-  } catch {
-    /* 저장 실패는 조용히 무시 — 사용자 입력값만 세션 유지, 다음 진입 시 기본값 */
-  }
+interface LeadTimeStore {
+  byCompany: Record<string, LeadTimeSettings>;
+  setSea: (companyId: string, n: number) => void;
+  setFedex: (companyId: string, n: number) => void;
+  reset: (companyId: string) => void;
 }
+
+const useLeadTimeStore = create<LeadTimeStore>()(
+  persist(
+    (set) => ({
+      byCompany: migrateLegacy(),
+      setSea: (companyId, n) =>
+        set((state) => ({
+          byCompany: {
+            ...state.byCompany,
+            [companyId]: {
+              ...(state.byCompany[companyId] ?? DEFAULT_SETTINGS),
+              sea: clamp(n),
+            },
+          },
+        })),
+      setFedex: (companyId, n) =>
+        set((state) => ({
+          byCompany: {
+            ...state.byCompany,
+            [companyId]: {
+              ...(state.byCompany[companyId] ?? DEFAULT_SETTINGS),
+              fedex: clamp(n),
+            },
+          },
+        })),
+      reset: (companyId) =>
+        set((state) => ({
+          byCompany: { ...state.byCompany, [companyId]: DEFAULT_SETTINGS },
+        })),
+    }),
+    { name: STORE_KEY },
+  ),
+);
 
 export interface UseLeadTimeSettingsResult extends LeadTimeSettings {
   setSea: (n: number) => void;
@@ -66,42 +114,33 @@ export interface UseLeadTimeSettingsResult extends LeadTimeSettings {
 export function useLeadTimeSettings(
   companyId: string | null,
 ): UseLeadTimeSettingsResult {
-  const [settings, setSettings] = useState<LeadTimeSettings>(() =>
-    readFromStorage(companyId),
+  const settings = useLeadTimeStore((s) =>
+    companyId ? (s.byCompany[companyId] ?? DEFAULT_SETTINGS) : DEFAULT_SETTINGS,
   );
-
-  // companyId 가 나중에 로드되는 케이스 (useCompany 는 초기 null 반환) 를 위해
-  // companyId 변화 시 다시 로드. 저장은 companyId 확정 후에만.
-  useEffect(() => {
-    setSettings(readFromStorage(companyId));
-  }, [companyId]);
+  const storeSetSea = useLeadTimeStore((s) => s.setSea);
+  const storeSetFedex = useLeadTimeStore((s) => s.setFedex);
+  const storeReset = useLeadTimeStore((s) => s.reset);
 
   const setSea = useCallback(
     (n: number) => {
-      const next = { ...settings, sea: clamp(n) };
-      setSettings(next);
-      if (companyId) writeToStorage(companyId, next);
+      if (companyId) storeSetSea(companyId, n);
     },
-    [companyId, settings],
+    [companyId, storeSetSea],
   );
 
   const setFedex = useCallback(
     (n: number) => {
-      const next = { ...settings, fedex: clamp(n) };
-      setSettings(next);
-      if (companyId) writeToStorage(companyId, next);
+      if (companyId) storeSetFedex(companyId, n);
     },
-    [companyId, settings],
+    [companyId, storeSetFedex],
   );
 
   const reset = useCallback(() => {
-    setSettings(DEFAULT_SETTINGS);
-    if (companyId) writeToStorage(companyId, DEFAULT_SETTINGS);
-  }, [companyId]);
+    if (companyId) storeReset(companyId);
+  }, [companyId, storeReset]);
 
   const isDefault =
-    settings.sea === DEFAULT_SETTINGS.sea &&
-    settings.fedex === DEFAULT_SETTINGS.fedex;
+    settings.sea === DEFAULT_SETTINGS.sea && settings.fedex === DEFAULT_SETTINGS.fedex;
 
   return { ...settings, setSea, setFedex, reset, isDefault };
 }
