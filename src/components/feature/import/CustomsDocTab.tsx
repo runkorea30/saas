@@ -182,6 +182,8 @@ function EditCell({
             fontSize: 11,
             fontFamily: mono ? 'monospace' : undefined,
             outline: 'none',
+            background: 'var(--bg)',
+            color: 'var(--ink)',
           }}
         />
       ) : (
