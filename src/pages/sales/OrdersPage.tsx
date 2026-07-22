@@ -249,6 +249,21 @@ export function OrdersPage() {
   const selectedOrder: OrderWithGroupInfo | null =
     groupedOrders.find((o) => o.id === selectedId) ?? null;
 
+  // 최초 주문(묶음 첫 행) 선택 시 같은 묶음의 추가주문들을 상세 패널에 함께 전달.
+  // 추가주문을 개별 선택했거나 단독 주문이면 빈 배열 → 기존처럼 그 주문 하나만 표시(회귀 방지).
+  // 데이터: getSameDayCustomerOrderIds 는 groupedOrders 순서(created_at 오름차순)를 보존하므로
+  //         최초 주문을 제외하면 추가1→추가2… 순서가 그대로 유지됨. items 는 useOrders 가 이미 로드.
+  const additionalOrders: Order[] = useMemo(() => {
+    if (!selectedOrder || selectedOrder.isAdditional) return [];
+    const ids = getSameDayCustomerOrderIds(groupedOrders, selectedOrder.id);
+    if (ids.length <= 1) return [];
+    const byId = new Map(groupedOrders.map((o) => [o.id, o]));
+    return ids
+      .filter((id) => id !== selectedOrder.id)
+      .map((id) => byId.get(id))
+      .filter((o): o is OrderWithGroupInfo => Boolean(o));
+  }, [groupedOrders, selectedOrder]);
+
   // ───── 체크박스 일괄 ─────
   // 같은 거래처 + 같은 날짜(시간 무관) 묶음 처리는 utils/orderGrouping 의 공용
   // 유틸 사용. 체크박스 경로와 우클릭 경로가 동일 함수를 호출해 정의가 한 곳에만 존재.
@@ -875,6 +890,7 @@ export function OrdersPage() {
           <OrderDetailPane
             order={selectedOrder}
             isAdditional={selectedOrder?.isAdditional ?? false}
+            additionalOrders={additionalOrders}
           />
         </div>
       </main>

@@ -40,10 +40,17 @@ import type { Order, OrderItemDraft } from '@/types/orders';
 export function OrderDetailPane({
   order,
   isAdditional = false,
+  additionalOrders = [],
 }: {
   order: Order | null;
   /** 같은 날짜·같은 거래처 묶음에서 본주문 이후에 생성된 추가주문 여부 — true 면 헤더에 배지 표시. */
   isAdditional?: boolean;
+  /**
+   * 최초 주문 선택 시 함께 표시할 같은 묶음의 추가주문들(created_at 오름차순).
+   * 비어 있으면(단독 주문 또는 추가주문 개별 선택) 기존 단일 주문 뷰 그대로.
+   * items 는 useOrders 조회에 이미 포함되어 있어 추가 쿼리 불필요.
+   */
+  additionalOrders?: Order[];
 }) {
   const { companyId } = useCompany();
   const queryClient = useQueryClient();
@@ -151,6 +158,15 @@ export function OrderDetailPane({
   if (!order) return <DetailEmpty />;
 
   const d = new Date(order.order_date);
+
+  // ───── 묶음(같은 날짜·거래처) 그룹 뷰 여부 ─────
+  // 최초 주문 선택 시에만 additionalOrders 가 채워짐. 그룹이면 헤더 금액을 묶음 전체 합계로,
+  // "N건 묶음" 배지를 표시하고 하단에 추가주문 섹션 + 묶음 전체 합계를 렌더.
+  const isGrouped = additionalOrders.length > 0;
+  const groupCount = additionalOrders.length + 1;
+  const groupTotal =
+    order.total_amount +
+    additionalOrders.reduce((s, o) => s + o.total_amount, 0);
 
   // 🔴 기존 행 수량을 수정했지만 아직 저장 전인 상태 — editMode 가 아니어도
   //    "저장하기/취소" 버튼을 노출해 자동저장 없이 명시적으로 저장하도록 함.
@@ -346,6 +362,36 @@ export function OrderDetailPane({
       ]);
     } catch (err) {
       console.error('품목 삭제 실패:', err);
+      alert('품목 삭제 중 오류가 발생했습니다.');
+    }
+  };
+
+  /**
+   * 그룹 뷰의 추가주문 품목 삭제 — 해당 추가주문에만 적용(휴지통).
+   * order.items(useOrders 로 이미 로드)의 품목 id 를 hard delete → 그 추가주문 total 재동기화 →
+   * ['orders'] invalidate 로 묶음 표시/합계 갱신. 최초 주문 편집 흐름과 독립.
+   */
+  const handleDeleteGroupItem = async (
+    additionalOrderId: string,
+    itemId: string,
+  ) => {
+    if (!companyId) return;
+    if (!window.confirm('이 품목을 삭제하시겠습니까?')) return;
+    try {
+      const { error } = await supabase
+        .from('order_items')
+        .delete()
+        .eq('id', itemId)
+        .eq('company_id', companyId);
+      if (error) throw error;
+      await syncOrderTotal({ companyId, orderId: additionalOrderId });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['order-items', additionalOrderId] }),
+        queryClient.invalidateQueries({ queryKey: ['orders'] }),
+        queryClient.invalidateQueries({ queryKey: ['inventory-stock', companyId] }),
+      ]);
+    } catch (err) {
+      console.error('추가주문 품목 삭제 실패:', err);
       alert('품목 삭제 중 오류가 발생했습니다.');
     }
   };
@@ -583,6 +629,24 @@ export function OrderDetailPane({
               추가주문
             </span>
           )}
+          {isGrouped && (
+            <span
+              title="같은 날짜·같은 거래처 묶음"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '1px 6px',
+                borderRadius: 999,
+                fontSize: 10.5,
+                fontWeight: 600,
+                background: 'var(--brand-wash)',
+                color: 'var(--brand)',
+                letterSpacing: '0.04em',
+              }}
+            >
+              {groupCount}건 묶음
+            </span>
+          )}
           <div style={{ flex: 1 }} />
           <button
             type="button"
@@ -633,7 +697,7 @@ export function OrderDetailPane({
               fontVariantNumeric: 'tabular-nums',
             }}
           >
-            {order.total_amount.toLocaleString('ko-KR')}원
+            {(isGrouped ? groupTotal : order.total_amount).toLocaleString('ko-KR')}원
           </span>
           <div style={{ flex: 1 }} />
           <button
@@ -1194,6 +1258,49 @@ export function OrderDetailPane({
         )}
       </div>
 
+      {/* 묶음 그룹 뷰 — 최초 주문 선택 시 같은 날짜·거래처의 추가주문 품목을 이어서 표시.
+          추가주문 각각: 라벨(추가N)·시간·개별 합계 + 품목표(읽기 + 휴지통 삭제만).
+          맨 아래 묶음 전체 합계(최초 + 모든 추가주문 total_amount). */}
+      {isGrouped && (
+        <div style={{ padding: '0 20px 8px' }}>
+          {additionalOrders.map((ao, i) => (
+            <AdditionalOrderSection
+              key={ao.id}
+              order={ao}
+              index={i + 1}
+              onDeleteItem={handleDeleteGroupItem}
+            />
+          ))}
+          <div
+            style={{
+              marginTop: 14,
+              paddingTop: 12,
+              borderTop: '2px solid var(--line-strong)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'baseline',
+            }}
+          >
+            <span
+              style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-2)' }}
+            >
+              묶음 전체 합계
+            </span>
+            <span
+              className="font-num"
+              style={{
+                fontSize: 13.5,
+                fontWeight: 700,
+                color: 'var(--brand)',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {groupTotal.toLocaleString()}원
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* 🟠 출고 사진 — 데스크탑은 조회 전용 (모바일 앱에서 촬영). */}
       <div
         style={{
@@ -1287,6 +1394,137 @@ function SuggestionList({
           </span>
         </button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * 그룹 뷰의 추가주문 1건 섹션 — 라벨(추가N) + 시간 + 개별 합계 + 읽기전용 품목표.
+ * 품목은 order.items(useOrders JOIN)에서 그대로 사용. 편집 없음, 휴지통 삭제만 제공.
+ * 공급가 = amount / quantity (DB 설계: amount = 공급가 × 수량), 판매가는 product.sell_price.
+ */
+function AdditionalOrderSection({
+  order,
+  index,
+  onDeleteItem,
+}: {
+  order: Order;
+  /** 묶음 내 추가주문 순번 (1-based) — "추가1", "추가2" … */
+  index: number;
+  onDeleteItem: (orderId: string, itemId: string) => void;
+}) {
+  const items = order.items ?? [];
+  // created_at 을 KST HH:MM 로 — 브라우저 타임존 무관하게 timeZone 지정.
+  const timeStr = new Date(order.created_at).toLocaleTimeString('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Seoul',
+  });
+  return (
+    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <span
+          title="추가주문"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '1px 8px',
+            borderRadius: 999,
+            fontSize: 11,
+            fontWeight: 700,
+            background: 'var(--warning-wash)',
+            color: 'var(--warning)',
+            letterSpacing: '0.04em',
+          }}
+        >
+          추가{index}
+        </span>
+        <span
+          className="font-num"
+          style={{
+            fontSize: 11,
+            color: 'var(--ink-3)',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {timeStr}
+        </span>
+        <div style={{ flex: 1 }} />
+        <span
+          className="font-num"
+          style={{
+            fontSize: 12.5,
+            fontWeight: 600,
+            color: 'var(--ink)',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {order.total_amount.toLocaleString()}원
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="border-b border-[var(--line-default)]">
+              <th className="text-left py-2 px-2 font-medium text-[var(--ink-3)] w-20">코드</th>
+              <th className="text-left py-2 px-2 font-medium text-[var(--ink-3)]">제품명</th>
+              <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-14">수량</th>
+              <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">판매가</th>
+              <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">공급가</th>
+              <th className="text-right py-2 px-2 font-medium text-[var(--ink-3)] w-20">합계</th>
+              <th className="w-8" />
+            </tr>
+          </thead>
+          <tbody>
+            {items.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="py-3 text-center text-[var(--ink-3)]">
+                  품목이 없습니다.
+                </td>
+              </tr>
+            ) : (
+              items.map((it) => {
+                const supply =
+                  it.quantity !== 0
+                    ? Math.round(Math.abs(it.amount / it.quantity))
+                    : 0;
+                const sellPrice = it.product?.sell_price ?? 0;
+                return (
+                  <tr
+                    key={it.id}
+                    className={`border-b border-[var(--line-subtle)] hover:bg-[var(--surface-2)] transition-colors ${
+                      it.is_return ? 'text-red-500' : ''
+                    }`}
+                  >
+                    <td className="py-1.5 px-2 font-mono">{it.product?.code ?? '—'}</td>
+                    <td className="py-1.5 px-2">{it.product?.name ?? '—'}</td>
+                    <td className="py-1.5 px-2 text-right font-num">{it.quantity}</td>
+                    <td className="py-1.5 px-2 text-right font-num">
+                      {sellPrice > 0 ? sellPrice.toLocaleString() : '—'}
+                    </td>
+                    <td className="py-1.5 px-2 text-right font-num">
+                      {supply > 0 ? supply.toLocaleString() : '—'}
+                    </td>
+                    <td className="py-1.5 px-2 text-right font-num font-medium">
+                      {it.amount.toLocaleString()}
+                    </td>
+                    <td className="py-1.5 px-2 text-center">
+                      <button
+                        type="button"
+                        onClick={() => onDeleteItem(order.id, it.id)}
+                        title="이 품목 삭제"
+                        className="text-[var(--ink-4)] hover:text-[var(--danger)] transition-colors"
+                      >
+                        <Trash2 size={12} strokeWidth={1.8} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
