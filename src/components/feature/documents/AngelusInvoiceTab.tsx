@@ -20,6 +20,7 @@ import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Modal } from '@/components/ui/Modal';
 import {
   parseSearchTerms,
   lineItemMatchesTerms,
@@ -35,22 +36,38 @@ const SEARCH_PLACEHOLDER: Record<'doc_no' | 'file_name' | 'line_item', string> =
   line_item: '제품코드/명 검색 (쉼표·공백으로 여러 개 가능)',
 };
 
-/** 항목 8: 검색 텀에 매칭되는 line_items 만 추출(카드 chip 강조용). 텀 없으면 빈 배열. */
-function matchedLineItems(
-  meta: unknown,
-  terms: string[],
-): { code: string; name: string }[] {
+interface MatchedLineItem {
+  code: string;
+  name: string;
+  qty: number | null;
+  amount: number | null;
+}
+
+/** unknown → 유한 숫자 or null. */
+function toNumOrNull(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** 항목 8/16: 검색 텀에 매칭되는 line_items 만 추출(chip 강조 + 요약 팝업용). 텀 없으면 빈 배열. */
+function matchedLineItems(meta: unknown, terms: string[]): MatchedLineItem[] {
   if (terms.length === 0 || !meta || typeof meta !== 'object') return [];
   const items = (meta as { line_items?: unknown }).line_items;
   if (!Array.isArray(items)) return [];
-  const out: { code: string; name: string }[] = [];
+  const out: MatchedLineItem[] = [];
   for (const it of items) {
     if (!it || typeof it !== 'object') continue;
     const o = it as Record<string, unknown>;
     const code = String(o.code ?? '');
     const name = String(o.name ?? '');
     if (lineItemMatchesTerms(code, name, terms)) {
-      out.push({ code, name });
+      out.push({
+        code,
+        name,
+        qty: toNumOrNull(o.qty),
+        amount: toNumOrNull(o.amount),
+      });
     }
   }
   return out;
@@ -121,6 +138,11 @@ export function AngelusInvoiceTab({ companyId }: Props) {
     'doc_no' | 'file_name' | 'line_item'
   >('doc_no');
   const [searchText, setSearchText] = useState('');
+  // 항목 16: 매칭 chip 클릭 시 요약 팝업으로 보여줄 대상.
+  const [matchModal, setMatchModal] = useState<{
+    row: AngelusRow;
+    matched: MatchedLineItem[];
+  } | null>(null);
 
   const queryKey = ['document-files', companyId, 'angelus_invoice'];
 
@@ -518,6 +540,7 @@ export function AngelusInvoiceTab({ companyId }: Props) {
               onDelete={setDeleteTarget}
               onSubtypeChange={handleSubtypeChange}
               onPoRefChange={handlePoRefChange}
+              onShowMatch={(row, matched) => setMatchModal({ row, matched })}
             />
           ))}
           {unassigned.length > 0 && (
@@ -530,6 +553,7 @@ export function AngelusInvoiceTab({ companyId }: Props) {
               onDelete={setDeleteTarget}
               onSubtypeChange={handleSubtypeChange}
               onPoRefChange={handlePoRefChange}
+              onShowMatch={(row, matched) => setMatchModal({ row, matched })}
               muted
             />
           )}
@@ -552,6 +576,140 @@ export function AngelusInvoiceTab({ companyId }: Props) {
         onConfirm={handleConfirmDelete}
         busy={busyDelete}
       />
+
+      <Modal
+        open={Boolean(matchModal)}
+        onClose={() => setMatchModal(null)}
+        title="매칭 정보 요약"
+        width={520}
+      >
+        {matchModal && (
+          <MatchSummary row={matchModal.row} matched={matchModal.matched} />
+        )}
+      </Modal>
+    </div>
+  );
+}
+
+/** 항목 16: 검색 매칭된 인보이스의 파일명/번호/Ship Date/제품/수량/금액/전체합계 요약. */
+function MatchSummary({
+  row,
+  matched,
+}: {
+  row: AngelusRow;
+  matched: MatchedLineItem[];
+}) {
+  const total = invoiceTotalUsd(row.extracted_metadata);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <SummaryRow label="파일명" value={row.file_name} />
+        <SummaryRow label="인보이스번호" value={row.extracted_doc_no ?? '—'} />
+        <SummaryRow label="Ship Date" value={invoiceShipDate(row)} />
+      </div>
+
+      <div>
+        <div
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: 'var(--ink-2)',
+            marginBottom: 6,
+          }}
+        >
+          매칭 제품 {matched.length}건
+        </div>
+        <table
+          style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}
+        >
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--line)' }}>
+              <th style={thStyle('left', 110)}>코드</th>
+              <th style={thStyle('left')}>제품명</th>
+              <th style={thStyle('right', 60)}>수량</th>
+              <th style={thStyle('right', 90)}>금액</th>
+            </tr>
+          </thead>
+          <tbody>
+            {matched.map((li, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid var(--line)' }}>
+                <td
+                  style={{
+                    ...tdStyle('left'),
+                    fontVariantNumeric: 'tabular-nums',
+                    color: 'var(--ink-2)',
+                  }}
+                >
+                  {li.code || '—'}
+                </td>
+                <td style={tdStyle('left')}>{li.name || '—'}</td>
+                <td
+                  style={{
+                    ...tdStyle('right'),
+                    fontVariantNumeric: 'tabular-nums',
+                    color: 'var(--ink-2)',
+                  }}
+                >
+                  {li.qty != null ? li.qty.toLocaleString('en-US') : '—'}
+                </td>
+                <td
+                  style={{
+                    ...tdStyle('right'),
+                    fontVariantNumeric: 'tabular-nums',
+                    color: 'var(--ink-2)',
+                  }}
+                >
+                  {fmtUsd(li.amount)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          paddingTop: 8,
+          borderTop: '1px solid var(--line)',
+          fontSize: 13,
+        }}
+      >
+        <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>
+          인보이스 전체 합계
+        </span>
+        <span
+          style={{
+            fontWeight: 600,
+            color: 'var(--ink)',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {fmtUsd(total)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** 요약 팝업 상단 라벨-값 한 줄. */
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: 'flex', gap: 10, fontSize: 13 }}>
+      <span
+        style={{
+          color: 'var(--ink-3)',
+          minWidth: 84,
+          flexShrink: 0,
+        }}
+      >
+        {label}
+      </span>
+      <span style={{ color: 'var(--ink)', wordBreak: 'break-all' }}>
+        {value}
+      </span>
     </div>
   );
 }
@@ -565,6 +723,7 @@ function GroupBlock({
   onDelete,
   onSubtypeChange,
   onPoRefChange,
+  onShowMatch,
   muted,
 }: {
   title: string;
@@ -576,6 +735,8 @@ function GroupBlock({
   onDelete: (row: AngelusRow) => void;
   onSubtypeChange: (row: AngelusRow, next: Subtype) => void;
   onPoRefChange: (row: AngelusRow, next: string) => void;
+  /** 항목 16: 매칭 chip 클릭 시 요약 팝업 열기. */
+  onShowMatch: (row: AngelusRow, matched: MatchedLineItem[]) => void;
   muted?: boolean;
 }) {
   // PO 그룹 합계 = 그룹 내 인보이스 total_usd 합. 하나라도 값이 있으면 헤더에 표시.
@@ -661,7 +822,25 @@ function GroupBlock({
                   <span>{row.file_name}</span>
                 </div>
                 {matched.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    title="매칭 정보 요약 보기"
+                    onClick={() => onShowMatch(row, matched)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onShowMatch(row, matched);
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 4,
+                      marginTop: 5,
+                      cursor: 'pointer',
+                    }}
+                  >
                     {matched.slice(0, 15).map((li, i) => (
                       <span
                         key={i}
