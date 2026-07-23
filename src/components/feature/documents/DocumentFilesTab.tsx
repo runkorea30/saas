@@ -15,6 +15,7 @@ import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { MatchDetailModal } from '@/components/feature/documents/MatchDetailModal';
+import { CombinedMatchModal } from '@/components/feature/documents/CombinedMatchModal';
 import { MultiChip } from '@/components/feature/orders/primitives';
 import type { DocFileCategory } from '@/pages/documents/DocumentsPage';
 import {
@@ -115,6 +116,9 @@ export function DocumentFilesTab({ companyId, category }: Props) {
     inv: ProductInvoice;
     lines: MatchedLine[];
   } | null>(null);
+  // 항목 28: 통합 조회 팝업 + ZIP 다운로드(수입면장 PDF).
+  const [combinedOpen, setCombinedOpen] = useState(false);
+  const [zipBusy, setZipBusy] = useState(false);
 
   const queryKey = ['document-files', companyId, category];
 
@@ -309,6 +313,59 @@ export function DocumentFilesTab({ companyId, category }: Props) {
     setDetailModal({ inv, lines });
   };
 
+  /** 항목 28: 통합 조회 매칭 수입면장들의 PDF 를 하나의 ZIP 으로 다운로드. */
+  const handleDownloadZip = async () => {
+    if (zipBusy || combinedMatches.length === 0) return;
+    setZipBusy(true);
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      const used = new Set<string>();
+      let added = 0;
+      for (const m of combinedMatches) {
+        const fp = m.row.file_path;
+        if (!fp) continue;
+        let blob: Blob | null = null;
+        if (fp.startsWith('data:')) {
+          blob = await (await fetch(fp)).blob();
+        } else {
+          const { data } = await supabase.storage
+            .from(STORAGE_BUCKET)
+            .download(fp);
+          blob = data ?? null;
+        }
+        if (!blob) continue;
+        let name =
+          m.row.file_name || `${m.row.extracted_doc_no ?? 'declaration'}.pdf`;
+        if (used.has(name)) name = `${m.row.extracted_doc_no ?? added}_${name}`;
+        used.add(name);
+        zip.file(name, blob);
+        added += 1;
+      }
+      if (added === 0) {
+        showToast({ kind: 'error', text: '다운로드할 PDF 를 찾지 못했습니다.' });
+        return;
+      }
+      const out = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(out);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `수입면장_검색결과_${added}건.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      showToast({ kind: 'success', text: `ZIP 다운로드 완료 (${added}개 PDF)` });
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: `ZIP 생성 실패: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      setZipBusy(false);
+    }
+  };
+
   const handleConfirmDelete = async () => {
     if (!deleteTarget || !companyId) return;
     setBusyDelete(true);
@@ -388,6 +445,32 @@ export function DocumentFilesTab({ companyId, category }: Props) {
 
   const hasActiveSearch =
     showSearchBar && (searchText.trim().length > 0 || yearSel.length > 0);
+
+  // 항목 28: 통합 조회 대상 — 제품 검색 + 연도필터로 매칭된 수입면장들(연결 제품 인보이스 라인 포함).
+  const combinedMatches = useMemo(() => {
+    if (!isDeclaration || searchType !== 'product') return [];
+    const terms = parseSearchTerms(searchText);
+    if (terms.length === 0) return [];
+    const base = yearSel.length
+      ? rows.filter((r) =>
+          yearSel.includes((r.extracted_doc_date ?? '').slice(0, 4)),
+        )
+      : rows;
+    const out: {
+      row: DocumentFileRow;
+      inv: ProductInvoice;
+      lines: MatchedLine[];
+    }[] = [];
+    for (const r of base) {
+      const no = matchedProductNo(r.extracted_metadata);
+      if (!no) continue;
+      const inv = productByNo.get(no);
+      if (!inv) continue;
+      const lines = matchedLineDetails(inv.meta, terms);
+      if (lines.length) out.push({ row: r, inv, lines });
+    }
+    return out;
+  }, [rows, isDeclaration, searchType, searchText, yearSel, productByNo]);
 
   const handleSearchTypeChange = (
     next: 'file_name' | 'doc_no' | 'product',
@@ -516,6 +599,17 @@ export function DocumentFilesTab({ companyId, category }: Props) {
             onChange={setYearSel}
             options={availableYears.map((y) => ({ id: y, label: `${y}년` }))}
           />
+
+          {combinedMatches.length > 0 && (
+            <button
+              type="button"
+              className="btn-base primary"
+              onClick={() => setCombinedOpen(true)}
+              style={{ height: 34 }}
+            >
+              통합 조회 ({combinedMatches.length}건)
+            </button>
+          )}
 
           {hasActiveSearch && (
             <button
@@ -796,6 +890,23 @@ export function DocumentFilesTab({ companyId, category }: Props) {
           onDownload={() =>
             downloadByPath(detailModal.inv.file_path, detailModal.inv.file_name)
           }
+        />
+      )}
+
+      {combinedOpen && (
+        <CombinedMatchModal
+          open
+          onClose={() => setCombinedOpen(false)}
+          queryLabel={searchText.trim()}
+          years={[...yearSel].sort()}
+          entries={combinedMatches.map((m) => ({
+            docNo: m.row.extracted_doc_no,
+            shipDate: metaShipDate(m.inv.meta),
+            fileName: m.row.file_name,
+            lines: m.lines,
+          }))}
+          onDownloadZip={() => void handleDownloadZip()}
+          zipBusy={zipBusy}
         />
       )}
     </div>
