@@ -40,6 +40,7 @@ import {
   type InvoiceCustomerGroup,
 } from '@/components/feature/orders/InvoicePrintView';
 import {
+  DateTypeInput,
   GradeBadge,
   MultiChip,
   Segmented,
@@ -82,15 +83,6 @@ const STATUS_OPTIONS: { id: OrderStatus; label: string; dot: string }[] = [
   { id: 'processing', label: '처리중',   dot: '#8b5cf6' },
   { id: 'shipped',    label: '발송완료', dot: 'var(--success)' },
 ];
-
-const dateInputStyle: React.CSSProperties = {
-  border: 'none',
-  background: 'transparent',
-  fontFamily: 'var(--font-num)',
-  fontSize: 12,
-  color: 'var(--ink-2)',
-  outline: 'none',
-};
 
 const PER_PAGE = 14;
 
@@ -686,18 +678,16 @@ export function OrdersPage() {
                 }}
               >
                 <Calendar size={13} color="var(--ink-3)" strokeWidth={1.6} />
-                <input
-                  type="date"
+                <DateTypeInput
+                  ariaLabel="시작일"
                   value={custom.from}
-                  onChange={(e) => setCustom({ ...custom, from: e.target.value })}
-                  style={dateInputStyle}
+                  onChange={(v) => setCustom({ ...custom, from: v })}
                 />
                 <span style={{ color: 'var(--ink-4)' }}>—</span>
-                <input
-                  type="date"
+                <DateTypeInput
+                  ariaLabel="종료일"
                   value={custom.to}
-                  onChange={(e) => setCustom({ ...custom, to: e.target.value })}
-                  style={dateInputStyle}
+                  onChange={(v) => setCustom({ ...custom, to: v })}
                 />
               </div>
             )}

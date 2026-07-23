@@ -486,6 +486,114 @@ export function EmptyState({
 }
 
 // ===== 기간 계산 ===========================================================
+// ===== DateTypeInput =======================================================
+/** 'YYYY-MM-DD' 문자열이 유효한 달력 날짜인지. */
+function isValidYmd(s: string): boolean {
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return false;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const da = Number(m[3]);
+  if (mo < 1 || mo > 12 || da < 1 || da > 31) return false;
+  const dt = new Date(y, mo - 1, da);
+  return (
+    dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === da
+  );
+}
+
+/** 숫자만 추출(최대 8자리) → 'YYYY-MM-DD' 로 대시 자동 삽입. */
+function formatDigits(raw: string): string {
+  const d = raw.replace(/\D/g, '').slice(0, 8);
+  if (d.length <= 4) return d;
+  if (d.length <= 6) return `${d.slice(0, 4)}-${d.slice(4)}`;
+  return `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}`;
+}
+
+/**
+ * 항목 21: YYYYMMDD 8자리 연속 타이핑 날짜 입력(로케일 무관) + 네이티브 달력 보조.
+ * value/onChange 는 'YYYY-MM-DD'. 8자리 입력 시 유효하면 즉시 반영, 아니면 blur 시 되돌림.
+ */
+export function DateTypeInput({
+  value,
+  onChange,
+  ariaLabel,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  ariaLabel?: string;
+}) {
+  const [text, setText] = useState(value);
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setText(value);
+  }, [value, focused]);
+
+  const commit = (s: string) => {
+    if (isValidYmd(s)) onChange(s);
+    else setText(value);
+  };
+
+  return (
+    <span
+      style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 2 }}
+    >
+      <input
+        type="text"
+        inputMode="numeric"
+        aria-label={ariaLabel}
+        value={focused ? text : value}
+        placeholder="YYYYMMDD"
+        onFocus={() => {
+          setFocused(true);
+          setText(value);
+        }}
+        onChange={(e) => {
+          const f = formatDigits(e.target.value);
+          setText(f);
+          if (f.replace(/\D/g, '').length === 8) commit(f);
+        }}
+        onBlur={() => {
+          setFocused(false);
+          commit(text);
+        }}
+        style={{
+          width: 96,
+          height: 24,
+          padding: '0 4px',
+          border: 'none',
+          background: 'transparent',
+          fontFamily: 'var(--font-num)',
+          fontSize: 12,
+          color: 'var(--ink-2)',
+          outline: 'none',
+        }}
+      />
+      <span
+        style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}
+      >
+        <span aria-hidden style={{ fontSize: 12, color: 'var(--ink-3)', cursor: 'pointer' }}>
+          📅
+        </span>
+        <input
+          type="date"
+          aria-label={ariaLabel ? `${ariaLabel} 달력` : '달력'}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            opacity: 0,
+            cursor: 'pointer',
+          }}
+        />
+      </span>
+    </span>
+  );
+}
+
 export function periodRange(key: string, today = new Date()): [Date, Date] {
   const endOfDay = new Date(today);
   endOfDay.setHours(23, 59, 59, 999);
