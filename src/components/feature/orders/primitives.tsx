@@ -215,6 +215,14 @@ export interface ChipOption {
   id: string;
   label: ReactNode;
   prefix?: ReactNode;
+  /** 항목 22: 타이핑 검색 대상 문자열(label 이 문자열이 아닐 때 사용). */
+  searchText?: string;
+}
+
+/** 검색 매칭용 문자열 — searchText 우선, 없으면 문자열 label. */
+function optSearchStr(o: ChipOption): string {
+  if (o.searchText) return o.searchText;
+  return typeof o.label === 'string' ? o.label : '';
 }
 
 export function MultiChip({
@@ -223,14 +231,18 @@ export function MultiChip({
   selected,
   onChange,
   options,
+  searchable = false,
 }: {
   label: string;
   icon?: ReactNode;
   selected: string[];
   onChange: (ids: string[]) => void;
   options: ChipOption[];
+  /** 항목 22: true 면 드롭다운 상단에 타이핑 검색 입력 표시. */
+  searchable?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -240,6 +252,17 @@ export function MultiChip({
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, []);
+
+  // 드롭다운 닫히면 검색어 초기화.
+  useEffect(() => {
+    if (!open) setQuery('');
+  }, [open]);
+
+  const q = query.trim().toLowerCase();
+  const shown =
+    searchable && q
+      ? options.filter((o) => optSearchStr(o).toLowerCase().includes(q))
+      : options;
 
   const toggle = (id: string) => {
     onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
@@ -306,7 +329,42 @@ export function MultiChip({
             padding: 4,
           }}
         >
-          {options.map((opt) => {
+          {searchable && (
+            <input
+              autoFocus
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={`${label} 검색`}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                height: 30,
+                padding: '0 8px',
+                marginBottom: 4,
+                border: '1px solid var(--line)',
+                borderRadius: 6,
+                background: 'var(--surface-2)',
+                color: 'var(--ink)',
+                fontSize: 12,
+                fontFamily: 'var(--font-kr)',
+                outline: 'none',
+              }}
+            />
+          )}
+          {shown.length === 0 && (
+            <div
+              style={{
+                padding: '10px 8px',
+                fontSize: 11.5,
+                color: 'var(--ink-3)',
+                textAlign: 'center',
+              }}
+            >
+              검색 결과가 없습니다.
+            </div>
+          )}
+          {shown.map((opt) => {
             const sel = selected.includes(opt.id);
             return (
               <button

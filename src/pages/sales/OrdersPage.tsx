@@ -706,9 +706,11 @@ export function OrdersPage() {
               icon={<Users size={13} strokeWidth={1.6} />}
               selected={customerSel}
               onChange={setCustomerSel}
+              searchable
               options={customerOptions.map((c) => ({
                 id: c.id,
                 label: c.name,
+                searchText: c.name,
                 prefix: <GradeBadge grade={c.grade} size="sm" />,
               }))}
             />
