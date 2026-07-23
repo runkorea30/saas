@@ -17,6 +17,7 @@ import { useCompany } from '@/hooks/useCompany';
 import { useResizableSplit } from '@/hooks/useResizableSplit';
 import { useOrders } from '@/hooks/queries/useOrders';
 import { useCustomers } from '@/hooks/queries/useCustomers';
+import { CustomerInfoDialog } from '@/components/feature/orders/CustomerInfoDialog';
 import {
   findPendingTransferConflicts,
   useSaveShippingInvoices,
@@ -401,6 +402,15 @@ export function OrdersPage() {
     y: number;
     orderId: string;
   } | null>(null);
+  /** 우클릭 "거래처 정보보기" 로 표시할 거래처 id (null 이면 닫힘). */
+  const [customerInfoId, setCustomerInfoId] = useState<string | null>(null);
+
+  /** 우클릭 메뉴 → 해당 주문의 거래처 정보 팝업 열기. */
+  const handleViewCustomer = (orderId: string) => {
+    setContextMenu(null);
+    const order = orders.find((o) => o.id === orderId);
+    setCustomerInfoId(order?.customer?.id ?? null);
+  };
 
   /**
    * 우클릭 메뉴에서 거래명세서 출력 — 같은 거래처+같은 날짜 묶음 전체를 포함해
@@ -911,6 +921,7 @@ export function OrdersPage() {
           x={contextMenu.x}
           y={contextMenu.y}
           onClose={() => setContextMenu(null)}
+          onViewCustomer={() => handleViewCustomer(contextMenu.orderId)}
           onChangeStatus={(status) =>
             handleChangeStatus(contextMenu.orderId, status)
           }
@@ -919,6 +930,15 @@ export function OrdersPage() {
           onTransferOnlyThis={() => void handleTransferOnlyThisOrder(contextMenu.orderId)}
         />
       )}
+
+      <CustomerInfoDialog
+        customer={
+          customerInfoId
+            ? (customersList.find((c) => c.id === customerInfoId) ?? null)
+            : null
+        }
+        onClose={() => setCustomerInfoId(null)}
+      />
 
       <TransferConflictDialog
         open={conflictDialog !== null}
@@ -942,6 +962,7 @@ function OrderContextMenu({
   x,
   y,
   onClose,
+  onViewCustomer,
   onChangeStatus,
   onPrintInvoice,
   onTransferGroup,
@@ -950,6 +971,7 @@ function OrderContextMenu({
   x: number;
   y: number;
   onClose: () => void;
+  onViewCustomer: () => void;
   onChangeStatus: (status: string) => void;
   onPrintInvoice: () => void;
   onTransferGroup: () => void;
@@ -988,6 +1010,25 @@ function OrderContextMenu({
         fontSize: 12.5,
       }}
     >
+      <button
+        type="button"
+        onClick={onViewCustomer}
+        style={{
+          width: '100%',
+          textAlign: 'left',
+          padding: '7px 10px',
+          border: 'none',
+          background: 'transparent',
+          cursor: 'pointer',
+          borderRadius: 4,
+          color: 'var(--ink)',
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
+        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+      >
+        거래처 정보보기
+      </button>
+      <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
       <button
         type="button"
         onClick={onPrintInvoice}
