@@ -436,6 +436,15 @@ export function periodRange(key: string, today = new Date()): [Date, Date] {
     s.setHours(0, 0, 0, 0);
     return [s, endOfDay];
   }
+  if (key === 'yesterday') {
+    const s = new Date(today);
+    s.setDate(s.getDate() - 1);
+    s.setHours(0, 0, 0, 0);
+    const e = new Date(today);
+    e.setDate(e.getDate() - 1);
+    e.setHours(23, 59, 59, 999);
+    return [s, e];
+  }
   if (key === 'week') {
     const dow = today.getDay();
     const monOff = dow === 0 ? 6 : dow - 1;
@@ -443,6 +452,20 @@ export function periodRange(key: string, today = new Date()): [Date, Date] {
     mon.setDate(mon.getDate() - monOff);
     mon.setHours(0, 0, 0, 0);
     return [mon, endOfDay];
+  }
+  if (key === 'lastweek') {
+    // 이번 주 월요일 계산 후 -7일(지난 주 월) ~ 이번 주 월 -1일(지난 주 일).
+    const dow = today.getDay();
+    const monOff = dow === 0 ? 6 : dow - 1;
+    const thisMon = new Date(today);
+    thisMon.setDate(thisMon.getDate() - monOff);
+    thisMon.setHours(0, 0, 0, 0);
+    const lastMon = new Date(thisMon);
+    lastMon.setDate(lastMon.getDate() - 7);
+    const lastSun = new Date(thisMon);
+    lastSun.setDate(lastSun.getDate() - 1);
+    lastSun.setHours(23, 59, 59, 999);
+    return [lastMon, lastSun];
   }
   if (key === 'month') {
     const s = new Date(today.getFullYear(), today.getMonth(), 1);

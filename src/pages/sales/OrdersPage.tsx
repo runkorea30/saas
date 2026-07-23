@@ -49,14 +49,30 @@ import {
 import type { OrderStatus } from '@/types/common';
 import type { Order, OrderWithGroupInfo, PeriodKey } from '@/types/orders';
 
+// 항목 21: 오늘/어제/이번 주/지난 주/이번 달/사용자 지정 (기존 지난 달·90일 탭 제거).
 const PERIOD_OPTIONS: { id: PeriodKey; label: string }[] = [
   { id: 'today', label: '오늘' },
+  { id: 'yesterday', label: '어제' },
   { id: 'week', label: '이번 주' },
+  { id: 'lastweek', label: '지난 주' },
   { id: 'month', label: '이번 달' },
-  { id: 'lastmonth', label: '지난 달' },
-  { id: '90d', label: '90일' },
   { id: 'custom', label: '사용자 지정' },
 ];
+
+/** Date → 'YYYY-MM-DD' (KST 로컬 기준, toISOString 금지). */
+function ymd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** 항목 21: 사용자 지정 기본값 = 오늘-1개월 ~ 오늘 (setMonth 사용, 고정 일수 근사 금지). */
+function lastMonthRange(today = new Date()): { from: string; to: string } {
+  const from = new Date(today);
+  from.setMonth(from.getMonth() - 1);
+  return { from: ymd(from), to: ymd(today) };
+}
 
 // 🟠 필터 옵션은 신규 4단계만. 레거시(draft/done/canceled)는 필터에서 제외.
 //    기존 draft/done/canceled 상태 주문의 뱃지 표시(읽기) 는 StatusBadge 에서 계속 지원.
@@ -109,10 +125,10 @@ export function OrdersPage() {
 
   // ───── 필터 상태 ─────
   const [period, setPeriod] = useState<PeriodKey>('today');
-  const [custom, setCustom] = useState<{ from: string; to: string }>({
-    from: '2026-03-01',
-    to: '2026-04-19',
-  });
+  // 항목 21: 사용자 지정 최초값 = 최근 한 달(오늘-1개월~오늘).
+  const [custom, setCustom] = useState<{ from: string; to: string }>(() =>
+    lastMonthRange(),
+  );
   const [statusSel, setStatusSel] = useState<OrderStatus[]>([]);
   const [customerSel, setCustomerSel] = useState<string[]>([]);
 
@@ -297,7 +313,7 @@ export function OrdersPage() {
   const resetFilters = () => {
     setStatusSel([]);
     setCustomerSel([]);
-    setPeriod('90d');
+    setPeriod('month');
   };
 
   // ───── 거래명세서 인쇄 ─────

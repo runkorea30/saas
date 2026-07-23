@@ -105,7 +105,16 @@ export interface OrderWithGroupInfo extends Order {
   groupSize: number;
 }
 
-export type PeriodKey = 'today' | 'week' | 'month' | 'lastmonth' | '90d' | 'custom';
+// 'yesterday'/'lastweek' 는 주문내역 탭용(항목 21). 'lastmonth'/'90d' 는 송장/청구 등 타 페이지에서 계속 사용.
+export type PeriodKey =
+  | 'today'
+  | 'yesterday'
+  | 'week'
+  | 'lastweek'
+  | 'month'
+  | 'lastmonth'
+  | '90d'
+  | 'custom';
 
 export interface DateRange {
   /** ISO 문자열, 포함 시작 (.gte) */
