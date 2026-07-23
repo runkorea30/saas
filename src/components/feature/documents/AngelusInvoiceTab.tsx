@@ -43,6 +43,16 @@ const SUBTYPE_COLOR: Record<Subtype, string> = {
   unknown: '#94a3b8',
 };
 
+// 🟠 이력적재/입고자동 인보이스는 doc_subtype='product'|'freight' 로 저장돼 위 4종 매핑에
+//    없다. 미지의 값은 원문 라벨 + 회색으로 graceful 렌더 (배지가 빈값으로 보이던 문제 해결).
+//    드롭다운 taxonomy(proforma/revised/final/unknown)는 그대로 유지.
+function subtypeLabel(raw: string): string {
+  return raw in SUBTYPE_LABEL ? SUBTYPE_LABEL[raw as Subtype] : raw;
+}
+function subtypeColor(raw: string): string {
+  return raw in SUBTYPE_COLOR ? SUBTYPE_COLOR[raw as Subtype] : '#94a3b8';
+}
+
 interface AngelusRow {
   id: string;
   file_name: string;
@@ -585,7 +595,7 @@ function GroupBlock({
               </td>
               <td style={tdStyle('center')}>
                 <SubtypeBadge
-                  value={(row.doc_subtype as Subtype | null) ?? 'unknown'}
+                  value={row.doc_subtype ?? 'unknown'}
                   confirmed={Boolean(row.subtype_confirmed)}
                   onChange={(next) => onSubtypeChange(row, next)}
                 />
@@ -652,12 +662,12 @@ function SubtypeBadge({
   confirmed,
   onChange,
 }: {
-  value: Subtype;
+  value: string;
   confirmed: boolean;
   onChange: (next: Subtype) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const color = SUBTYPE_COLOR[value];
+  const color = subtypeColor(value);
   return (
     <div style={{ position: 'relative', display: 'inline-block' }}>
       <button
@@ -681,7 +691,7 @@ function SubtypeBadge({
         }}
       >
         {confirmed && <CheckCircle2 size={10} />}
-        {SUBTYPE_LABEL[value]}
+        {subtypeLabel(value)}
       </button>
       {open && (
         <div

@@ -46,6 +46,7 @@ import { RecentInvoicesSection } from '@/components/feature/import/RecentInvoice
 import { CustomsDocTab } from '@/components/feature/import/CustomsDocTab';
 import { CodeCorrectionsTab } from '@/components/feature/import/CodeCorrectionsTab';
 import { parseInvoicePDF } from '@/utils/invoiceParser';
+import { uploadReceivingInvoices } from '@/lib/angelusReceivingUpload';
 
 // ───────────────────────────────────────────────────────────
 
@@ -112,6 +113,8 @@ export function ImportReceivingPage() {
   //    입고확정 성공 후 항목 4에서 document_files 로 정식 업로드(입고 전 이탈 시 고아 방지).
   const [freightFile, setFreightFile] = useState<File | null>(null);
   const [freightParsing, setFreightParsing] = useState(false);
+  // 운임 인보이스 파싱으로 얻은 문서번호 — 항목 4 업로드 시 freight row extracted_doc_no.
+  const [freightInvoiceNo, setFreightInvoiceNo] = useState<string | null>(null);
 
   /**
    * 운임 인보이스 PDF 업로드 핸들러 — 파싱해 shippingCostUsd 자동 채움.
@@ -125,6 +128,7 @@ export function ImportReceivingPage() {
       const total = parsed.rows.reduce((sum, r) => sum + (r.amount || 0), 0);
       setHeader((h) => ({ ...h, shippingCostUsd: parseFloat(total.toFixed(2)) }));
       setFreightFile(file);
+      setFreightInvoiceNo(parsed.invoice_no || null);
       showToast({
         kind: 'success',
         text: `운임 인보이스 파싱 완료 — Shipping Cost $${total.toFixed(2)} 자동 입력 (수정 가능)`,
@@ -481,6 +485,10 @@ export function ImportReceivingPage() {
 
   const performSubmit = () => {
     const rowsToSubmit = validSubmitRows;
+    // 🔴 클로저 안전: onSuccess 시점에 state 가 리셋될 수 있어 미리 캡처.
+    const capturedInvoiceNumber = header.invoiceNumber;
+    const capturedFreightFile = freightFile;
+    const capturedFreightNo = freightInvoiceNo;
     createMut.mutate(
       { header, rows: rowsToSubmit },
       {
@@ -489,8 +497,10 @@ export function ImportReceivingPage() {
             kind: 'success',
             text: `${rowsToSubmit.length}건 입고 완료`,
           });
-          // 행은 초기화, 헤더는 유지 (연속 입력 편의).
+          // 행은 초기화, 헤더는 유지 (연속 입력 편의). 운임 첨부는 이 인보이스 전용이라 리셋.
           setRowInputs([createEmptyRow()]);
+          setFreightFile(null);
+          setFreightInvoiceNo(null);
           // 🔴 다중 세션 대응: 해당 invoice_no 의 세션 행만 resolved_at 세팅 + 이관본
           //    정리. 회사 전체를 UPDATE 하던 기존 방식은 다른 미확정 세션까지 초기화.
           if (companyId) {
@@ -498,7 +508,7 @@ export function ImportReceivingPage() {
               try {
                 await markSessionResolved({
                   companyId,
-                  invoiceNumber: header.invoiceNumber,
+                  invoiceNumber: capturedInvoiceNumber,
                 });
                 queryClient.invalidateQueries({
                   queryKey: ['invoice-verifications-pending', companyId],
@@ -509,6 +519,42 @@ export function ImportReceivingPage() {
               } catch (e) {
                 // eslint-disable-next-line no-console
                 console.error('[markSessionResolved]', e);
+              }
+
+              // ───── 항목 4: 제품/운임 인보이스를 엔젤러스인보이스 탭에 자동 업로드 ─────
+              // 🔴 실패해도 재고/입고는 이미 커밋됨 — 롤백 없이 토스트로만 안내.
+              try {
+                const up = await uploadReceivingInvoices({
+                  companyId,
+                  invoiceNumber: capturedInvoiceNumber,
+                  freightFile: capturedFreightFile,
+                  freightInvoiceNo: capturedFreightNo,
+                });
+                const uploadedCount =
+                  (up.productUploaded ? 1 : 0) + (up.freightUploaded ? 1 : 0);
+                if (up.errors.length > 0) {
+                  showToast({
+                    kind: 'error',
+                    text: '재고는 반영됐으나 인보이스 문서 업로드 실패 — 문서관리에서 수동 업로드해주세요',
+                  });
+                } else if (uploadedCount > 0) {
+                  showToast({
+                    kind: 'success',
+                    text: `인보이스 ${uploadedCount}건 문서관리에 업로드됨`,
+                  });
+                }
+                if (uploadedCount > 0) {
+                  queryClient.invalidateQueries({
+                    queryKey: ['document-files', companyId, 'angelus_invoice'],
+                  });
+                }
+              } catch (e) {
+                // eslint-disable-next-line no-console
+                console.error('[uploadReceivingInvoices]', e);
+                showToast({
+                  kind: 'error',
+                  text: '재고는 반영됐으나 인보이스 문서 업로드 실패 — 문서관리에서 수동 업로드해주세요',
+                });
               }
             })();
           }
