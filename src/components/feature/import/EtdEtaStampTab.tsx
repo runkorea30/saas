@@ -354,38 +354,36 @@ export function EtdEtaStampTab() {
         </div>
       )}
 
-      {/* 은행 송금용 병합 옵션 (항목 11·12) */}
-      {pageInfo && (
-        <div
-          style={{
-            padding: '12px 16px',
-            background: 'var(--surface)',
-            border: '1px solid var(--line)',
-            borderRadius: 'var(--radius-lg)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-          }}
-        >
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)' }}>
-            은행 송금용 병합 옵션
-          </div>
-          <MergePdfRow
-            label="Statement 맨 앞 페이지로 추가"
-            checked={addStatement}
-            onToggleChecked={setAddStatement}
-            file={statementFile}
-            onPickFile={setStatementFile}
-          />
-          <MergePdfRow
-            label="페덱스 운임 인보이스 병합 (제품 인보이스 뒤에 추가)"
-            checked={mergeFreight}
-            onToggleChecked={setMergeFreight}
-            file={freightFile}
-            onPickFile={setFreightFile}
-          />
+      {/* 은행 송금용 병합 옵션 (항목 11·12) — PDF 선택 전에도 항상 노출. */}
+      <div
+        style={{
+          padding: '12px 16px',
+          background: 'var(--surface)',
+          border: '1px solid var(--line)',
+          borderRadius: 'var(--radius-lg)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)' }}>
+          은행 송금용 병합 옵션
         </div>
-      )}
+        <MergePdfRow
+          label="Statement 맨 앞 페이지로 추가"
+          checked={addStatement}
+          onToggleChecked={setAddStatement}
+          file={statementFile}
+          onPickFile={setStatementFile}
+        />
+        <MergePdfRow
+          label="페덱스 운임 인보이스 병합 (제품 인보이스 뒤에 추가)"
+          checked={mergeFreight}
+          onToggleChecked={setMergeFreight}
+          file={freightFile}
+          onPickFile={setFreightFile}
+        />
+      </div>
 
       {/* 미리보기 */}
       <div
