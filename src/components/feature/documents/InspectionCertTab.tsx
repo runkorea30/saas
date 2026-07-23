@@ -596,6 +596,25 @@ export function InspectionCertTab({ companyId }: Props) {
           </button>
         )}
 
+        <a
+          href="https://chemp.mcee.go.kr/login"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn-base"
+          style={{
+            height: 34,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 12.5,
+            textDecoration: 'none',
+          }}
+          title="화학제품관리시스템 (새 탭에서 열기)"
+        >
+          <ExternalLink className="ico-sm" />
+          화학제품관리시스템
+        </a>
+
         <div style={{ flex: 1 }} />
 
         <ThresholdSelect
