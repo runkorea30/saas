@@ -8,15 +8,33 @@
  *    로컬 state 없음.
  * 🟡 숫자 필드는 number state. 빈 입력은 0 으로 유지 (빈 문자열 허용 안 함).
  */
+import { useRef } from 'react';
 import type { ImportInvoiceHeader } from '@/types/import';
 
 interface Props {
   value: ImportInvoiceHeader;
   onChange: (next: ImportInvoiceHeader) => void;
   disabled?: boolean;
+  /**
+   * 운임 인보이스 PDF 선택 시 호출 (항목 3). 부모가 parseInvoicePDF 로 파싱해
+   * shippingCostUsd 를 자동 채움. 미전달 시 업로드 UI 자체가 렌더되지 않음(하위호환).
+   */
+  onFreightPdfSelect?: (file: File) => void;
+  /** 현재 보관 중인 운임 인보이스 파일명 (표시용). */
+  freightFileName?: string | null;
+  /** 운임 인보이스 파싱 진행 중 여부. */
+  freightParsing?: boolean;
 }
 
-export function ImportHeaderForm({ value, onChange, disabled }: Props) {
+export function ImportHeaderForm({
+  value,
+  onChange,
+  disabled,
+  onFreightPdfSelect,
+  freightFileName,
+  freightParsing,
+}: Props) {
+  const freightInputRef = useRef<HTMLInputElement>(null);
   const patch = (key: keyof ImportInvoiceHeader, v: string | number) => {
     onChange({ ...value, [key]: v });
   };
@@ -87,19 +105,73 @@ export function ImportHeaderForm({ value, onChange, disabled }: Props) {
             style={inputStyle}
           />
         </Field>
-        <Field label="Shipping Cost (USD)" required>
-          <input
-            type="number"
-            inputMode="decimal"
-            min={0}
-            step="0.01"
-            value={numberInput(value.shippingCostUsd)}
-            onChange={(e) => patch('shippingCostUsd', parseNum(e.target.value))}
-            placeholder="0"
-            disabled={disabled}
-            style={inputStyle}
-          />
-        </Field>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <span style={{ fontSize: 11.5, color: 'var(--ink-2)', fontWeight: 500 }}>
+              Shipping Cost (USD)
+              <span style={{ color: 'var(--danger)', marginLeft: 3 }}>*</span>
+            </span>
+            <input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="0.01"
+              value={numberInput(value.shippingCostUsd)}
+              onChange={(e) => patch('shippingCostUsd', parseNum(e.target.value))}
+              placeholder="0"
+              disabled={disabled}
+              style={inputStyle}
+            />
+          </label>
+          {onFreightPdfSelect && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                flexWrap: 'wrap',
+              }}
+            >
+              <input
+                ref={freightInputRef}
+                type="file"
+                accept=".pdf"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) onFreightPdfSelect(file);
+                  // 같은 파일 재선택도 onChange 발화되도록 값 초기화.
+                  e.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => freightInputRef.current?.click()}
+                disabled={disabled || freightParsing}
+                className="btn-base"
+                style={{ height: 26, fontSize: 11, padding: '0 10px' }}
+                title="운임(Freight) 인보이스 PDF 를 업로드하면 총액이 Shipping Cost 에 자동 입력됩니다 (수정 가능)"
+              >
+                {freightParsing ? '파싱 중…' : '운임 인보이스 PDF'}
+              </button>
+              {freightFileName && !freightParsing && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--ink-3)',
+                    maxWidth: 160,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={freightFileName}
+                >
+                  {freightFileName}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
         <Field
           label="PDF Total USD"
           hint="PDF 에 찍힌 Total — 실제 합계와 차이 검증용. 비워 두면 검증 스킵."

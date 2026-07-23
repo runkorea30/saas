@@ -106,6 +106,39 @@ export function ImportReceivingPage() {
   const [confirmDiff, setConfirmDiff] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
+  // ───── 운임(Freight) 인보이스 PDF ─────
+  // 🟠 (항목 3) Shipping Cost (USD) 자동채움용. parseInvoicePDF 재사용 → Σ rows.amount.
+  //    파일은 즉시 Storage 업로드하지 않고 File 객체로만 임시 보관 —
+  //    입고확정 성공 후 항목 4에서 document_files 로 정식 업로드(입고 전 이탈 시 고아 방지).
+  const [freightFile, setFreightFile] = useState<File | null>(null);
+  const [freightParsing, setFreightParsing] = useState(false);
+
+  /**
+   * 운임 인보이스 PDF 업로드 핸들러 — 파싱해 shippingCostUsd 자동 채움.
+   * 자동값은 수동 수정 가능(number input 그대로). 파싱 실패 시 토스트만 띄우고
+   * 기존 수동 입력 유지(fallback, 강제 아님). 성공 시 File 은 freightFile 로 보관.
+   */
+  const handleFreightPdfSelect = async (file: File) => {
+    setFreightParsing(true);
+    try {
+      const parsed = await parseInvoicePDF(file);
+      const total = parsed.rows.reduce((sum, r) => sum + (r.amount || 0), 0);
+      setHeader((h) => ({ ...h, shippingCostUsd: parseFloat(total.toFixed(2)) }));
+      setFreightFile(file);
+      showToast({
+        kind: 'success',
+        text: `운임 인보이스 파싱 완료 — Shipping Cost $${total.toFixed(2)} 자동 입력 (수정 가능)`,
+      });
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: `운임 인보이스 파싱 실패: ${e instanceof Error ? e.message : String(e)}. Shipping Cost 를 직접 입력해 주세요.`,
+      });
+    } finally {
+      setFreightParsing(false);
+    }
+  };
+
   // ───── 거래처 포털 수입 안내 설정 ─────
   const [noticeStatus, setNoticeStatus] = useState<'' | ImportNoticeStatus>('');
   const [noticeDate, setNoticeDate] = useState<string>('');
@@ -843,7 +876,14 @@ export function ImportReceivingPage() {
 
         {activeTab === 'receiving' && (
           <>
-            <ImportHeaderForm value={header} onChange={setHeader} disabled={busy} />
+            <ImportHeaderForm
+              value={header}
+              onChange={setHeader}
+              disabled={busy}
+              onFreightPdfSelect={handleFreightPdfSelect}
+              freightFileName={freightFile?.name ?? null}
+              freightParsing={freightParsing}
+            />
 
         <ImportSummaryBar
           total={summary.total}
