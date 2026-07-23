@@ -45,6 +45,27 @@ function rowLineItemsMatch(meta: unknown, q: string): boolean {
   return false;
 }
 
+/** 항목 8: 검색어에 매칭되는 line_items 만 추출(카드 chip 강조용). q 없으면 빈 배열. */
+function matchedLineItems(
+  meta: unknown,
+  q: string | null,
+): { code: string; name: string }[] {
+  if (!q || !meta || typeof meta !== 'object') return [];
+  const items = (meta as { line_items?: unknown }).line_items;
+  if (!Array.isArray(items)) return [];
+  const out: { code: string; name: string }[] = [];
+  for (const it of items) {
+    if (!it || typeof it !== 'object') continue;
+    const o = it as Record<string, unknown>;
+    const code = String(o.code ?? '');
+    const name = String(o.name ?? '');
+    if (code.toLowerCase().includes(q) || name.toLowerCase().includes(q)) {
+      out.push({ code, name });
+    }
+  }
+  return out;
+}
+
 const SELECT_LIST =
   'id, file_name, file_size, mime_type, memo, uploaded_at, created_at, source, email_from, email_received_at, extracted_doc_no, extracted_doc_date, doc_subtype, subtype_confirmed, related_po_reference, extracted_metadata, file_path';
 
@@ -159,6 +180,12 @@ export function AngelusInvoiceTab({ companyId }: Props) {
   }, [rows, searchType, searchText]);
 
   const hasActiveSearch = searchText.trim().length > 0;
+
+  // 항목 8: 제품코드/명 필터 활성 시에만 매칭 라인아이템 chip 강조. 그 외엔 null(=chip 없음).
+  const highlightQuery =
+    searchType === 'line_item' && searchText.trim()
+      ? searchText.trim().toLowerCase()
+      : null;
 
   const { groups, unassigned } = useMemo(
     () => groupByPo(filteredRows),
@@ -496,6 +523,7 @@ export function AngelusInvoiceTab({ companyId }: Props) {
               title={`PO ${g.poRef}`}
               rows={g.items}
               knownPoRefs={knownPoRefs}
+              highlightQuery={highlightQuery}
               onOpen={handleOpen}
               onDelete={setDeleteTarget}
               onSubtypeChange={handleSubtypeChange}
@@ -507,6 +535,7 @@ export function AngelusInvoiceTab({ companyId }: Props) {
               title="미분류 (PO 참조번호 없음)"
               rows={unassigned}
               knownPoRefs={knownPoRefs}
+              highlightQuery={highlightQuery}
               onOpen={handleOpen}
               onDelete={setDeleteTarget}
               onSubtypeChange={handleSubtypeChange}
@@ -541,6 +570,7 @@ function GroupBlock({
   title,
   rows,
   knownPoRefs,
+  highlightQuery,
   onOpen,
   onDelete,
   onSubtypeChange,
@@ -550,6 +580,8 @@ function GroupBlock({
   title: string;
   rows: AngelusRow[];
   knownPoRefs: string[];
+  /** 항목 8: 설정 시 매칭 라인아이템을 chip 으로 강조. null 이면 chip 없음. */
+  highlightQuery: string | null;
   onOpen: (row: AngelusRow) => void;
   onDelete: (row: AngelusRow) => void;
   onSubtypeChange: (row: AngelusRow, next: Subtype) => void;
@@ -622,7 +654,9 @@ function GroupBlock({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const matched = matchedLineItems(row.extracted_metadata, highlightQuery);
+            return (
             <tr key={row.id} style={{ borderBottom: '1px solid var(--line)' }}>
               <td style={tdStyle('left')}>
                 <div
@@ -636,6 +670,36 @@ function GroupBlock({
                   )}
                   <span>{row.file_name}</span>
                 </div>
+                {matched.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+                    {matched.slice(0, 15).map((li, i) => (
+                      <span
+                        key={i}
+                        title={li.name ? `${li.code} · ${li.name}` : li.code}
+                        style={{
+                          fontSize: 10.5,
+                          padding: '1px 6px',
+                          borderRadius: 4,
+                          background: 'var(--warning-wash)',
+                          color: 'var(--ink)',
+                          border: '1px solid var(--warning)',
+                          maxWidth: 220,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {li.code}
+                        {li.name ? ` · ${li.name}` : ''}
+                      </span>
+                    ))}
+                    {matched.length > 15 && (
+                      <span style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>
+                        +{matched.length - 15}
+                      </span>
+                    )}
+                  </div>
+                )}
               </td>
               <td
                 style={{
@@ -714,7 +778,8 @@ function GroupBlock({
                 </div>
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>
