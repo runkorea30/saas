@@ -8,7 +8,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Download,
+  ExternalLink,
   FileUp,
   Loader2,
   Trash2,
@@ -185,42 +185,31 @@ export function AngelusInvoiceTab({ companyId }: Props) {
     }
   };
 
-  const handleDownload = async (row: AngelusRow) => {
-    if (!companyId) return;
+  /**
+   * PDF 를 크롬 새 탭에서 바로 열기 (저장 대신 브라우저 내장 뷰어로 표시).
+   * 🔴 동기 처리 — row.file_path 는 목록 쿼리에 이미 로드돼 있고 getPublicUrl 도
+   *    네트워크 호출이 없어, await 없이 클릭 제스처 안에서 window.open 을 호출한다.
+   *    (await 뒤 window.open 은 크롬 팝업 차단 대상이 되므로 동기 유지가 중요.)
+   */
+  const handleOpen = (row: AngelusRow) => {
     try {
-      const { data, error } = await supabase
-        .from('document_files')
-        .select('file_path, file_name')
-        .eq('id', row.id)
-        .eq('company_id', companyId)
-        .single();
-      if (error) throw error;
-      if (!data?.file_path) throw new Error('파일 데이터 없음');
-
-      if (data.file_path.startsWith('data:')) {
-        const a = document.createElement('a');
-        a.href = data.file_path;
-        a.download = data.file_name;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+      if (!row.file_path) throw new Error('파일 데이터 없음');
+      // 수동 업로드(base64): data: 최상위 내비게이션은 크롬이 차단하므로 Blob URL 로 변환.
+      if (row.file_path.startsWith('data:')) {
+        const url = URL.createObjectURL(dataUriToBlob(row.file_path));
+        window.open(url, '_blank', 'noopener,noreferrer');
+        // 새 탭이 로드할 시간을 준 뒤 해제 (즉시 revoke 하면 빈 탭이 됨).
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
         return;
       }
-
-      const { data: blob, error: dlErr } = await supabase.storage
+      // Storage 파일(documents 버킷 public) → 공개 URL 새 탭 열기.
+      const { data: pub } = supabase.storage
         .from(STORAGE_BUCKET)
-        .download(data.file_path);
-      if (dlErr || !blob) throw new Error(dlErr?.message ?? '다운로드 실패');
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = data.file_name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+        .getPublicUrl(row.file_path);
+      if (!pub?.publicUrl) throw new Error('공개 URL 생성 실패');
+      window.open(pub.publicUrl, '_blank', 'noopener,noreferrer');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '다운로드 실패';
+      const msg = err instanceof Error ? err.message : '열기 실패';
       showToast({ kind: 'error', text: msg });
     }
   };
@@ -464,7 +453,7 @@ export function AngelusInvoiceTab({ companyId }: Props) {
               title={`PO ${g.poRef}`}
               rows={g.items}
               knownPoRefs={knownPoRefs}
-              onDownload={handleDownload}
+              onOpen={handleOpen}
               onDelete={setDeleteTarget}
               onSubtypeChange={handleSubtypeChange}
               onPoRefChange={handlePoRefChange}
@@ -475,7 +464,7 @@ export function AngelusInvoiceTab({ companyId }: Props) {
               title="미분류 (PO 참조번호 없음)"
               rows={unassigned}
               knownPoRefs={knownPoRefs}
-              onDownload={handleDownload}
+              onOpen={handleOpen}
               onDelete={setDeleteTarget}
               onSubtypeChange={handleSubtypeChange}
               onPoRefChange={handlePoRefChange}
@@ -509,7 +498,7 @@ function GroupBlock({
   title,
   rows,
   knownPoRefs,
-  onDownload,
+  onOpen,
   onDelete,
   onSubtypeChange,
   onPoRefChange,
@@ -518,7 +507,7 @@ function GroupBlock({
   title: string;
   rows: AngelusRow[];
   knownPoRefs: string[];
-  onDownload: (row: AngelusRow) => void;
+  onOpen: (row: AngelusRow) => void;
   onDelete: (row: AngelusRow) => void;
   onSubtypeChange: (row: AngelusRow, next: Subtype) => void;
   onPoRefChange: (row: AngelusRow, next: string) => void;
@@ -624,13 +613,13 @@ function GroupBlock({
                 >
                   <button
                     type="button"
-                    onClick={() => onDownload(row)}
-                    title="다운로드"
+                    onClick={() => onOpen(row)}
+                    title="새 탭에서 열기"
                     className="btn-base"
                     style={{ height: 28, padding: '0 10px', fontSize: 12 }}
                   >
-                    <Download size={12} />
-                    다운로드
+                    <ExternalLink size={12} />
+                    열기
                   </button>
                   <button
                     type="button"
@@ -868,6 +857,18 @@ function fmtDateTime(iso: string | null): string {
   const hh = String(kst.getUTCHours()).padStart(2, '0');
   const mm = String(kst.getUTCMinutes()).padStart(2, '0');
   return `${y}-${m}-${dd} ${hh}:${mm}`;
+}
+
+/** base64 data URI → Blob (크롬은 data: 최상위 내비게이션을 차단하므로 Blob URL 로 변환). */
+function dataUriToBlob(dataUri: string): Blob {
+  const commaIdx = dataUri.indexOf(',');
+  const meta = dataUri.slice(0, commaIdx);
+  const b64 = dataUri.slice(commaIdx + 1);
+  const mime = /data:([^;]+)/.exec(meta)?.[1] ?? 'application/pdf';
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
 }
 
 function thStyle(
