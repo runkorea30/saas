@@ -17,6 +17,7 @@
  *    (호출부가 이미 커밋 성공한 뒤 호출). 결과 카운트 + 에러 목록을 반환한다.
  */
 import { supabase } from '@/lib/supabase';
+import type { Json } from '@/types/database';
 
 const STORAGE_BUCKET = 'documents';
 
@@ -42,16 +43,43 @@ function safeSegment(raw: string): string {
   return cleaned || 'unknown';
 }
 
-/** verification 세션에서 이 인보이스의 업로드된 제품 PDF 경로/파일명 조회 (최신 1건). */
+/** 항목 7 백필과 동일한 line_items 형식 {code,name,qty,amount}. */
+interface LineItem {
+  code: string;
+  name: string;
+  qty: number;
+  amount: number;
+}
+
+/** 세션 invoice_rows(InvoiceParsedRow[]) → line_items 로 정규화. */
+function toLineItems(invoiceRows: unknown): LineItem[] {
+  if (!Array.isArray(invoiceRows)) return [];
+  const items: LineItem[] = [];
+  for (const r of invoiceRows) {
+    if (!r || typeof r !== 'object') continue;
+    const o = r as Record<string, unknown>;
+    const code = String(o.item_code ?? '').trim();
+    if (!code) continue;
+    items.push({
+      code,
+      name: String(o.description ?? '').trim(),
+      qty: Number(o.qty_shipped ?? 0) || 0,
+      amount: Number(o.amount ?? 0) || 0,
+    });
+  }
+  return items;
+}
+
+/** verification 세션에서 이 인보이스의 업로드된 제품 PDF 경로/파일명 + 라인아이템 조회 (최신 1건). */
 async function findSessionInvoiceFile(
   companyId: string,
   invoiceNumber: string,
-): Promise<{ path: string; name: string } | null> {
+): Promise<{ path: string; name: string; lineItems: LineItem[] } | null> {
   const key = invoiceNumber.trim();
   if (!key) return null;
   const { data, error } = await supabase
     .from('invoice_verifications')
-    .select('invoice_file_path, invoice_file_name, updated_at')
+    .select('invoice_file_path, invoice_file_name, invoice_rows, updated_at')
     .eq('company_id', companyId)
     .ilike('invoice_no', key)
     .order('updated_at', { ascending: false })
@@ -64,6 +92,7 @@ async function findSessionInvoiceFile(
   return {
     path: row.invoice_file_path,
     name: row.invoice_file_name || `Inv_${safeSegment(invoiceNumber)}_product.pdf`,
+    lineItems: toLineItems(row.invoice_rows),
   };
 }
 
@@ -100,6 +129,11 @@ export async function uploadReceivingInvoices(
         subtype_confirmed: false,
         related_po_reference: invoiceNumber.trim(),
         extracted_doc_no: invoiceNumber.trim(),
+        // 항목 7: 제품코드/명 필터용 line_items 함께 저장(백필과 동일 형식).
+        extracted_metadata:
+          sessionFile.lineItems.length > 0
+            ? ({ line_items: sessionFile.lineItems } as unknown as Json)
+            : null,
       });
       if (insErr) throw insErr;
       result.productUploaded = true;

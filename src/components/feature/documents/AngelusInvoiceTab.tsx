@@ -24,6 +24,27 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const STORAGE_BUCKET = 'documents';
 
+const SEARCH_PLACEHOLDER: Record<'doc_no' | 'file_name' | 'line_item', string> = {
+  doc_no: '인보이스번호 검색',
+  file_name: '파일명 검색',
+  line_item: '제품코드 또는 제품명 검색',
+};
+
+/** 인보이스 extracted_metadata.line_items 에 검색어(코드/명 부분일치, 소문자) 매칭 여부. */
+function rowLineItemsMatch(meta: unknown, q: string): boolean {
+  if (!meta || typeof meta !== 'object') return false;
+  const items = (meta as { line_items?: unknown }).line_items;
+  if (!Array.isArray(items)) return false;
+  for (const it of items) {
+    if (!it || typeof it !== 'object') continue;
+    const o = it as Record<string, unknown>;
+    const code = String(o.code ?? '').toLowerCase();
+    const name = String(o.name ?? '').toLowerCase();
+    if (code.includes(q) || name.includes(q)) return true;
+  }
+  return false;
+}
+
 const SELECT_LIST =
   'id, file_name, file_size, mime_type, memo, uploaded_at, created_at, source, email_from, email_received_at, extracted_doc_no, extracted_doc_date, doc_subtype, subtype_confirmed, related_po_reference, extracted_metadata, file_path';
 
@@ -85,7 +106,9 @@ export function AngelusInvoiceTab({ companyId }: Props) {
   const [uploading, setUploading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AngelusRow | null>(null);
   const [busyDelete, setBusyDelete] = useState(false);
-  const [searchType, setSearchType] = useState<'doc_no' | 'file_name'>('doc_no');
+  const [searchType, setSearchType] = useState<
+    'doc_no' | 'file_name' | 'line_item'
+  >('doc_no');
   const [searchText, setSearchText] = useState('');
 
   const queryKey = ['document-files', companyId, 'angelus_invoice'];
@@ -114,6 +137,22 @@ export function AngelusInvoiceTab({ companyId }: Props) {
     if (searchType === 'file_name') {
       return rows.filter((r) => r.file_name.toLowerCase().includes(q));
     }
+    if (searchType === 'line_item') {
+      // PO 그룹 단위: 그룹 내 제품 인보이스 line_items 가 매칭되면 그 그룹(제품+운임) 전체 표시.
+      // line_items 없는 인보이스는 검색 시에만 제외(그룹 매칭으로는 함께 노출됨).
+      const matchingPoRefs = new Set<string>();
+      for (const r of rows) {
+        if (rowLineItemsMatch(r.extracted_metadata, q)) {
+          const po = r.related_po_reference?.trim();
+          if (po) matchingPoRefs.add(po);
+        }
+      }
+      return rows.filter((r) => {
+        if (rowLineItemsMatch(r.extracted_metadata, q)) return true;
+        const po = r.related_po_reference?.trim();
+        return Boolean(po && matchingPoRefs.has(po));
+      });
+    }
     return rows.filter((r) =>
       (r.extracted_doc_no ?? '').toLowerCase().includes(q),
     );
@@ -126,7 +165,9 @@ export function AngelusInvoiceTab({ companyId }: Props) {
     [filteredRows],
   );
 
-  const handleSearchTypeChange = (next: 'doc_no' | 'file_name') => {
+  const handleSearchTypeChange = (
+    next: 'doc_no' | 'file_name' | 'line_item',
+  ) => {
     setSearchType(next);
     setSearchText('');
   };
@@ -360,7 +401,9 @@ export function AngelusInvoiceTab({ companyId }: Props) {
         <select
           value={searchType}
           onChange={(e) =>
-            handleSearchTypeChange(e.target.value as 'doc_no' | 'file_name')
+            handleSearchTypeChange(
+              e.target.value as 'doc_no' | 'file_name' | 'line_item',
+            )
           }
           style={{
             height: 34,
@@ -375,15 +418,14 @@ export function AngelusInvoiceTab({ companyId }: Props) {
         >
           <option value="doc_no">인보이스번호</option>
           <option value="file_name">파일명</option>
+          <option value="line_item">제품코드/명</option>
         </select>
 
         <input
           type="text"
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
-          placeholder={
-            searchType === 'file_name' ? '파일명 검색' : '인보이스번호 검색'
-          }
+          placeholder={SEARCH_PLACEHOLDER[searchType]}
           style={{
             height: 34,
             padding: '0 12px',
