@@ -15,6 +15,7 @@ import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { MatchDetailModal } from '@/components/feature/documents/MatchDetailModal';
+import { MultiChip } from '@/components/feature/orders/primitives';
 import type { DocFileCategory } from '@/pages/documents/DocumentsPage';
 import {
   parseSearchTerms,
@@ -103,11 +104,12 @@ export function DocumentFilesTab({ companyId, category }: Props) {
   const [deleteTarget, setDeleteTarget] = useState<DocumentFileRow | null>(null);
   const [busyDelete, setBusyDelete] = useState(false);
   // 항목 26: 검색 필터 기본값을 제품코드/명(product)으로.
-  const [searchType, setSearchType] = useState<
-    'file_name' | 'doc_no' | 'year' | 'product'
-  >('product');
+  const [searchType, setSearchType] = useState<'file_name' | 'doc_no' | 'product'>(
+    'product',
+  );
   const [searchText, setSearchText] = useState('');
-  const [searchYear, setSearchYear] = useState('');
+  // 항목 27: 연도 다중선택 필터(수입면장 신고일자 기준, OR). 빈 배열이면 전체.
+  const [yearSel, setYearSel] = useState<string[]>([]);
   // (항목 19) 상세보기 팝업 — 매칭 제품 인보이스 + 매칭 라인.
   const [detailModal, setDetailModal] = useState<{
     inv: ProductInvoice;
@@ -352,49 +354,46 @@ export function DocumentFilesTab({ companyId, category }: Props) {
 
   const filteredRows = useMemo(() => {
     if (!showSearchBar) return rows;
-    if (searchType === 'year') {
-      if (!searchYear) return rows;
-      return rows.filter((r) =>
-        (r.extracted_doc_date ?? '').startsWith(searchYear),
-      );
-    }
+    // 항목 27: 연도 다중선택(OR, 신고일자 기준) 먼저 적용, 그 위에 검색(AND).
+    const base = yearSel.length
+      ? rows.filter((r) =>
+          yearSel.includes((r.extracted_doc_date ?? '').slice(0, 4)),
+        )
+      : rows;
     const q = searchText.trim().toLowerCase();
-    if (!q) return rows;
+    if (!q) return base;
     if (searchType === 'file_name') {
-      return rows.filter((r) => r.file_name.toLowerCase().includes(q));
+      return base.filter((r) => r.file_name.toLowerCase().includes(q));
     }
     if (searchType === 'product') {
       // (항목 10) 제품코드/명 → 매칭 제품 인보이스(line_items) 의 invoice_no 집합을 구하고,
       //   수입면장 중 matched_product_invoice_no 가 그 집합에 포함되는 건만 표시.
       //   매칭 정보 없는 수입면장은 검색 시에만 제외(검색어 없으면 위에서 전체 반환).
       const terms = parseSearchTerms(searchText);
-      if (terms.length === 0) return rows;
+      if (terms.length === 0) return base;
       const matchedNos = new Set<string>();
       for (const p of productInvoices) {
         if (metaLineItemsMatch(p.meta, terms)) matchedNos.add(p.no);
       }
       if (matchedNos.size === 0) return [];
-      return rows.filter((r) => {
+      return base.filter((r) => {
         const no = matchedProductNo(r.extracted_metadata);
         return no.length > 0 && matchedNos.has(no);
       });
     }
-    return rows.filter((r) =>
+    return base.filter((r) =>
       (r.extracted_doc_no ?? '').toLowerCase().includes(q),
     );
-  }, [rows, showSearchBar, searchType, searchText, searchYear, productInvoices]);
+  }, [rows, showSearchBar, searchType, searchText, yearSel, productInvoices]);
 
   const hasActiveSearch =
-    showSearchBar &&
-    ((searchType === 'year' && Boolean(searchYear)) ||
-      (searchType !== 'year' && searchText.trim().length > 0));
+    showSearchBar && (searchText.trim().length > 0 || yearSel.length > 0);
 
   const handleSearchTypeChange = (
-    next: 'file_name' | 'doc_no' | 'year' | 'product',
+    next: 'file_name' | 'doc_no' | 'product',
   ) => {
     setSearchType(next);
     setSearchText('');
-    setSearchYear('');
   };
 
   return (
@@ -474,7 +473,7 @@ export function DocumentFilesTab({ companyId, category }: Props) {
             value={searchType}
             onChange={(e) =>
               handleSearchTypeChange(
-                e.target.value as 'file_name' | 'doc_no' | 'year' | 'product',
+                e.target.value as 'file_name' | 'doc_no' | 'product',
               )
             }
             style={{
@@ -491,62 +490,39 @@ export function DocumentFilesTab({ companyId, category }: Props) {
             <option value="file_name">파일명</option>
             <option value="doc_no">신고번호</option>
             <option value="product">제품코드/명</option>
-            <option value="year">연도별조회</option>
           </select>
 
-          {searchType === 'year' ? (
-            <select
-              value={searchYear}
-              onChange={(e) => setSearchYear(e.target.value)}
-              style={{
-                height: 34,
-                padding: '0 10px',
-                borderRadius: 8,
-                border: '1px solid var(--line-strong)',
-                background: 'var(--surface)',
-                color: 'var(--ink)',
-                fontSize: 13,
-                fontFamily: 'var(--font-kr)',
-                minWidth: 140,
-              }}
-            >
-              <option value="">연도 선택</option>
-              {availableYears.map((y) => (
-                <option key={y} value={y}>
-                  {y}년
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              type="text"
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              placeholder={
-                DECL_TEXT_PLACEHOLDER[
-                  searchType as 'file_name' | 'doc_no' | 'product'
-                ]
-              }
-              style={{
-                height: 34,
-                padding: '0 12px',
-                borderRadius: 8,
-                border: '1px solid var(--line-strong)',
-                background: 'var(--surface)',
-                color: 'var(--ink)',
-                fontSize: 13,
-                width: 240,
-                fontFamily: 'var(--font-kr)',
-              }}
-            />
-          )}
+          <input
+            type="text"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder={DECL_TEXT_PLACEHOLDER[searchType]}
+            style={{
+              height: 34,
+              padding: '0 12px',
+              borderRadius: 8,
+              border: '1px solid var(--line-strong)',
+              background: 'var(--surface)',
+              color: 'var(--ink)',
+              fontSize: 13,
+              width: 240,
+              fontFamily: 'var(--font-kr)',
+            }}
+          />
+
+          <MultiChip
+            label="연도"
+            selected={yearSel}
+            onChange={setYearSel}
+            options={availableYears.map((y) => ({ id: y, label: `${y}년` }))}
+          />
 
           {hasActiveSearch && (
             <button
               type="button"
               onClick={() => {
                 setSearchText('');
-                setSearchYear('');
+                setYearSel([]);
               }}
               className="btn-base"
             >
