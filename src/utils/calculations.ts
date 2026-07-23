@@ -616,6 +616,28 @@ export function calcSalesQty1m(qty3m: number): number {
 }
 
 /**
+ * 판매량(2개월) = 판매량(3개월) ÷ 3 × 2 (= 6개월 월평균 × 2).
+ * 반올림된 정수 수량(EA) 반환. 1개월 파생과 동일한 방식.
+ */
+export function calcSalesQty2m(qty3m: number): number {
+  return Math.round((qty3m / 3) * 2);
+}
+
+/** 발주 기준: '1m' = 1개월, '2m' = 2개월, '3m' = 3개월 판매량. */
+export type SalesBasis = '1m' | '2m' | '3m';
+
+/**
+ * 발주 기준(salesBasis)에 따른 기준 판매량 수량.
+ * qty3m(판매량 3개월)에서 파생 — 1m = ÷3, 2m = ÷3×2, 3m = 그대로.
+ * 🔴 중첩 삼항 회피 + basis→수량 매핑 단일화를 위해 이 헬퍼로 통일.
+ */
+export function calcSalesQtyByBasis(basis: SalesBasis, qty3m: number): number {
+  if (basis === '1m') return calcSalesQty1m(qty3m);
+  if (basis === '2m') return calcSalesQty2m(qty3m);
+  return qty3m;
+}
+
+/**
  * 발주서 추천 발주수량.
  * - 주문할 수량 = 판매량(기준) − 현재재고 (음수면 0)
  * - unit 이 'DZ'(대소문자 무관) 면 round(주문할 수량 / 12) DZ (소수점 첫째 자리 반올림)

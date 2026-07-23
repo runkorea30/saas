@@ -48,6 +48,8 @@ import {
   calcOrderQty,
   calcSalesQty1m,
   calcSalesQty3m,
+  calcSalesQtyByBasis,
+  type SalesBasis,
 } from '@/utils/calculations';
 import { getCategoryLabel } from '@/constants/categories';
 import { sortByCategory } from '@/utils/sortProducts';
@@ -58,6 +60,14 @@ import {
 } from '@/components/feature/purchase-order/ResizableTh';
 
 const SAVED_QUERY_KEY = 'purchase-order-saved-categories';
+
+/** 발주 기준(salesBasis) UI 라벨 — 중첩 삼항 회피용 매핑. 순서는 1개월-2개월-3개월. */
+const BASIS_LABEL: Record<SalesBasis, { ko: string; short: string }> = {
+  '1m': { ko: '1개월', short: '1M' },
+  '2m': { ko: '2개월', short: '2M' },
+  '3m': { ko: '3개월', short: '3M' },
+};
+const BASIS_ORDER: readonly SalesBasis[] = ['1m', '2m', '3m'];
 
 /** 계산검증 팝오버가 열릴 수 있는 셀 컬럼 식별자. */
 type VerifyColumn =
@@ -248,8 +258,8 @@ export function PurchaseOrderPage() {
    */
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  /** 발주 기준: '1m' = 1개월 판매량, '3m' = 3개월 판매량 (기본값 '3m') */
-  const [salesBasis, setSalesBasis] = useState<'1m' | '3m'>('3m');
+  /** 발주 기준: '1m'=1개월, '2m'=2개월, '3m'=3개월 판매량 (기본값 '3m') */
+  const [salesBasis, setSalesBasis] = useState<SalesBasis>('3m');
   // "발주예상 USD" — 전체 활성 품목 기준(카테고리 필터/저장 상태 무관).
   //  useOrderNeedEstimate 는 handleGenerate 와 동일 로직(baseQty·재고+입고예정·단가) 사용.
   //  저장된 값 기반의 "발주확정 USD" 와 짝을 이루는 KPI.
@@ -394,8 +404,8 @@ export function PurchaseOrderPage() {
       if (excludedCategories.has(p.category)) continue;
       const qty6mExcl = salesMap.get(p.id) ?? 0;
       const qty3m = calcSalesQty3m(qty6mExcl);
-      // salesBasis 에 따라 기준 수량 결정 (1m = 3m / 3)
-      const baseQty = salesBasis === '1m' ? calcSalesQty1m(qty3m) : qty3m;
+      // salesBasis 에 따라 기준 수량 결정 (1m = 3m/3, 2m = 3m/3×2, 3m = 그대로)
+      const baseQty = calcSalesQtyByBasis(salesBasis, qty3m);
       const stock = stockMap.get(p.id) ?? 0;
       const incoming = incomingByProduct.get(p.id) ?? 0;
       // 🔴 (2026-07-05) 리드타임 감안 재고 조정 + 입고예정 반영.
@@ -414,7 +424,7 @@ export function PurchaseOrderPage() {
       if (orderQ > 0) next.set(p.id, orderQ);
     }
     setOrderQty(next);
-    const basisLabel = salesBasis === '1m' ? '1개월' : '3개월';
+    const basisLabel = BASIS_LABEL[salesBasis].ko;
     showToast({
       kind: 'success',
       text: `발주서 생성 완료 (${next.size}품목 · ${basisLabel} 기준, 리드타임·입고예정 반영)`,
@@ -765,7 +775,7 @@ export function PurchaseOrderPage() {
               <SummaryItem
                 label="발주예상 USD"
                 value={`$${formatUsd(needEstimateUsd)}`}
-                sub={salesBasis === '1m' ? '(1M 기준)' : '(3M 기준)'}
+                sub={`(${BASIS_LABEL[salesBasis].short} 기준)`}
               />
               <SummaryItem
                 label="발주확정 USD"
@@ -897,7 +907,7 @@ export function PurchaseOrderPage() {
             >
               보조 도구
             </span>
-            {/* 1개월 / 3개월 기준 토글 */}
+            {/* 1개월 / 2개월 / 3개월 기준 토글 */}
             <div
               style={{
                 display: 'flex',
@@ -909,7 +919,7 @@ export function PurchaseOrderPage() {
                 background: 'var(--surface)',
               }}
             >
-              {(['1m', '3m'] as const).map((basis) => (
+              {BASIS_ORDER.map((basis) => (
                 <button
                   key={basis}
                   type="button"
@@ -929,9 +939,9 @@ export function PurchaseOrderPage() {
                     cursor: 'pointer',
                     transition: 'all 0.15s',
                   }}
-                  title={basis === '1m' ? '1개월 판매량 기준' : '3개월 판매량 기준'}
+                  title={`${BASIS_LABEL[basis].ko} 판매량 기준`}
                 >
-                  {basis === '1m' ? '1개월' : '3개월'}
+                  {BASIS_LABEL[basis].ko}
                 </button>
               ))}
             </div>
@@ -1288,7 +1298,7 @@ export function PurchaseOrderPage() {
                       dailyAvg > 0 ? Math.floor(effectiveStock / dailyAvg) : null;
                     const incomingSources =
                       incomingSourcesByProduct.get(p.id) ?? [];
-                    const baseQty = salesBasis === '1m' ? qty1m : qty3m;
+                    const baseQty = calcSalesQtyByBasis(salesBasis, qty3m);
                     const depletionAdjustedStock = Math.max(
                       0,
                       Math.round(stock - leadTimeQty),
@@ -1448,7 +1458,7 @@ export function PurchaseOrderPage() {
                           발주수량 (1단계 발주서 생성 로직)
                         </div>
                         <Kv
-                          k={`baseQty(${salesBasis === '1m' ? '1M' : '3M'})`}
+                          k={`baseQty(${BASIS_LABEL[salesBasis].short})`}
                           v={baseQty.toLocaleString('ko-KR')}
                         />
                         <Kv

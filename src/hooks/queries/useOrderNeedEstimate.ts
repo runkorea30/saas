@@ -9,7 +9,7 @@
  *    이 위젯도 함께 수정함.)
  *
  * 🔴 company_id 는 useCompany() 에서만.
- * 🔴 calcOrderQty / calcSalesQty1m / calcSalesQty3m 은 calculations.ts 경유.
+ * 🔴 calcOrderQty / calcSalesQty3m / calcSalesQtyByBasis 은 calculations.ts 경유.
  * 🟠 usePurchaseOrder 캐시 재활용 — 추가 쿼리 없음.
  * 🟠 excludedCategories 는 호출자(TopNav)에서 localStorage 로 관리.
  */
@@ -18,12 +18,13 @@ import { usePurchaseOrder } from './usePurchaseOrder';
 import { useIncomingQuantities } from './useIncomingQuantities';
 import { usePurchaseForecast } from './usePurchaseForecast';
 import {
-  calcSalesQty1m,
   calcSalesQty3m,
+  calcSalesQtyByBasis,
   calcOrderQty,
+  type SalesBasis,
 } from '@/utils/calculations';
 
-export type OrderBasis = '1m' | '3m';
+export type OrderBasis = SalesBasis;
 
 export interface OrderNeedEstimate {
   estimatedUsd: number;
@@ -77,7 +78,7 @@ export function useOrderNeedEstimate(
 
       const qty6m = salesMap.get(p.id) ?? 0;
       const qty3m = calcSalesQty3m(qty6m);
-      const baseQty = basis === '1m' ? calcSalesQty1m(qty3m) : qty3m;
+      const baseQty = calcSalesQtyByBasis(basis, qty3m);
       const stock = stockMap.get(p.id) ?? 0;
       const incoming = incomingByProduct.get(p.id) ?? 0;
       // 리드타임 감안: 발주 → 입고 사이에 자연 소진될 재고만큼 미리 뺌.
