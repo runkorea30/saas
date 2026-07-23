@@ -126,7 +126,7 @@ function App() {
           <Route path="documents" element={<DocumentsPage />} />
 
           <Route path="settings">
-            <Route index element={<Navigate to="/settings/company" replace />} />
+            <Route index element={<Navigate to="/settings/customers" replace />} />
             <Route path="company" element={<CompanyInfoPage />} />
             <Route path="customers" element={<CustomersPage />} />
             <Route path="customer-groups" element={<CustomerGroupsPage />} />

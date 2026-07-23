@@ -81,7 +81,7 @@ export const navSections: NavSection[] = [
   {
     path: '/settings',
     label: '설정',
-    indexRedirect: '/settings/company',
+    indexRedirect: '/settings/customers',
     items: [
       { path: '/settings/company', label: '회사정보' },
       { path: '/settings/customers', label: '거래처' },
