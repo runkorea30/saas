@@ -30,17 +30,28 @@ const SEARCH_PLACEHOLDER: Record<'doc_no' | 'file_name' | 'line_item', string> =
   line_item: '제품코드 또는 제품명 검색',
 };
 
-/** 인보이스 extracted_metadata.line_items 에 검색어(코드/명 부분일치, 소문자) 매칭 여부. */
+/** 항목 14: 제품코드 비교용 정규화 — 하이픈 제거 + 소문자('-' 무시 검색, 코드 전용). */
+function normCode(s: string): string {
+  return s.toLowerCase().replace(/-/g, '');
+}
+
+/** 라인아이템 하나가 검색어에 매칭하는지(코드=하이픈무시, 명=부분일치). q 는 소문자 가정. */
+function lineItemMatches(code: string, name: string, q: string): boolean {
+  if (!q) return false;
+  return name.toLowerCase().includes(q) || normCode(code).includes(normCode(q));
+}
+
+/** 인보이스 extracted_metadata.line_items 에 검색어(코드=하이픈무시/명 부분일치) 매칭 여부. */
 function rowLineItemsMatch(meta: unknown, q: string): boolean {
-  if (!meta || typeof meta !== 'object') return false;
+  if (!q || !meta || typeof meta !== 'object') return false;
   const items = (meta as { line_items?: unknown }).line_items;
   if (!Array.isArray(items)) return false;
   for (const it of items) {
     if (!it || typeof it !== 'object') continue;
     const o = it as Record<string, unknown>;
-    const code = String(o.code ?? '').toLowerCase();
-    const name = String(o.name ?? '').toLowerCase();
-    if (code.includes(q) || name.includes(q)) return true;
+    if (lineItemMatches(String(o.code ?? ''), String(o.name ?? ''), q)) {
+      return true;
+    }
   }
   return false;
 }
@@ -59,7 +70,7 @@ function matchedLineItems(
     const o = it as Record<string, unknown>;
     const code = String(o.code ?? '');
     const name = String(o.name ?? '');
-    if (code.toLowerCase().includes(q) || name.toLowerCase().includes(q)) {
+    if (lineItemMatches(code, name, q)) {
       out.push({ code, name });
     }
   }
