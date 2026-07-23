@@ -119,6 +119,12 @@ export function ImportReceivingPage() {
   const [confirmDiff, setConfirmDiff] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
+  // ───── 입고확정 후 거래처 포털 안내 삭제 확인창 (항목 4) ─────
+  const [noticeClearOpen, setNoticeClearOpen] = useState(false);
+  const [noticeClearBusy, setNoticeClearBusy] = useState(false);
+  const [clearFedex, setClearFedex] = useState(false);
+  const [clearSea, setClearSea] = useState(false);
+
   // ───── 운임(Freight) 인보이스 PDF ─────
   // 🟠 (항목 3) Shipping Cost (USD) 자동채움용. parseInvoicePDF 재사용 → Σ rows.amount.
   //    파일은 즉시 Storage 업로드하지 않고 File 객체로만 임시 보관 —
@@ -495,6 +501,95 @@ export function ImportReceivingPage() {
     performSubmit();
   };
 
+  // ───── 거래처 포털 안내 현재값 유무 (항목 4) ─────
+  const fedexHasNotice = Boolean(
+    company?.import_notice_status ||
+      (company?.import_notice_products?.length ?? 0) > 0 ||
+      company?.import_notice_date ||
+      company?.import_notice_order_date ||
+      company?.import_notice_ship_date ||
+      company?.import_notice_customs_date ||
+      company?.import_notice_arrival_text,
+  );
+  const seaHasNotice = Boolean(
+    company?.import_notice_sea_status ||
+      (company?.import_notice_sea_products?.length ?? 0) > 0 ||
+      company?.import_notice_sea_order_date ||
+      company?.import_notice_sea_ship_date ||
+      company?.import_notice_sea_customs_date ||
+      company?.import_notice_sea_arrival_text,
+  );
+
+  /**
+   * 확인창 "지우기" — 체크된 쪽의 안내를 초기화.
+   * 🔴 products 는 hardening 규칙대로 persistProducts() targeted UPDATE 로만,
+   *    나머지 스칼라 필드는 별도 companies UPDATE 로 null 처리.
+   */
+  const handleClearNotices = async () => {
+    if (!companyId) {
+      setNoticeClearOpen(false);
+      return;
+    }
+    setNoticeClearBusy(true);
+    try {
+      const clearScalars = async (sea: boolean) => {
+        const updateData = sea
+          ? {
+              import_notice_sea_status: null,
+              import_notice_sea_order_date: null,
+              import_notice_sea_ship_date: null,
+              import_notice_sea_customs_date: null,
+              import_notice_sea_arrival_text: null,
+            }
+          : {
+              import_notice_status: null,
+              import_notice_date: null,
+              import_notice_order_date: null,
+              import_notice_ship_date: null,
+              import_notice_customs_date: null,
+              import_notice_arrival_text: null,
+            };
+        const { error } = await supabase
+          .from('companies')
+          .update(updateData)
+          .eq('id', companyId);
+        if (error) throw error;
+      };
+      if (clearFedex) {
+        await persistProducts([], false);
+        await clearScalars(false);
+        setNoticeStatus('');
+        setNoticeDate('');
+        setNoticeProducts([]);
+        setNoticeOrderDate('');
+        setNoticeShipDate('');
+        setNoticeCustomsDate('');
+        setNoticeArrivalText('');
+      }
+      if (clearSea) {
+        await persistProducts([], true);
+        await clearScalars(true);
+        setNoticeSeaStatus('');
+        setNoticeSeaProducts([]);
+        setNoticeSeaOrderDate('');
+        setNoticeSeaShipDate('');
+        setNoticeSeaCustomsDate('');
+        setNoticeSeaArrivalText('');
+      }
+      await queryClient.invalidateQueries({ queryKey: ['current-company'] });
+      setNoticeInvoiceReloadKey((k) => k + 1);
+      showToast({ kind: 'success', text: '거래처 포털 안내를 지웠습니다.' });
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: `안내 삭제 실패: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      setNoticeClearBusy(false);
+      setNoticeClearOpen(false);
+    }
+  };
+
   const performSubmit = () => {
     const rowsToSubmit = validSubmitRows;
     // 🔴 클로저 안전: onSuccess 시점에 state 가 리셋될 수 있어 미리 캡처.
@@ -513,6 +608,12 @@ export function ImportReceivingPage() {
           setRowInputs([createEmptyRow()]);
           setFreightFile(null);
           setFreightInvoiceNo(null);
+          // 항목 4: 거래처 포털 안내가 있으면 삭제 여부 확인창 표시(자동삭제 아님).
+          if (fedexHasNotice || seaHasNotice) {
+            setClearFedex(fedexHasNotice);
+            setClearSea(seaHasNotice);
+            setNoticeClearOpen(true);
+          }
           // 🔴 다중 세션 대응: 해당 invoice_no 의 세션 행만 resolved_at 세팅 + 이관본
           //    정리. 회사 전체를 UPDATE 하던 기존 방식은 다른 미확정 세션까지 초기화.
           if (companyId) {
@@ -1536,6 +1637,45 @@ export function ImportReceivingPage() {
         confirmVariant="danger"
         onConfirm={onConfirmReset}
         busy={busy}
+      />
+
+      {/* 항목 4: 입고확정 후 거래처 포털 안내 삭제 확인 */}
+      <ConfirmDialog
+        open={noticeClearOpen}
+        onClose={() => setNoticeClearOpen(false)}
+        title="거래처 포털 안내 삭제"
+        confirmLabel="지우기"
+        cancelLabel="그대로 두기"
+        confirmVariant="danger"
+        busy={noticeClearBusy}
+        onConfirm={() => void handleClearNotices()}
+        body={
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span>
+              거래처 포털에 표시 중인 안내가 있습니다. 지울 항목을 선택하세요.
+            </span>
+            {fedexHasNotice && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={clearFedex}
+                  onChange={(e) => setClearFedex(e.target.checked)}
+                />
+                페덱스(항공) 안내 지우기
+              </label>
+            )}
+            {seaHasNotice && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={clearSea}
+                  onChange={(e) => setClearSea(e.target.checked)}
+                />
+                해상운송 안내 지우기
+              </label>
+            )}
+          </div>
+        }
       />
     </div>
   );
