@@ -89,6 +89,38 @@ function isNearExpiry(
   return isWithinExpiryMonths(dateStr, thresholdMonths);
 }
 
+/** 클릭 정렬 대상 컬럼 (6종 데이터 컬럼). 신청서/체크박스는 제외. */
+type SortField = EditableField;
+type SortState = { field: SortField; dir: 'asc' | 'desc' };
+/** 날짜 컬럼 — ISO 문자열 사전식 비교로 날짜 순서 일치. 나머지는 localeCompare. */
+const DATE_SORT_FIELDS = new Set<SortField>([
+  'inspection_valid_until',
+  'import_valid_until',
+]);
+
+/**
+ * 두 행을 정렬 기준으로 비교. null/빈값은 정렬 방향과 무관하게 항상 맨 뒤.
+ */
+function compareInspection(
+  a: InspectionCert,
+  b: InspectionCert,
+  sort: SortState,
+): number {
+  const av = ((a[sort.field] as string | null) ?? '').trim();
+  const bv = ((b[sort.field] as string | null) ?? '').trim();
+  if (!av && !bv) return 0;
+  if (!av) return 1; // null 맨 뒤
+  if (!bv) return -1;
+  let cmp: number;
+  if (DATE_SORT_FIELDS.has(sort.field)) {
+    // ISO 날짜 문자열은 사전식 비교가 곧 날짜 순서.
+    cmp = av < bv ? -1 : Number(av > bv);
+  } else {
+    cmp = av.localeCompare(bv, 'ko');
+  }
+  return sort.dir === 'asc' ? cmp : -cmp;
+}
+
 interface Props {
   companyId: string | null;
 }
@@ -120,7 +152,17 @@ export function InspectionCertTab({ companyId }: Props) {
   });
 
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<SortState | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+
+  /** 헤더 클릭 — 같은 컬럼이면 방향 토글, 다른 컬럼이면 오름차순부터. */
+  const handleSort = (field: SortField) => {
+    setSort((prev) =>
+      prev?.field === field
+        ? { field, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { field, dir: 'asc' },
+    );
+  };
   const [editingCell, setEditingCell] = useState<{
     id: string;
     field: EditableField;
@@ -142,6 +184,12 @@ export function InspectionCertTab({ companyId }: Props) {
       return hay.includes(q);
     });
   }, [rows, search]);
+
+  // 검색 결과 위에 정렬 적용 (sort 없으면 쿼리 기본순서 = product_name asc 유지).
+  const sorted = useMemo(() => {
+    if (!sort) return filtered;
+    return [...filtered].sort((a, b) => compareInspection(a, b, sort));
+  }, [filtered, sort]);
 
   const allChecked =
     filtered.length > 0 && filtered.every((r) => checkedIds.has(r.id));
@@ -634,17 +682,17 @@ export function InspectionCertTab({ companyId }: Props) {
                       onChange={toggleAll}
                     />
                   </th>
-                  <th style={thStyle('left')}>검사대상제품</th>
-                  <th style={thStyle('left', 120)}>HS_NO</th>
-                  <th style={thStyle('left', 180)}>시험검사번호</th>
-                  <th style={thStyle('center', 130)}>검사유효기간</th>
-                  <th style={thStyle('left', 180)}>수입요건번호</th>
-                  <th style={thStyle('center', 130)}>수입유효기간</th>
+                  <SortHeader label="검사대상제품" field="product_name" align="left" sort={sort} onSort={handleSort} />
+                  <SortHeader label="HS_NO" field="hs_no" align="left" width={120} sort={sort} onSort={handleSort} />
+                  <SortHeader label="시험검사번호" field="inspection_no" align="left" width={180} sort={sort} onSort={handleSort} />
+                  <SortHeader label="검사유효기간" field="inspection_valid_until" align="center" width={130} sort={sort} onSort={handleSort} />
+                  <SortHeader label="수입요건번호" field="import_req_no" align="left" width={180} sort={sort} onSort={handleSort} />
+                  <SortHeader label="수입유효기간" field="import_valid_until" align="center" width={130} sort={sort} onSort={handleSort} />
                   <th style={thStyle('left', 200)}>신청서</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((row) => (
+                {sorted.map((row) => (
                   <tr
                     key={row.id}
                     style={{ borderBottom: '1px solid var(--line)' }}
@@ -1136,6 +1184,38 @@ function thStyle(
     color: 'var(--ink-2)',
     width,
   };
+}
+
+/** 클릭 정렬 헤더 — 활성 컬럼에 방향 화살표(▲▼) 표시. */
+function SortHeader({
+  label,
+  field,
+  align,
+  width,
+  sort,
+  onSort,
+}: {
+  label: string;
+  field: SortField;
+  align: 'left' | 'center' | 'right';
+  width?: number;
+  sort: SortState | null;
+  onSort: (field: SortField) => void;
+}) {
+  const active = sort?.field === field;
+  const arrow = active ? (sort?.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  return (
+    <th
+      style={{ ...thStyle(align, width), cursor: 'pointer', userSelect: 'none' }}
+      onClick={() => onSort(field)}
+      title="클릭하여 정렬"
+    >
+      {label}
+      <span style={{ color: active ? 'var(--ink)' : 'var(--ink-3)' }}>
+        {arrow}
+      </span>
+    </th>
+  );
 }
 
 function tdStyle(align: 'left' | 'center' | 'right'): React.CSSProperties {
