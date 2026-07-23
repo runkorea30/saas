@@ -1592,3 +1592,15 @@ Phase 1 (수동 입력) 기준. Phase 2 에서 PDF 파싱이 추가되어도 계
 - `695a562` feat(inventory): 안전재고/발주점 풀패키지 (마이그레이션 + UI + 홈 경고) (#2)
 - `34c4a13` feat(dogfooding): Supabase 연동 + N+1 리팩토링 + 타입 엄격화 (#1)
 - `810a6ea` docs: SESSION_HANDOFF 갱신 — 수입/매입 Phase 1 완료 반영
+
+---
+
+## 알려진 데이터 이슈 (수동 확인 대기)
+
+- **엔젤러스 인보이스 76474 — total_usd 불일치 (2026-07-24 발견)**
+  - 항목 7 line_items 백필 dry-run 중, 파싱된 라인 합계 **$3,807.69** (89개 라인, 모두 정상 제품코드)
+    vs `document_files.extracted_metadata.total_usd` 저장값 **$807.69** — 정확히 **$3,000** 차이.
+  - 나머지 59건 제품 인보이스는 Σamount = 저장 total_usd 정확 일치 → 파서 신뢰. 76474의 저장
+    total_usd 가 historical 추출 이상치로 추정됨.
+  - line_items 백필은 정상 완료(라인 자체는 유효). **total_usd 는 이번에 손대지 않음.**
+  - TODO: 원본 PDF(`historical-import/.../Inv_76474...pdf`) 수동 확인 후 total_usd 정정 여부 결정.
