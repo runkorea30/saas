@@ -102,9 +102,10 @@ export function DocumentFilesTab({ companyId, category }: Props) {
   const [uploading, setUploading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DocumentFileRow | null>(null);
   const [busyDelete, setBusyDelete] = useState(false);
+  // 항목 26: 검색 필터 기본값을 제품코드/명(product)으로.
   const [searchType, setSearchType] = useState<
     'file_name' | 'doc_no' | 'year' | 'product'
-  >('file_name');
+  >('product');
   const [searchText, setSearchText] = useState('');
   const [searchYear, setSearchYear] = useState('');
   // (항목 19) 상세보기 팝업 — 매칭 제품 인보이스 + 매칭 라인.
