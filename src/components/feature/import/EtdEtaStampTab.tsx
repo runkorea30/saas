@@ -48,6 +48,15 @@ function saveLastEtdEta(etd: string, eta: string): void {
   }
 }
 
+/** src PDF 의 모든 페이지를 dst 에 순서대로 복사해 이어붙임(항목 11·12 병합용). */
+async function appendAllPages(
+  dst: PDFDocument,
+  src: PDFDocument,
+): Promise<void> {
+  const pages = await dst.copyPages(src, src.getPageIndices());
+  pages.forEach((p) => dst.addPage(p));
+}
+
 interface PageInfo {
   widthPts: number;
   heightPts: number;
@@ -67,6 +76,9 @@ export function EtdEtaStampTab() {
   const [topPct, setTopPct] = useState(28);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // 항목 11: 페덱스 운임 인보이스를 제품 인보이스 뒤에 병합.
+  const [mergeFreight, setMergeFreight] = useState(false);
+  const [freightFile, setFreightFile] = useState<File | null>(null);
 
   // 원본 PDF 바이트(pdf-lib 생성용) — state 로 안 두고 ref (재렌더 불필요).
   const bytesRef = useRef<ArrayBuffer | null>(null);
@@ -175,6 +187,10 @@ export function EtdEtaStampTab() {
       showToast({ kind: 'error', text: 'ETD / ETA 를 모두 입력해 주세요.' });
       return;
     }
+    if (mergeFreight && !freightFile) {
+      showToast({ kind: 'error', text: '병합할 운임 인보이스 PDF 를 선택해 주세요.' });
+      return;
+    }
     setGenerating(true);
     try {
       const pdfDoc = await PDFDocument.load(bytesRef.current.slice(0));
@@ -190,14 +206,28 @@ export function EtdEtaStampTab() {
         font,
         color: rgb(0.07, 0.07, 0.07),
       });
-      const out = await pdfDoc.save();
+
+      // 항목 11: 병합 옵션이 있으면 [제품(ETD/ETA 삽입)] → [운임] 순으로 하나의 PDF 로 합침.
+      const willMerge = mergeFreight && Boolean(freightFile);
+      let outDoc = pdfDoc;
+      if (willMerge) {
+        const merged = await PDFDocument.create();
+        await appendAllPages(merged, pdfDoc);
+        if (freightFile) {
+          const fdoc = await PDFDocument.load(await freightFile.arrayBuffer());
+          await appendAllPages(merged, fdoc);
+        }
+        outDoc = merged;
+      }
+      const out = await outDoc.save();
       const baseName = file.name.replace(/\.pdf$/i, '');
+      const suffix = willMerge ? '_송금용' : '_ETD-ETA';
       // pdf-lib save() 반환 Uint8Array 를 새 버퍼로 복사해 Blob 타입 호환.
       const blob = new Blob([new Uint8Array(out)], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${baseName}_ETD-ETA.pdf`;
+      a.download = `${baseName}${suffix}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -336,6 +366,32 @@ export function EtdEtaStampTab() {
         </div>
       )}
 
+      {/* 은행 송금용 병합 옵션 (항목 11·12) */}
+      {pageInfo && (
+        <div
+          style={{
+            padding: '12px 16px',
+            background: 'var(--surface)',
+            border: '1px solid var(--line)',
+            borderRadius: 'var(--radius-lg)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)' }}>
+            은행 송금용 병합 옵션
+          </div>
+          <MergePdfRow
+            label="페덱스 운임 인보이스 병합 (제품 인보이스 뒤에 추가)"
+            checked={mergeFreight}
+            onToggleChecked={setMergeFreight}
+            file={freightFile}
+            onPickFile={setFreightFile}
+          />
+        </div>
+      )}
+
       {/* 미리보기 */}
       <div
         style={{
@@ -364,6 +420,80 @@ export function EtdEtaStampTab() {
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+/** 병합 옵션 한 줄 — 체크박스 + (체크 시)PDF 파일 선택. 항목 11·12 공용. */
+function MergePdfRow({
+  label,
+  checked,
+  onToggleChecked,
+  file,
+  onPickFile,
+}: {
+  label: string;
+  checked: boolean;
+  onToggleChecked: (v: boolean) => void;
+  file: File | null;
+  onPickFile: (f: File | null) => void;
+}) {
+  return (
+    <div
+      style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}
+    >
+      <label
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          fontSize: 12.5,
+          color: 'var(--ink-2)',
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onToggleChecked(e.target.checked)}
+        />
+        {label}
+      </label>
+      {checked && (
+        <>
+          <label
+            className="btn-base"
+            style={{ cursor: 'pointer', height: 30, padding: '0 10px', fontSize: 12 }}
+          >
+            <FileText className="ico-sm" />
+            <span>{file ? '파일 변경' : 'PDF 선택'}</span>
+            <input
+              type="file"
+              accept=".pdf"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                e.target.value = '';
+                onPickFile(f);
+              }}
+            />
+          </label>
+          {file && (
+            <span
+              style={{
+                fontSize: 12,
+                color: 'var(--ink-3)',
+                maxWidth: 220,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={file.name}
+            >
+              {file.name}
+            </span>
+          )}
+        </>
+      )}
     </div>
   );
 }
