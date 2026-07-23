@@ -486,6 +486,7 @@ export function OrderListTable(props: OrderListTableProps) {
                     </div>
                     {o.internal_note && o.internal_note.trim() && (
                       <span
+                        className="memo-badge"
                         title={`내부메모: ${
                           o.internal_note.length > 60
                             ? `${o.internal_note.slice(0, 60)}…`

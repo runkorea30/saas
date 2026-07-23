@@ -44,6 +44,8 @@
     --success-wash: #DEE9DA;
     --warning: #A2701E;
     --warning-wash: #F2E4CB;
+    /* 항목 30: 내부메모 배지 pulse glow (라이트) */
+    --memo-badge-glow: rgba(162, 112, 30, 0.5);
     --danger: #8B2C25;
     --danger-wash: #F1D8D3;
     --info: #365A7A;
@@ -185,6 +187,7 @@
     --success-wash: #1E2A1B;
     --warning: #D9B16A;
     --warning-wash: #2E2516;
+    --memo-badge-glow: rgba(217, 177, 106, 0.6);
     --danger: #D78479;
     --danger-wash: #2F1C19;
     --info: #8DB0CC;
@@ -254,6 +257,7 @@
     --success-wash: #2A3527;
     --warning: #DDB874;
     --warning-wash: #3D311E;
+    --memo-badge-glow: rgba(221, 184, 116, 0.6);
     --danger: #DC8C81;
     --danger-wash: #3D2521;
     --info: #95B7D1;
@@ -338,6 +342,7 @@
     --success-wash: #2A331D;
     --warning: #D9A85F;
     --warning-wash: #3A2C16;
+    --memo-badge-glow: rgba(217, 168, 95, 0.6);
     --danger: #D67866;
     --danger-wash: #3A2018;
     --info: #A6B8C2;
@@ -680,5 +685,28 @@
     size: A4 portrait;
     /* 상단만 절반으로 축소 (12mm → 6mm) — 종이 절약 목적. 좌우/하단은 유지. */
     margin: 6mm 10mm 12mm 10mm;
+  }
+}
+
+/* 항목 30: 내부메모 배지 pulse glow — warning 계열 CSS 변수(테마별) 사용. */
+@keyframes memo-badge-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--memo-badge-glow);
+  }
+  50% {
+    box-shadow: 0 0 6px 3px var(--memo-badge-glow);
+  }
+}
+
+.memo-badge {
+  animation: memo-badge-pulse 2s ease-in-out infinite;
+}
+
+/* 접근성: 모션 최소화 설정 시 애니메이션 끄고 정적 glow 로 강조 유지. */
+@media (prefers-reduced-motion: reduce) {
+  .memo-badge {
+    animation: none;
+    box-shadow: 0 0 4px 1px var(--memo-badge-glow);
   }
 }
