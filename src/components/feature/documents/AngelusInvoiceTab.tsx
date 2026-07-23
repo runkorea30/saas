@@ -25,7 +25,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const STORAGE_BUCKET = 'documents';
 
 const SELECT_LIST =
-  'id, file_name, file_size, mime_type, memo, uploaded_at, created_at, source, email_from, email_received_at, extracted_doc_no, doc_subtype, subtype_confirmed, related_po_reference, extracted_metadata, file_path';
+  'id, file_name, file_size, mime_type, memo, uploaded_at, created_at, source, email_from, email_received_at, extracted_doc_no, extracted_doc_date, doc_subtype, subtype_confirmed, related_po_reference, extracted_metadata, file_path';
 
 type Subtype = 'proforma' | 'revised' | 'final' | 'unknown';
 
@@ -65,6 +65,7 @@ interface AngelusRow {
   email_from: string | null;
   email_received_at: string | null;
   extracted_doc_no: string | null;
+  extracted_doc_date: string | null;
   doc_subtype: string | null;
   subtype_confirmed: boolean | null;
   related_po_reference: string | null;
@@ -574,7 +575,7 @@ function GroupBlock({
             <th style={thStyle('center', 110)}>종류</th>
             <th style={thStyle('right', 110)}>합계(USD)</th>
             <th style={thStyle('left', 140)}>PO 참조</th>
-            <th style={thStyle('left', 160)}>수신일시</th>
+            <th style={thStyle('left', 160)}>Ship Date</th>
             <th style={thStyle('center', 140)}>작업</th>
           </tr>
         </thead>
@@ -626,12 +627,14 @@ function GroupBlock({
                   onChange={(next) => onPoRefChange(row, next)}
                 />
               </td>
-              <td style={{ ...tdStyle('left'), color: 'var(--ink-2)' }}>
-                {fmtDateTime(
-                  row.email_received_at ??
-                    row.uploaded_at ??
-                    row.created_at,
-                )}
+              <td
+                style={{
+                  ...tdStyle('left'),
+                  color: 'var(--ink-2)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {invoiceShipDate(row)}
               </td>
               <td style={tdStyle('center')}>
                 <div
@@ -877,16 +880,31 @@ function groupByPo(rows: AngelusRow[]): {
   return { groups, unassigned };
 }
 
-function fmtDateTime(iso: string | null): string {
+/** 날짜(YYYY-MM-DD, KST) 표시. ISO 문자열이면 KST 날짜만. 없으면 '—'. */
+function fmtDate(iso: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
   const kst = new Date(d.getTime() + 9 * 3600_000);
   const y = kst.getUTCFullYear();
   const m = String(kst.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(kst.getUTCDate()).padStart(2, '0');
-  const hh = String(kst.getUTCHours()).padStart(2, '0');
-  const mm = String(kst.getUTCMinutes()).padStart(2, '0');
-  return `${y}-${m}-${dd} ${hh}:${mm}`;
+  return `${y}-${m}-${dd}`;
+}
+
+/**
+ * 표시용 Ship Date — extracted_metadata.ship_date 우선,
+ * 없으면 extracted_doc_date, 그것도 없으면 수신 타임스탬프의 날짜로 폴백.
+ */
+function invoiceShipDate(row: AngelusRow): string {
+  const meta = row.extracted_metadata;
+  const shipDate =
+    meta && typeof meta === 'object'
+      ? (meta as { ship_date?: unknown }).ship_date
+      : null;
+  if (typeof shipDate === 'string' && shipDate.trim()) return shipDate;
+  if (row.extracted_doc_date) return row.extracted_doc_date;
+  return fmtDate(row.email_received_at ?? row.uploaded_at ?? row.created_at);
 }
 
 /** extracted_metadata.total_usd 를 숫자로 파싱. 없거나 비정상이면 null. */
