@@ -144,6 +144,17 @@
     배포본(saas-beta-pied) 육안 확인 완료: ETD/ETA 고정값 프리필 + Statement/운임 체크박스 노출 + 체크 시 파일 선택 필드 표시.
 - 13. 설정 페이지 기본 탭 = 거래처(`/settings` index redirect + navConfig indexRedirect 둘 다 변경) — `62a798e`
 
+### 문서관리/송금 개선 — 신규 3건 (17~19, 지시서 009, 전부 완료·push 2026-07-24)
+- 18. 엔젤러스인보이스 검색 필터 기본값 = 제품코드/명(line_item) — `8440892`
+- 17. 송금용 PDF 편집 — 금액 요약 카드(제품/운임 합계 + 소계, Statement 있으면 Amount Due 우선 강조) — `23063cf`
+  - 제품/운임 합계는 기존 `parseInvoicePDF`(서버 pdf-parse) 재사용해 rows.amount 합. Statement Amount Due 는 pdfjs 텍스트 정규식.
+  - 파싱 실패 시 "금액 확인 필요" 표시, 병합/다운로드는 정상(partial failure tolerance).
+  - ⚠️ Statement Amount Due 정규식은 예시 형식($6,403.03) 기준 best-effort — 실제 Statement PDF 레이아웃에 따라 실패 가능(그 경우 "금액 확인 필요").
+- 19. 검색 결과 "상세보기" 팝업(다운로드 포함) — `76be1c8`
+  - 공용 `MatchDetailModal`(항목16 팝업 확장): 라인별 단가(=amount/qty 반올림) + PDF 다운로드 버튼.
+  - 엔젤러스인보이스: 카드마다 "상세보기" 버튼(chip 유지). 수입면장: 항목10 간접검색 결과에 "상세보기" → 매칭 제품 인보이스 상세 + 그 PDF 다운로드.
+  - `matchedLineDetails`/`MatchedLine` 을 `lineItemSearch` util 로 공용화(AngelusInvoiceTab 로컬 `matchedLineItems` 중복 제거).
+
 ### 별도 검토 대기 항목
 - 인보이스 76474 total_usd 불일치(§ "알려진 데이터 이슈" 참조, 원본 PDF 수동 확인 후 처리).
 - 백필 스크립트 `scripts/phase7-*.mjs` 커밋 여부 확인(재현성용).
