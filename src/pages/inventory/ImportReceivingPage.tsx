@@ -11,7 +11,7 @@
  *    adjustedQuantity 가 새 default 로 자동 추종. 수동 편집하면 이후 자동 추종 안 함.
  *    Phase 2 에서 PDF 업로드 + 자동 파싱 예정.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useCompany } from '@/hooks/useCompany';
@@ -45,6 +45,12 @@ import { InvoiceUploadCard } from '@/components/feature/import/InvoiceUploadCard
 import { RecentInvoicesSection } from '@/components/feature/import/RecentInvoicesSection';
 import { CustomsDocTab } from '@/components/feature/import/CustomsDocTab';
 import { CodeCorrectionsTab } from '@/components/feature/import/CodeCorrectionsTab';
+// 🟠 pdf-lib + pdfjs 는 무거워 이 탭에서만 필요 → lazy 로 별도 청크 분리(메인 번들 부담 제거).
+const EtdEtaStampTab = lazy(() =>
+  import('@/components/feature/import/EtdEtaStampTab').then((m) => ({
+    default: m.EtdEtaStampTab,
+  })),
+);
 import { parseInvoicePDF } from '@/utils/invoiceParser';
 import { uploadReceivingInvoices } from '@/lib/angelusReceivingUpload';
 
@@ -72,7 +78,13 @@ function createEmptyRow(): ImportRowInput {
   };
 }
 
-type TabKey = 'verification' | 'customs' | 'receiving' | 'portal' | 'code-corrections';
+type TabKey =
+  | 'verification'
+  | 'customs'
+  | 'receiving'
+  | 'portal'
+  | 'code-corrections'
+  | 'etd-eta-stamp';
 
 const DEFAULT_HEADER: ImportInvoiceHeader = {
   invoiceNumber: '',
@@ -880,6 +892,11 @@ export function ImportReceivingPage() {
             onClick={() => setActiveTab('code-corrections')}
             label="OCR 오독 관리"
           />
+          <TabButton
+            active={activeTab === 'etd-eta-stamp'}
+            onClick={() => setActiveTab('etd-eta-stamp')}
+            label="송금용 PDF 편집"
+          />
         </div>
 
         {productsQuery.error && (
@@ -919,6 +936,18 @@ export function ImportReceivingPage() {
         {activeTab === 'customs' && <CustomsDocTab />}
 
         {activeTab === 'code-corrections' && <CodeCorrectionsTab />}
+
+        {activeTab === 'etd-eta-stamp' && (
+          <Suspense
+            fallback={
+              <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)', fontSize: 13 }}>
+                편집기 불러오는 중…
+              </div>
+            }
+          >
+            <EtdEtaStampTab />
+          </Suspense>
+        )}
 
         {activeTab === 'receiving' && (
           <>
