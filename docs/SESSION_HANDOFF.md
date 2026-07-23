@@ -105,7 +105,7 @@
 
 ---
 
-## 오늘 추가된 작업 요약 (2026-07-24, 발주서 기준토글·품절필터 + 수입 입고처리 자동화 + 문서관리 1~8)
+## 오늘 추가된 작업 요약 (2026-07-24, 발주서 기준토글·품절필터 + 수입 입고처리 자동화 + 문서관리/송금 1~16)
 
 ### 발주서 페이지 (2건)
 - **1/2/3개월 기준 토글** (완료, commit `754b2c0`) — `calcSalesQty2m(qty3m)=round(qty3m/3*2)` + `calcSalesQtyByBasis` 헬퍼 추가(`calculations.ts`). 조사 결과 기존 1m/3m도 실제 DB 집계가 아니라 6개월평균 파생값이었음 → 2m도 동일 파생 방식으로 통일.
@@ -125,18 +125,25 @@
 7. **엔젤러스인보이스 제품코드/명 필터** — `3d87520` (+ 백필 스크립트 `1852b28`). 제품 인보이스 60건 전체 `extracted_metadata.line_items` 백필 완료(2,377개 라인, DB 반영). 신규 입고분도 `angelusReceivingUpload`에서 자동 저장. 필터 UI(검색창, line_items 부분일치). 수입면장은 스캔이미지(textLen=0)라 직접 검색 제외.
 8. 매칭 품목 카드 UI chip 강조 — `ec228b9` (PDF 자체는 미수정). ✅ 커밋·push 확인 완료(2026-07-24 세션 시작 시 검증).
 
-### 다음 세션 할 일 (우선순위 순)
-- **신규 지시서 `documents_new_8features_prompt.md` (9~16번)** — ⚠️ 세션 시작 시점에 레포/홈/Downloads 어디에도 파일 없음. 재확보 필요. 항목 요약:
-  - 9. 송금용 PDF 편집 — ETD/ETA 마지막 입력값 기본값 저장
-  - 10. 수입면장 — 제품코드/명 간접 검색(엔젤러스 인보이스 line_items 경유, `matched_product_invoice_no` 연결)
-  - 11. 은행 송금용 PDF — 제품+운임 인보이스 병합(pdf-lib copyPages)
-  - 12. 은행 송금용 PDF — Statement 파일 맨 앞 페이지 선택적 삽입
-  - 13. 설정 페이지 — 거래처 탭 기본 선택
-  - 14. 제품코드 검색 시 "-" 무시
-  - 15. 제품명 다중 검색(쉼표/공백 구분)
-  - 16. 매칭 인보이스 요약 팝업(파일명/인보이스번호/Ship Date/제품/수량/금액)
-  - 권장 순서: 14 → 15 → 10 → 16 → 9 → 11 → 12 → 13
-- **별도 검토 대기**: 인보이스 76474 total_usd 불일치(§ "알려진 데이터 이슈" 참조, 원본 PDF 수동 확인 후 처리). 백필 스크립트 `scripts/phase7-*.mjs` 커밋 여부 확인.
+### 문서관리/송금 개선 — 신규 8건 (9~16번, 전부 완료·push 2026-07-24)
+지시서 `documents_new_8features_prompt.md` 기준. 권장 순서(14→15→10→16→9→11→12→13)대로 항목별 개별 커밋.
+- 14. 제품코드 검색 시 `-` 무시(코드 전용) — `5491cef`
+- 15. 제품명 다중 검색(쉼표/공백 OR) — `87e7fc3`
+- 10. 수입면장 제품코드/명 간접검색(`matched_product_invoice_no` → 제품 인보이스 line_items 경유) — `211f3b2`
+  - ⚙️ 매칭 로직을 `src/utils/lineItemSearch.ts` 공용 util로 추출(`normCode`/`parseSearchTerms`/`metaLineItemsMatch`).
+    `AngelusInvoiceTab`·`DocumentFilesTab` 공유. 14·15 로직도 이 util 경유. (§8 "같은 로직 복사 금지" 준수)
+  - `DocumentFilesTab`: 제품 인보이스 조회를 total_usd(항목5) + line_items(항목10) 공용 단일 쿼리로 통합.
+- 16. 엔젤러스인보이스 매칭 요약 팝업(chip 클릭 → `Modal`: 파일명/번호/Ship Date/제품·수량·금액/전체합계) — `dc43b10`
+- 9. 송금용 PDF — ETD/ETA 마지막 입력값 localStorage(`etdEtaLastUsed`) 프리필/저장 — `94a8a86`
+- 11. 송금용 PDF — 제품+운임 인보이스 병합(pdf-lib copyPages, [제품]→[운임]) — `417bf5e`
+  - ⚠️ 이 도구는 임의 업로드 PDF 로 동작(PO DB 연동 없음) → 스펙의 "PO 자동 페어링 제안"은 미구현,
+    **수동 운임 PDF 선택** 경로로 제공. 자동 제안이 필요하면 문서 라이브러리에서 인보이스 선택하는 재설계 필요.
+- 12. 송금용 PDF — Statement 맨 앞 페이지 선택 삽입([Statement]→[제품]→[운임] 조합 가능) — `ac06612`
+- 13. 설정 페이지 기본 탭 = 거래처(`/settings` index redirect + navConfig indexRedirect 둘 다 변경) — `62a798e`
+
+### 별도 검토 대기 항목
+- 인보이스 76474 total_usd 불일치(§ "알려진 데이터 이슈" 참조, 원본 PDF 수동 확인 후 처리).
+- 백필 스크립트 `scripts/phase7-*.mjs` 커밋 여부 확인(재현성용).
 
 ---
 
