@@ -82,6 +82,36 @@ export function DocumentFilesTab({ companyId, category }: Props) {
     staleTime: 30_000,
   });
 
+  // 🟠 (항목 5) 수입면장 전용 — 매칭 제품 인보이스의 total_usd 맵.
+  //   수입합계금액(KRW) 계산에 사용. 다른 카테고리에서는 조회하지 않음.
+  const isDeclaration = category === 'import_declaration';
+  const { data: productTotals } = useQuery<Map<string, number>>({
+    queryKey: ['angelus-product-totals', companyId],
+    enabled: Boolean(companyId) && isDeclaration,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const prodRows = await fetchAllRows<{
+        extracted_doc_no: string | null;
+        extracted_metadata: unknown;
+      }>(() =>
+        supabase
+          .from('document_files')
+          .select('extracted_doc_no, extracted_metadata')
+          .eq('company_id', companyId!)
+          .eq('category', 'angelus_invoice')
+          .eq('doc_subtype', 'product'),
+      );
+      const map = new Map<string, number>();
+      for (const r of prodRows) {
+        const no = r.extracted_doc_no?.trim();
+        if (!no) continue;
+        const total = parseTotalUsd(r.extracted_metadata);
+        if (total != null) map.set(no, total);
+      }
+      return map;
+    },
+  });
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -451,6 +481,7 @@ export function DocumentFilesTab({ companyId, category }: Props) {
                     <th style={thStyle('left', 140)}>신고번호</th>
                     <th style={thStyle('left', 110)}>신고일자</th>
                     <th style={thStyle('center', 70)}>운송</th>
+                    <th style={thStyle('right', 130)}>수입합계금액</th>
                   </>
                 )}
                 <th style={thStyle('right', 90)}>크기</th>
@@ -469,6 +500,9 @@ export function DocumentFilesTab({ companyId, category }: Props) {
                     transport_type?: string | null;
                     mawb_hawb?: string | null;
                   } | null) ?? null;
+                const importKrw = showMetaColumns
+                  ? computeImportTotalKrw(row.extracted_metadata, productTotals)
+                  : null;
                 return (
                   <tr
                     key={row.id}
@@ -518,6 +552,22 @@ export function DocumentFilesTab({ companyId, category }: Props) {
                           }}
                         >
                           {renderTransport(meta?.transport_type ?? null)}
+                        </td>
+                        <td
+                          style={{
+                            ...tdStyle('right'),
+                            color:
+                              importKrw != null
+                                ? 'var(--ink)'
+                                : 'var(--ink-3)',
+                            fontVariantNumeric: 'tabular-nums',
+                          }}
+                          title={importKrwTooltip(
+                            row.extracted_metadata,
+                            productTotals,
+                          )}
+                        >
+                          {importKrwLabel(Boolean(productTotals), importKrw)}
                         </td>
                       </>
                     )}
@@ -615,6 +665,67 @@ function renderTransport(t: string | null): string {
   if (t === 'air') return '항공';
   if (t === 'sea') return '해상';
   return '—';
+}
+
+/** unknown 값을 유한 숫자로 파싱. 실패 시 null. */
+function toNumOrNull(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** extracted_metadata.total_usd 파싱 (angelus 제품 인보이스). */
+function parseTotalUsd(meta: unknown): number | null {
+  if (!meta || typeof meta !== 'object') return null;
+  return toNumOrNull((meta as { total_usd?: unknown }).total_usd);
+}
+
+/**
+ * 수입합계금액(KRW) = round((제품_total_usd + 운임_usd) × 환율). (항목 5)
+ *  · 제품_total_usd: 매칭 제품 인보이스(productTotals[matched_product_invoice_no])
+ *  · 운임_usd: actual_freight_usd 우선, 없으면 declared_freight_usd
+ *  · 매칭 인보이스번호/제품총액/환율 중 하나라도 없으면 null(=매칭정보 없음).
+ */
+function computeImportTotalKrw(
+  meta: unknown,
+  productTotals: Map<string, number> | undefined,
+): number | null {
+  if (!productTotals || !meta || typeof meta !== 'object') return null;
+  const m = meta as Record<string, unknown>;
+  const prodNo =
+    typeof m.matched_product_invoice_no === 'string'
+      ? m.matched_product_invoice_no.trim()
+      : '';
+  if (!prodNo) return null;
+  const productUsd = productTotals.get(prodNo);
+  if (productUsd == null) return null;
+  const freightUsd =
+    toNumOrNull(m.actual_freight_usd) ?? toNumOrNull(m.declared_freight_usd);
+  const fx = toNumOrNull(m.exchange_rate);
+  if (freightUsd == null || fx == null) return null;
+  return Math.round((productUsd + freightUsd) * fx);
+}
+
+/** KRW 표시. 로딩 중이면 '—', 계산 불가면 '매칭정보 없음'. */
+function importKrwLabel(loaded: boolean, krw: number | null): string {
+  if (!loaded) return '—';
+  if (krw == null) return '매칭정보 없음';
+  return `₩${krw.toLocaleString('ko-KR')}`;
+}
+
+/** 수입합계금액 계산 근거 툴팁 — 계산 가능할 때만 문자열, 아니면 undefined. */
+function importKrwTooltip(
+  meta: unknown,
+  productTotals: Map<string, number> | undefined,
+): string | undefined {
+  if (computeImportTotalKrw(meta, productTotals) == null) return undefined;
+  const m = meta as Record<string, unknown>;
+  const prodNo = String(m.matched_product_invoice_no ?? '').trim();
+  const productUsd = productTotals?.get(prodNo);
+  const freightUsd =
+    toNumOrNull(m.actual_freight_usd) ?? toNumOrNull(m.declared_freight_usd);
+  const fx = toNumOrNull(m.exchange_rate);
+  return `제품 인보이스 ${prodNo} ($${productUsd}) + 운임 $${freightUsd} × 환율 ${fx}`;
 }
 
 function fmtSize(bytes: number | null): string {
