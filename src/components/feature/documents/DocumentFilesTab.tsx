@@ -14,8 +14,14 @@ import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { MatchDetailModal } from '@/components/feature/documents/MatchDetailModal';
 import type { DocFileCategory } from '@/pages/documents/DocumentsPage';
-import { parseSearchTerms, metaLineItemsMatch } from '@/utils/lineItemSearch';
+import {
+  parseSearchTerms,
+  metaLineItemsMatch,
+  matchedLineDetails,
+  type MatchedLine,
+} from '@/utils/lineItemSearch';
 
 const CATEGORY_LABELS: Record<DocFileCategory, string> = {
   import_declaration: '수입면장',
@@ -60,6 +66,34 @@ interface Props {
   category: DocFileCategory;
 }
 
+/** (항목 19) 수입면장 간접검색이 참조하는 제품 인보이스(상세보기/다운로드용). */
+interface ProductInvoice {
+  no: string;
+  meta: unknown;
+  id: string;
+  file_name: string;
+  file_path: string;
+}
+
+/** extracted_metadata.ship_date (문자열) 우선, 없으면 '—'. */
+function metaShipDate(meta: unknown): string {
+  if (meta && typeof meta === 'object') {
+    const s = (meta as { ship_date?: unknown }).ship_date;
+    if (typeof s === 'string' && s.trim()) return s;
+  }
+  return '—';
+}
+
+/** 수입면장 row 의 매칭 제품 인보이스번호(없으면 ''). */
+function matchedProductNo(meta: unknown): string {
+  if (meta && typeof meta === 'object') {
+    const v = (meta as { matched_product_invoice_no?: unknown })
+      .matched_product_invoice_no;
+    if (typeof v === 'string') return v.trim();
+  }
+  return '';
+}
+
 export function DocumentFilesTab({ companyId, category }: Props) {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
@@ -73,6 +107,11 @@ export function DocumentFilesTab({ companyId, category }: Props) {
   >('file_name');
   const [searchText, setSearchText] = useState('');
   const [searchYear, setSearchYear] = useState('');
+  // (항목 19) 상세보기 팝업 — 매칭 제품 인보이스 + 매칭 라인.
+  const [detailModal, setDetailModal] = useState<{
+    inv: ProductInvoice;
+    lines: MatchedLine[];
+  } | null>(null);
 
   const queryKey = ['document-files', companyId, category];
 
@@ -96,19 +135,22 @@ export function DocumentFilesTab({ companyId, category }: Props) {
   //   총액(항목 5 수입합계금액)과 line_items(항목 10 제품 간접검색)에 공용. 다른 카테고리에서는 조회 안 함.
   const isDeclaration = category === 'import_declaration';
   const { data: productInvoices = [], isFetched: productsFetched } = useQuery<
-    { no: string; meta: unknown }[]
+    ProductInvoice[]
   >({
     queryKey: ['angelus-product-invoices', companyId],
     enabled: Boolean(companyId) && isDeclaration,
     staleTime: 60_000,
     queryFn: async () => {
       const prodRows = await fetchAllRows<{
+        id: string;
+        file_name: string;
+        file_path: string;
         extracted_doc_no: string | null;
         extracted_metadata: unknown;
       }>(() =>
         supabase
           .from('document_files')
-          .select('extracted_doc_no, extracted_metadata')
+          .select('id, file_name, file_path, extracted_doc_no, extracted_metadata')
           .eq('company_id', companyId!)
           .eq('category', 'angelus_invoice')
           .eq('doc_subtype', 'product'),
@@ -117,6 +159,9 @@ export function DocumentFilesTab({ companyId, category }: Props) {
         .map((r) => ({
           no: r.extracted_doc_no?.trim() ?? '',
           meta: r.extracted_metadata,
+          id: r.id,
+          file_name: r.file_name,
+          file_path: r.file_path,
         }))
         .filter((r) => r.no);
     },
@@ -129,6 +174,13 @@ export function DocumentFilesTab({ companyId, category }: Props) {
       const total = parseTotalUsd(r.meta);
       if (total != null) map.set(r.no, total);
     }
+    return map;
+  }, [productInvoices]);
+
+  // (항목 19) 인보이스번호 → 제품 인보이스(상세보기/다운로드용).
+  const productByNo = useMemo(() => {
+    const map = new Map<string, ProductInvoice>();
+    for (const r of productInvoices) map.set(r.no, r);
     return map;
   }, [productInvoices]);
 
@@ -216,6 +268,44 @@ export function DocumentFilesTab({ companyId, category }: Props) {
     }
   };
 
+  /** (항목 19) 파일 경로/이름으로 직접 다운로드(제품 인보이스 PDF). */
+  const downloadByPath = async (filePath: string, fileName: string) => {
+    try {
+      if (filePath.startsWith('data:')) {
+        const a = document.createElement('a');
+        a.href = filePath;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        return;
+      }
+      const { data: blob, error } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .download(filePath);
+      if (error || !blob) throw new Error(error?.message ?? '다운로드 실패');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '다운로드 실패';
+      showToast({ kind: 'error', text: msg });
+    }
+  };
+
+  /** (항목 19) 수입면장 row 의 매칭 제품 인보이스 상세보기 팝업 열기. */
+  const openDetail = (row: DocumentFileRow) => {
+    const inv = productByNo.get(matchedProductNo(row.extracted_metadata));
+    if (!inv) return;
+    const lines = matchedLineDetails(inv.meta, parseSearchTerms(searchText));
+    setDetailModal({ inv, lines });
+  };
+
   const handleConfirmDelete = async () => {
     if (!deleteTarget || !companyId) return;
     setBusyDelete(true);
@@ -284,13 +374,7 @@ export function DocumentFilesTab({ companyId, category }: Props) {
       }
       if (matchedNos.size === 0) return [];
       return rows.filter((r) => {
-        const m = r.extracted_metadata as {
-          matched_product_invoice_no?: unknown;
-        } | null;
-        const no =
-          typeof m?.matched_product_invoice_no === 'string'
-            ? m.matched_product_invoice_no.trim()
-            : '';
+        const no = matchedProductNo(r.extracted_metadata);
         return no.length > 0 && matchedNos.has(no);
       });
     }
@@ -649,6 +733,24 @@ export function DocumentFilesTab({ companyId, category }: Props) {
                           gap: 6,
                         }}
                       >
+                        {searchType === 'product' &&
+                          productByNo.has(
+                            matchedProductNo(row.extracted_metadata),
+                          ) && (
+                            <button
+                              type="button"
+                              onClick={() => openDetail(row)}
+                              title="매칭 제품 상세보기"
+                              className="btn-base"
+                              style={{
+                                height: 28,
+                                padding: '0 10px',
+                                fontSize: 12,
+                              }}
+                            >
+                              상세보기
+                            </button>
+                          )}
                         <button
                           type="button"
                           onClick={() => handleDownload(row)}
@@ -704,6 +806,21 @@ export function DocumentFilesTab({ companyId, category }: Props) {
         onConfirm={handleConfirmDelete}
         busy={busyDelete}
       />
+
+      {detailModal && (
+        <MatchDetailModal
+          open
+          onClose={() => setDetailModal(null)}
+          fileName={detailModal.inv.file_name}
+          docNo={detailModal.inv.no}
+          shipDate={metaShipDate(detailModal.inv.meta)}
+          lines={detailModal.lines}
+          totalUsd={parseTotalUsd(detailModal.inv.meta)}
+          onDownload={() =>
+            downloadByPath(detailModal.inv.file_path, detailModal.inv.file_name)
+          }
+        />
+      )}
     </div>
   );
 }

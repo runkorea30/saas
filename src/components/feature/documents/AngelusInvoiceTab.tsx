@@ -20,11 +20,12 @@ import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { Modal } from '@/components/ui/Modal';
+import { MatchDetailModal } from '@/components/feature/documents/MatchDetailModal';
 import {
   parseSearchTerms,
-  lineItemMatchesTerms,
   metaLineItemsMatch,
+  matchedLineDetails,
+  type MatchedLine,
 } from '@/utils/lineItemSearch';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -36,41 +37,14 @@ const SEARCH_PLACEHOLDER: Record<'doc_no' | 'file_name' | 'line_item', string> =
   line_item: '제품코드/명 검색 (쉼표·공백으로 여러 개 가능)',
 };
 
-interface MatchedLineItem {
-  code: string;
-  name: string;
-  qty: number | null;
-  amount: number | null;
-}
-
-/** unknown → 유한 숫자 or null. */
-function toNumOrNull(v: unknown): number | null {
-  if (v == null || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-/** 항목 8/16: 검색 텀에 매칭되는 line_items 만 추출(chip 강조 + 요약 팝업용). 텀 없으면 빈 배열. */
-function matchedLineItems(meta: unknown, terms: string[]): MatchedLineItem[] {
-  if (terms.length === 0 || !meta || typeof meta !== 'object') return [];
-  const items = (meta as { line_items?: unknown }).line_items;
-  if (!Array.isArray(items)) return [];
-  const out: MatchedLineItem[] = [];
-  for (const it of items) {
-    if (!it || typeof it !== 'object') continue;
-    const o = it as Record<string, unknown>;
-    const code = String(o.code ?? '');
-    const name = String(o.name ?? '');
-    if (lineItemMatchesTerms(code, name, terms)) {
-      out.push({
-        code,
-        name,
-        qty: toNumOrNull(o.qty),
-        amount: toNumOrNull(o.amount),
-      });
-    }
-  }
-  return out;
+/** 항목 19: Blob/Object URL 을 파일 다운로드로 트리거. */
+function triggerDownload(url: string, fileName: string): void {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 const SELECT_LIST =
@@ -142,7 +116,7 @@ export function AngelusInvoiceTab({ companyId }: Props) {
   // 항목 16: 매칭 chip 클릭 시 요약 팝업으로 보여줄 대상.
   const [matchModal, setMatchModal] = useState<{
     row: AngelusRow;
-    matched: MatchedLineItem[];
+    matched: MatchedLine[];
   } | null>(null);
 
   const queryKey = ['document-files', companyId, 'angelus_invoice'];
@@ -292,6 +266,29 @@ export function AngelusInvoiceTab({ companyId }: Props) {
       window.open(pub.publicUrl, '_blank', 'noopener,noreferrer');
     } catch (err) {
       const msg = err instanceof Error ? err.message : '열기 실패';
+      showToast({ kind: 'error', text: msg });
+    }
+  };
+
+  /** 항목 19: 상세보기 팝업에서 원본 PDF 다운로드(open 로직 재사용, 새 탭 대신 다운로드). */
+  const downloadRow = async (row: AngelusRow) => {
+    try {
+      if (!row.file_path) throw new Error('파일 데이터 없음');
+      if (row.file_path.startsWith('data:')) {
+        const url = URL.createObjectURL(dataUriToBlob(row.file_path));
+        triggerDownload(url, row.file_name);
+        window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+        return;
+      }
+      const { data: blob, error } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .download(row.file_path);
+      if (error || !blob) throw new Error(error?.message ?? '다운로드 실패');
+      const url = URL.createObjectURL(blob);
+      triggerDownload(url, row.file_name);
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '다운로드 실패';
       showToast({ kind: 'error', text: msg });
     }
   };
@@ -578,139 +575,18 @@ export function AngelusInvoiceTab({ companyId }: Props) {
         busy={busyDelete}
       />
 
-      <Modal
-        open={Boolean(matchModal)}
-        onClose={() => setMatchModal(null)}
-        title="매칭 정보 요약"
-        width={520}
-      >
-        {matchModal && (
-          <MatchSummary row={matchModal.row} matched={matchModal.matched} />
-        )}
-      </Modal>
-    </div>
-  );
-}
-
-/** 항목 16: 검색 매칭된 인보이스의 파일명/번호/Ship Date/제품/수량/금액/전체합계 요약. */
-function MatchSummary({
-  row,
-  matched,
-}: {
-  row: AngelusRow;
-  matched: MatchedLineItem[];
-}) {
-  const total = invoiceTotalUsd(row.extracted_metadata);
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <SummaryRow label="파일명" value={row.file_name} />
-        <SummaryRow label="인보이스번호" value={row.extracted_doc_no ?? '—'} />
-        <SummaryRow label="Ship Date" value={invoiceShipDate(row)} />
-      </div>
-
-      <div>
-        <div
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            color: 'var(--ink-2)',
-            marginBottom: 6,
-          }}
-        >
-          매칭 제품 {matched.length}건
-        </div>
-        <table
-          style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}
-        >
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--line)' }}>
-              <th style={thStyle('left', 110)}>코드</th>
-              <th style={thStyle('left')}>제품명</th>
-              <th style={thStyle('right', 60)}>수량</th>
-              <th style={thStyle('right', 90)}>금액</th>
-            </tr>
-          </thead>
-          <tbody>
-            {matched.map((li, i) => (
-              <tr key={i} style={{ borderBottom: '1px solid var(--line)' }}>
-                <td
-                  style={{
-                    ...tdStyle('left'),
-                    fontVariantNumeric: 'tabular-nums',
-                    color: 'var(--ink-2)',
-                  }}
-                >
-                  {li.code || '—'}
-                </td>
-                <td style={tdStyle('left')}>{li.name || '—'}</td>
-                <td
-                  style={{
-                    ...tdStyle('right'),
-                    fontVariantNumeric: 'tabular-nums',
-                    color: 'var(--ink-2)',
-                  }}
-                >
-                  {li.qty != null ? li.qty.toLocaleString('en-US') : '—'}
-                </td>
-                <td
-                  style={{
-                    ...tdStyle('right'),
-                    fontVariantNumeric: 'tabular-nums',
-                    color: 'var(--ink-2)',
-                  }}
-                >
-                  {fmtUsd(li.amount)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          paddingTop: 8,
-          borderTop: '1px solid var(--line)',
-          fontSize: 13,
-        }}
-      >
-        <span style={{ color: 'var(--ink-2)', fontWeight: 600 }}>
-          인보이스 전체 합계
-        </span>
-        <span
-          style={{
-            fontWeight: 600,
-            color: 'var(--ink)',
-            fontVariantNumeric: 'tabular-nums',
-          }}
-        >
-          {fmtUsd(total)}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/** 요약 팝업 상단 라벨-값 한 줄. */
-function SummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: 'flex', gap: 10, fontSize: 13 }}>
-      <span
-        style={{
-          color: 'var(--ink-3)',
-          minWidth: 84,
-          flexShrink: 0,
-        }}
-      >
-        {label}
-      </span>
-      <span style={{ color: 'var(--ink)', wordBreak: 'break-all' }}>
-        {value}
-      </span>
+      {matchModal && (
+        <MatchDetailModal
+          open
+          onClose={() => setMatchModal(null)}
+          fileName={matchModal.row.file_name}
+          docNo={matchModal.row.extracted_doc_no}
+          shipDate={invoiceShipDate(matchModal.row)}
+          lines={matchModal.matched}
+          totalUsd={invoiceTotalUsd(matchModal.row.extracted_metadata)}
+          onDownload={() => downloadRow(matchModal.row)}
+        />
+      )}
     </div>
   );
 }
@@ -737,7 +613,7 @@ function GroupBlock({
   onSubtypeChange: (row: AngelusRow, next: Subtype) => void;
   onPoRefChange: (row: AngelusRow, next: string) => void;
   /** 항목 16: 매칭 chip 클릭 시 요약 팝업 열기. */
-  onShowMatch: (row: AngelusRow, matched: MatchedLineItem[]) => void;
+  onShowMatch: (row: AngelusRow, matched: MatchedLine[]) => void;
   muted?: boolean;
 }) {
   // PO 그룹 합계 = 그룹 내 인보이스 total_usd 합. 하나라도 값이 있으면 헤더에 표시.
@@ -807,7 +683,7 @@ function GroupBlock({
         </thead>
         <tbody>
           {rows.map((row) => {
-            const matched = matchedLineItems(row.extracted_metadata, highlightTerms);
+            const matched = matchedLineDetails(row.extracted_metadata, highlightTerms);
             return (
             <tr key={row.id} style={{ borderBottom: '1px solid var(--line)' }}>
               <td style={tdStyle('left')}>
@@ -869,6 +745,21 @@ function GroupBlock({
                       </span>
                     )}
                   </div>
+                )}
+                {matched.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onShowMatch(row, matched)}
+                    className="btn-base"
+                    style={{
+                      marginTop: 6,
+                      height: 24,
+                      padding: '0 8px',
+                      fontSize: 11,
+                    }}
+                  >
+                    상세보기
+                  </button>
                 )}
               </td>
               <td

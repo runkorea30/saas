@@ -47,3 +47,44 @@ export function metaLineItemsMatch(meta: unknown, terms: string[]): boolean {
   }
   return false;
 }
+
+/** 매칭 라인아이템 상세(항목 16/19 팝업용). */
+export interface MatchedLine {
+  code: string;
+  name: string;
+  qty: number | null;
+  amount: number | null;
+}
+
+/** unknown → 유한 숫자 or null. */
+function toNumOrNull(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** 검색 텀에 매칭되는 line_items 를 상세(코드/명/수량/금액)로 추출. 텀 없으면 빈 배열. */
+export function matchedLineDetails(
+  meta: unknown,
+  terms: string[],
+): MatchedLine[] {
+  if (terms.length === 0 || !meta || typeof meta !== 'object') return [];
+  const items = (meta as { line_items?: unknown }).line_items;
+  if (!Array.isArray(items)) return [];
+  const out: MatchedLine[] = [];
+  for (const it of items) {
+    if (!it || typeof it !== 'object') continue;
+    const o = it as Record<string, unknown>;
+    const code = String(o.code ?? '');
+    const name = String(o.name ?? '');
+    if (lineItemMatchesTerms(code, name, terms)) {
+      out.push({
+        code,
+        name,
+        qty: toNumOrNull(o.qty),
+        amount: toNumOrNull(o.amount),
+      });
+    }
+  }
+  return out;
+}
