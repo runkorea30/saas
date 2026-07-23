@@ -422,14 +422,20 @@ export function OrdersPage() {
     void handlePrintInvoice(ids);
   };
 
-  /** 우클릭 메뉴에서 상태 직접 변경. */
+  /**
+   * 우클릭 메뉴에서 상태 직접 변경.
+   * 항목 20: 우클릭한 주문이 체크박스 선택 목록에 포함돼 있으면 선택된 전체를 변경,
+   *          선택에 없으면(선택 없이 바로 우클릭) 그 1건만 변경.
+   */
   const handleChangeStatus = async (orderId: string, status: string) => {
     setContextMenu(null);
     if (!companyId) return;
+    const checkedIds = Object.keys(checked).filter((k) => checked[k]);
+    const targetIds = checkedIds.includes(orderId) ? checkedIds : [orderId];
     await supabase
       .from('orders')
       .update({ status })
-      .eq('id', orderId)
+      .in('id', targetIds)
       .eq('company_id', companyId);
     await queryClient.invalidateQueries({ queryKey: ['orders'] });
   };
