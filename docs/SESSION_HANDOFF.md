@@ -155,6 +155,18 @@
   - 엔젤러스인보이스: 카드마다 "상세보기" 버튼(chip 유지). 수입면장: 항목10 간접검색 결과에 "상세보기" → 매칭 제품 인보이스 상세 + 그 PDF 다운로드.
   - `matchedLineDetails`/`MatchedLine` 을 `lineItemSearch` util 로 공용화(AngelusInvoiceTab 로컬 `matchedLineItems` 중복 제거).
 
+### 주문내역 탭 개선 — 신규 4건 (20~23, 지시서 010, 전부 완료·push 2026-07-24)
+- 20. 다중선택 후 우클릭 상태변경이 1건만 적용되던 버그 수정 — `af1e169`
+  - `handleChangeStatus`: 우클릭 주문이 체크 목록에 있으면 `.in('id', checkedIds)` 전체, 없으면 그 1건만.
+- 21. 날짜 필터 탭 = 오늘/어제/이번 주/지난 주/이번 달/사용자 지정 — `04501f1`(탭·기본값) + `748d3aa`(연속 타이핑)
+  - `PeriodKey` 에 yesterday/lastweek 추가(lastmonth/90d 는 송장·청구 등 타 페이지에서 계속 사용하므로 유지).
+  - 사용자 지정 기본값 = 최근 한 달(오늘-1개월~오늘, `setMonth`, `ymd()`는 getFullYear/Month/Date).
+  - 날짜 입력: 신규 `DateTypeInput`(primitives) — YYYYMMDD 8자리 연속 타이핑(로케일 무관) + 📅 네이티브 달력 보조. **사용자 승인 후 구현**(커스텀 텍스트 방식).
+- 22. 거래처 필터 타이핑 검색 — `2b73ac6`
+  - `MultiChip` 에 `searchable` prop + 드롭다운 상단 검색 input + `searchText`(ChipOption) 추가. 거래처 필터에만 활성. "선택 해제" 유지.
+- 23. internal_note 있는 주문에 목록 배지(StickyNote, warning 계열 CSS 변수) + hover 툴팁 미리보기 — `b3efc24`
+  - `internal_note`는 이미 useOrders/Order 타입에 존재. OrderListTable 거래처명 옆에 배지, 값 없으면 미표시(회귀 없음).
+
 ### 별도 검토 대기 항목
 - 인보이스 76474 total_usd 불일치(§ "알려진 데이터 이슈" 참조, 원본 PDF 수동 확인 후 처리).
 - 백필 스크립트 `scripts/phase7-*.mjs` 커밋 여부 확인(재현성용).
