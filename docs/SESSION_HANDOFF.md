@@ -176,6 +176,16 @@
   - ZIP: `jszip` 동적 import(코드분할됨), storage/base64 PDF 수집 → 단일 zip, 로딩상태 표시. **jszip 을 package.json 직접 의존성으로 추가**(지시서 사전 승인).
   - `fmtUsd`/`unitPrice` 는 MatchDetailModal 에서 export 해 공용화. 개별 상세보기(19번)는 그대로 유지.
 
+### 수입면장 확장 + 인보이스↔수입면장 연결 — 신규 4건 (26~29, 지시서 012, 완료·push 2026-07-24)
+- 26. 수입면장 검색 필터 기본값 = 제품코드/명 — `5d665b0`
+- 27. 수입면장 연도 다중선택 필터 — `714e812`
+  - 단일 '연도별조회' searchType 을 다중선택 `MultiChip`(신고일자 `extracted_doc_date` 기준)로 교체. 제품검색 AND, 연도 OR.
+- 28. 수입면장 통합 조회 팝업 + ZIP — `729b299`
+  - `CombinedMatchModal` 재사용. 매칭 수입면장 전체를 한 팝업에(연결 제품 인보이스 라인 표시). **ZIP 은 수입면장 PDF** 묶음(제품 인보이스 아님).
+- 29. 엔젤러스인보이스 → 연관 수입면장 표시 — `fcb4d58`
+  - ⚠️ 지시서 006 **미구현**이었음(커밋·코드 흔적 없음) → 신규 구현. 인보이스 `extracted_doc_no` === 수입면장 `matched_product_invoice_no` 역참조 맵.
+  - MatchDetailModal(19)/CombinedMatchModal(25)에 "연관 수입면장" 파일명 링크 → 클릭 시 새 탭 PDF. `handleOpen`→`openFilePathNewTab` 일반화(중복 제거).
+
 ### 별도 검토 대기 항목
 - 인보이스 76474 total_usd 불일치(§ "알려진 데이터 이슈" 참조, 원본 PDF 수동 확인 후 처리).
 - 백필 스크립트 `scripts/phase7-*.mjs` 커밋 여부 확인(재현성용).
