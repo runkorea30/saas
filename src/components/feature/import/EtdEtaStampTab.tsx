@@ -79,6 +79,9 @@ export function EtdEtaStampTab() {
   // 항목 11: 페덱스 운임 인보이스를 제품 인보이스 뒤에 병합.
   const [mergeFreight, setMergeFreight] = useState(false);
   const [freightFile, setFreightFile] = useState<File | null>(null);
+  // 항목 12: Statement PDF 를 맨 앞 페이지로 삽입.
+  const [addStatement, setAddStatement] = useState(false);
+  const [statementFile, setStatementFile] = useState<File | null>(null);
 
   // 원본 PDF 바이트(pdf-lib 생성용) — state 로 안 두고 ref (재렌더 불필요).
   const bytesRef = useRef<ArrayBuffer | null>(null);
@@ -191,6 +194,10 @@ export function EtdEtaStampTab() {
       showToast({ kind: 'error', text: '병합할 운임 인보이스 PDF 를 선택해 주세요.' });
       return;
     }
+    if (addStatement && !statementFile) {
+      showToast({ kind: 'error', text: '맨 앞에 넣을 Statement PDF 를 선택해 주세요.' });
+      return;
+    }
     setGenerating(true);
     try {
       const pdfDoc = await PDFDocument.load(bytesRef.current.slice(0));
@@ -207,13 +214,19 @@ export function EtdEtaStampTab() {
         color: rgb(0.07, 0.07, 0.07),
       });
 
-      // 항목 11: 병합 옵션이 있으면 [제품(ETD/ETA 삽입)] → [운임] 순으로 하나의 PDF 로 합침.
-      const willMerge = mergeFreight && Boolean(freightFile);
+      // 항목 11·12: 병합 옵션이 있으면 [Statement] → [제품(ETD/ETA 삽입)] → [운임] 순으로 합침.
+      const includeFreight = mergeFreight && Boolean(freightFile);
+      const includeStatement = addStatement && Boolean(statementFile);
+      const willMerge = includeFreight || includeStatement;
       let outDoc = pdfDoc;
       if (willMerge) {
         const merged = await PDFDocument.create();
+        if (statementFile && includeStatement) {
+          const sdoc = await PDFDocument.load(await statementFile.arrayBuffer());
+          await appendAllPages(merged, sdoc);
+        }
         await appendAllPages(merged, pdfDoc);
-        if (freightFile) {
+        if (freightFile && includeFreight) {
           const fdoc = await PDFDocument.load(await freightFile.arrayBuffer());
           await appendAllPages(merged, fdoc);
         }
@@ -382,6 +395,13 @@ export function EtdEtaStampTab() {
           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)' }}>
             은행 송금용 병합 옵션
           </div>
+          <MergePdfRow
+            label="Statement 맨 앞 페이지로 추가"
+            checked={addStatement}
+            onToggleChecked={setAddStatement}
+            file={statementFile}
+            onPickFile={setStatementFile}
+          />
           <MergePdfRow
             label="페덱스 운임 인보이스 병합 (제품 인보이스 뒤에 추가)"
             checked={mergeFreight}
