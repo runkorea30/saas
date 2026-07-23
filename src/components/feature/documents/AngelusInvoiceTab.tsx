@@ -134,9 +134,10 @@ export function AngelusInvoiceTab({ companyId }: Props) {
   const [uploading, setUploading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AngelusRow | null>(null);
   const [busyDelete, setBusyDelete] = useState(false);
+  // 항목 18: 검색 필터 기본값을 제품코드/명(line_item)으로.
   const [searchType, setSearchType] = useState<
     'doc_no' | 'file_name' | 'line_item'
-  >('doc_no');
+  >('line_item');
   const [searchText, setSearchText] = useState('');
   // 항목 16: 매칭 chip 클릭 시 요약 팝업으로 보여줄 대상.
   const [matchModal, setMatchModal] = useState<{
