@@ -8,7 +8,7 @@
  * - 행 선택(단일) + 체크박스(다중) 분리 — 클릭=선택, 체크박스=일괄.
  */
 import { useMemo, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, StickyNote } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Check,
@@ -484,6 +484,29 @@ export function OrderListTable(props: OrderListTableProps) {
                     >
                       {customerName}
                     </div>
+                    {o.internal_note && o.internal_note.trim() && (
+                      <span
+                        title={`내부메모: ${
+                          o.internal_note.length > 60
+                            ? `${o.internal_note.slice(0, 60)}…`
+                            : o.internal_note
+                        }`}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                          width: 18,
+                          height: 18,
+                          borderRadius: 4,
+                          background: 'var(--warning-wash)',
+                          color: 'var(--warning)',
+                          border: '1px solid var(--warning)',
+                        }}
+                      >
+                        <StickyNote size={11} strokeWidth={1.8} />
+                      </span>
+                    )}
                     {o.is_direct_shipping && (
                       <span
                         title="직송 주문"
