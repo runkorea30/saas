@@ -513,6 +513,14 @@ function GroupBlock({
   onPoRefChange: (row: AngelusRow, next: string) => void;
   muted?: boolean;
 }) {
+  // PO 그룹 합계 = 그룹 내 인보이스 total_usd 합. 하나라도 값이 있으면 헤더에 표시.
+  const anyTotal = rows.some(
+    (r) => invoiceTotalUsd(r.extracted_metadata) != null,
+  );
+  const groupTotal = rows.reduce(
+    (sum, r) => sum + (invoiceTotalUsd(r.extracted_metadata) ?? 0),
+    0,
+  );
   return (
     <div
       style={{
@@ -540,6 +548,18 @@ function GroupBlock({
         <span style={{ color: 'var(--ink-3)', fontWeight: 500, fontSize: 12 }}>
           · {rows.length}건
         </span>
+        {anyTotal && (
+          <span
+            style={{
+              color: 'var(--ink-2)',
+              fontWeight: 600,
+              fontSize: 12,
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            · 합계 {fmtUsd(groupTotal)}
+          </span>
+        )}
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
@@ -552,6 +572,7 @@ function GroupBlock({
             <th style={thStyle('left')}>파일명</th>
             <th style={thStyle('left', 130)}>인보이스번호</th>
             <th style={thStyle('center', 110)}>종류</th>
+            <th style={thStyle('right', 110)}>합계(USD)</th>
             <th style={thStyle('left', 140)}>PO 참조</th>
             <th style={thStyle('left', 160)}>수신일시</th>
             <th style={thStyle('center', 140)}>작업</th>
@@ -588,6 +609,15 @@ function GroupBlock({
                   confirmed={Boolean(row.subtype_confirmed)}
                   onChange={(next) => onSubtypeChange(row, next)}
                 />
+              </td>
+              <td
+                style={{
+                  ...tdStyle('right'),
+                  color: 'var(--ink-2)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {fmtUsd(invoiceTotalUsd(row.extracted_metadata))}
               </td>
               <td style={tdStyle('left')}>
                 <PoRefEditor
@@ -857,6 +887,24 @@ function fmtDateTime(iso: string | null): string {
   const hh = String(kst.getUTCHours()).padStart(2, '0');
   const mm = String(kst.getUTCMinutes()).padStart(2, '0');
   return `${y}-${m}-${dd} ${hh}:${mm}`;
+}
+
+/** extracted_metadata.total_usd 를 숫자로 파싱. 없거나 비정상이면 null. */
+function invoiceTotalUsd(meta: unknown): number | null {
+  if (!meta || typeof meta !== 'object') return null;
+  const v = (meta as { total_usd?: unknown }).total_usd;
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** USD 금액 표시 — null 이면 '—'. */
+function fmtUsd(n: number | null): string {
+  if (n == null) return '—';
+  return `$${n.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 /** base64 data URI → Blob (크롬은 data: 최상위 내비게이션을 차단하므로 Blob URL 로 변환). */
