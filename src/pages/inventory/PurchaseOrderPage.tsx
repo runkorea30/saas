@@ -13,7 +13,7 @@
  *  - "초기화" → 이번 달 모든 draft 발주서 삭제 + orderQty 리셋
  *  - "엑셀" → savedCategories 의 품목만 ORDER SHEET 양식으로 다운로드
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -68,6 +68,13 @@ const BASIS_LABEL: Record<SalesBasis, { ko: string; short: string }> = {
   '3m': { ko: '3개월', short: '3M' },
 };
 const BASIS_ORDER: readonly SalesBasis[] = ['1m', '2m', '3m'];
+
+/**
+ * "한달내 품절예상" 필터 기준일수. days_until_reorder <= 이 값이면 매칭.
+ * days_until_reorder = daysToDepletion − lead_time 이므로 리드타임·입고예정 이미 반영.
+ * (상태 컬럼의 '1개월(D-30)' 세그먼트와 동일 의미.)
+ */
+const STOCKOUT_SOON_DAYS = 30;
 
 /** 계산검증 팝오버가 열릴 수 있는 셀 컬럼 식별자. */
 type VerifyColumn =
@@ -257,6 +264,12 @@ export function PurchaseOrderPage() {
    * - 그 외 : 해당 카테고리 단일
    */
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  /**
+   * "한달내 품절예상" 필터 ON/OFF. ON 이면 days_until_reorder <= 30 인 제품만 표시.
+   * 🟠 pinMode='status' 상단고정과 별개(그건 강조, 이건 숨김). 카테고리와 AND 결합.
+   * 🟠 제외 카테고리(눈 off)와는 독립 — 조건 맞으면 그대로 표시.
+   */
+  const [stockOutOnly, setStockOutOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   /** 발주 기준: '1m'=1개월, '2m'=2개월, '3m'=3개월 판매량 (기본값 '3m') */
   const [salesBasis, setSalesBasis] = useState<SalesBasis>('3m');
@@ -286,13 +299,43 @@ export function PurchaseOrderPage() {
   const [wStatus, setWStatus] = useColumnWidth('status', 110);
   const [wTotal, setWTotal] = useColumnWidth('total', 100);
 
+  // 카테고리 선택만 반영한 1차 목록 (품절예상 필터/정렬/pin 이전 단계).
+  const categoryBase = useMemo(() => {
+    if (selectedCategory === null) return products;
+    if (selectedCategory === SAVED_ALL_FILTER) {
+      return products.filter((p) => savedCategories.has(p.category));
+    }
+    return products.filter((p) => p.category === selectedCategory);
+  }, [products, selectedCategory, savedCategories]);
+
+  /**
+   * "한달내 품절예상" 매칭 판정 — days_until_reorder <= 30 (판매이력 없음 제외).
+   * days_until_reorder 는 리드타임·입고예정 이미 반영된 값(usePurchaseForecast).
+   */
+  const isStockOutSoon = useCallback(
+    (productId: string): boolean => {
+      const f = forecastById.get(productId);
+      return (
+        !!f &&
+        f.status !== 'no_history' &&
+        f.days_until_reorder != null &&
+        f.days_until_reorder <= STOCKOUT_SOON_DAYS
+      );
+    },
+    [forecastById],
+  );
+
+  // 필터 뱃지용 카운트 — 현재 카테고리 스코프 내 매칭 제품 수.
+  const stockOutCount = useMemo(
+    () => categoryBase.filter((p) => isStockOutSoon(p.id)).length,
+    [categoryBase, isStockOutSoon],
+  );
+
   const filteredProducts = useMemo(() => {
-    const base =
-      selectedCategory === null
-        ? products
-        : selectedCategory === SAVED_ALL_FILTER
-          ? products.filter((p) => savedCategories.has(p.category))
-          : products.filter((p) => p.category === selectedCategory);
+    // 품절예상 필터 ON 이면 카테고리 목록에서 매칭 제품만 남김(카테고리와 AND).
+    const base = stockOutOnly
+      ? categoryBase.filter((p) => isStockOutSoon(p.id))
+      : categoryBase;
 
     // 1단계: sortMode 기준으로 sorted 목록 생성.
     let sorted: typeof base;
@@ -358,9 +401,9 @@ export function PurchaseOrderPage() {
     }
     return [...pinned, ...rest];
   }, [
-    products,
-    selectedCategory,
-    savedCategories,
+    categoryBase,
+    stockOutOnly,
+    isStockOutSoon,
     sortMode,
     forecastById,
     pinMode,
@@ -1129,6 +1172,23 @@ export function PurchaseOrderPage() {
             />
           ))}
           <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            onClick={() => setStockOutOnly((v) => !v)}
+            className="btn-base"
+            style={{
+              height: 28,
+              fontSize: 12,
+              // ON: 강조(brand), OFF: 기본. 다크모드 안전용 CSS 변수만 사용.
+              background: stockOutOnly ? 'var(--brand)' : undefined,
+              color: stockOutOnly ? 'var(--surface)' : undefined,
+              borderColor: stockOutOnly ? 'var(--brand)' : undefined,
+              fontWeight: stockOutOnly ? 600 : 400,
+            }}
+            title="리드타임을 반영해 한 달 이내 품절이 예상되는 제품만 표시 (재고소진예상일 D-30 이내). 다시 누르면 해제."
+          >
+            한달내 품절예상 ({stockOutCount})
+          </button>
           <button
             type="button"
             onClick={handleSelectSavedCategories}
