@@ -134,11 +134,14 @@
     `AngelusInvoiceTab`·`DocumentFilesTab` 공유. 14·15 로직도 이 util 경유. (§8 "같은 로직 복사 금지" 준수)
   - `DocumentFilesTab`: 제품 인보이스 조회를 total_usd(항목5) + line_items(항목10) 공용 단일 쿼리로 통합.
 - 16. 엔젤러스인보이스 매칭 요약 팝업(chip 클릭 → `Modal`: 파일명/번호/Ship Date/제품·수량·금액/전체합계) — `dc43b10`
-- 9. 송금용 PDF — ETD/ETA 마지막 입력값 localStorage(`etdEtaLastUsed`) 프리필/저장 — `94a8a86`
+- 9. 송금용 PDF — ETD/ETA 입력값. **최종: 고정 기본값 `Long Beach LA`/`Incheon`**(지시서 007/008, `0a82d4a`).
+  - 최초 `94a8a86`은 localStorage 마지막값 프리필이었으나 최초 사용 시 빈 값 → 고정 기본값으로 교체(수정 가능, 새로고침 시 기본값 복귀).
 - 11. 송금용 PDF — 제품+운임 인보이스 병합(pdf-lib copyPages, [제품]→[운임]) — `417bf5e`
   - ⚠️ 이 도구는 임의 업로드 PDF 로 동작(PO DB 연동 없음) → 스펙의 "PO 자동 페어링 제안"은 미구현,
     **수동 운임 PDF 선택** 경로로 제공. 자동 제안이 필요하면 문서 라이브러리에서 인보이스 선택하는 재설계 필요.
 - 12. 송금용 PDF — Statement 맨 앞 페이지 선택 삽입([Statement]→[제품]→[운임] 조합 가능) — `ac06612`
+  - ⚠️ 지시서 008 정정: 11·12 병합 옵션 카드가 `pageInfo`(PDF 선택) 조건에 가려져 초기 화면에 안 보이던 문제 수정 → **항상 노출**(`65f6a9b`).
+    배포본(saas-beta-pied) 육안 확인 완료: ETD/ETA 고정값 프리필 + Statement/운임 체크박스 노출 + 체크 시 파일 선택 필드 표시.
 - 13. 설정 페이지 기본 탭 = 거래처(`/settings` index redirect + navConfig indexRedirect 둘 다 변경) — `62a798e`
 
 ### 별도 검토 대기 항목
