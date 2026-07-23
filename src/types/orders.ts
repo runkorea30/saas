@@ -69,7 +69,10 @@ export interface Order {
   total_amount: number;
   status: OrderStatus;
   source: OrderSource;
+  /** 거래처가 포털에서 작성하는 메모 (거래처 노출). */
   memo: string | null;
+  /** 내부 전용 메모 (직원↔직원). 거래처 포털 SELECT 에 절대 포함 금지. */
+  internal_note: string | null;
   /**
    * 운송장 번호 배열. 거의 1건이지만 복수 등록 가능. orders.tracking_numbers (jsonb).
    * 각 항목은 `{ carrier, number }` 객체 — carrier 코드 정의는

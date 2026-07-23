@@ -810,12 +810,24 @@ export function OrderDetailPane({
             </div>
           </div>
         )}
-        <TrackingNumberSection
-          key={order.id}
-          orderId={order.id}
-          initialTrackingNumbers={normalizeTrackingNumbers(order.tracking_numbers)}
-          currentStatus={order.status}
-        />
+        {/* 송장정보(50%) + 내부메모(50%) 나란히 배치. */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'stretch' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <TrackingNumberSection
+              key={order.id}
+              orderId={order.id}
+              initialTrackingNumbers={normalizeTrackingNumbers(order.tracking_numbers)}
+              currentStatus={order.status}
+            />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <InternalNoteSection
+              key={order.id}
+              orderId={order.id}
+              initialNote={order.internal_note ?? ''}
+            />
+          </div>
+        </div>
         {order.is_direct_shipping &&
           (() => {
             // shipping_info 가 string(JSON) 또는 object 배열로 올 수 있어 양쪽 처리.
@@ -1735,6 +1747,101 @@ function StatusPicker({ order }: { order: Order }) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 내부 전용 메모 — 직원↔직원 공유. 거래처 포털에는 절대 노출되지 않음(orders.internal_note).
+ * blur 시 자동 저장 + dirty 상태면 "저장" 버튼 노출. orders.memo(거래처 작성)와 별개.
+ */
+function InternalNoteSection({
+  orderId,
+  initialNote,
+}: {
+  orderId: string;
+  initialNote: string;
+}) {
+  const queryClient = useQueryClient();
+  const [note, setNote] = useState(initialNote);
+  const [saved, setSaved] = useState(initialNote);
+  const [saving, setSaving] = useState(false);
+  const isDirty = note !== saved;
+
+  const persist = async () => {
+    if (note === saved) return;
+    setSaving(true);
+    // Supabase 자동생성 타입에 internal_note 미반영(desync) — payload 통째로 캐스팅.
+    const payload: Record<string, unknown> = {
+      internal_note: note.trim() || null,
+    };
+    await supabase
+      .from('orders')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update(payload as any)
+      .eq('id', orderId);
+    queryClient.invalidateQueries({ queryKey: ['orders'] });
+    setSaved(note);
+    setSaving(false);
+  };
+
+  return (
+    <div
+      style={{
+        height: '100%',
+        background: 'var(--surface)',
+        border: '1px solid var(--line)',
+        borderRadius: 8,
+        padding: '10px 12px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          flexWrap: 'wrap',
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-2)' }}>
+          내부메모{saving && ' · 저장중…'}
+        </span>
+        <span style={{ fontSize: 10.5, color: 'var(--ink-3)' }}>
+          직원 전용 · 거래처에게 표시되지 않음
+        </span>
+        {isDirty && !saving && (
+          <button
+            type="button"
+            onClick={() => void persist()}
+            className="btn-base"
+            style={{ height: 22, fontSize: 11, padding: '0 8px', marginLeft: 'auto' }}
+          >
+            저장
+          </button>
+        )}
+      </div>
+      <textarea
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        onBlur={() => void persist()}
+        placeholder="내부 작업자끼리만 공유되는 메모"
+        style={{
+          flex: 1,
+          minHeight: 60,
+          resize: 'vertical',
+          padding: '6px 8px',
+          border: '1px solid var(--line-strong)',
+          borderRadius: 6,
+          background: 'var(--surface)',
+          color: 'var(--ink)',
+          fontSize: 12.5,
+          fontFamily: 'var(--font-kr)',
+          outline: 'none',
+        }}
+      />
     </div>
   );
 }
