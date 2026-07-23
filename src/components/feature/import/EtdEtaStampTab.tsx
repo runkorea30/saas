@@ -2,7 +2,8 @@
  * 송금용 PDF 편집 — 인보이스 PDF 1페이지에 "ETD : {출발지} // ETA : {도착지}" 문구 삽입.
  *
  * 🟠 은행 송금 요청으로 삽입하는 1회성 산출물. 원본은 건드리지 않고 새 PDF 로 다운로드만.
- * 🟠 완전 클라이언트 처리 — pdfjs(좌표추출/미리보기) + pdf-lib(텍스트 삽입). 서버 왕복 없음.
+ * 🟠 문구 삽입/미리보기/병합은 클라이언트(pdfjs + pdf-lib). 항목 17 금액요약만:
+ *    제품/운임 합계는 기존 파이프라인(parseInvoicePDF, 서버) 재사용, Statement Amount Due 는 pdfjs 텍스트.
  * 🟠 위치: 1페이지 "BILL TO" 위(자동 탐지), 못 찾으면 수동 슬라이더(위에서 %)로 폴백.
  *    가로는 항상 페이지 중앙 정렬.
  */
@@ -12,6 +13,7 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { FileText, Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/Toast';
+import { parseInvoicePDF } from '@/utils/invoiceParser';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -41,6 +43,63 @@ interface PageInfo {
   billToYPts: number | null;
 }
 
+/** 항목 17: 금액 추출 상태 — 로딩/성공(값)/실패(파싱 불가). */
+type AmountInfo = { status: 'loading' | 'ok' | 'fail'; value: number | null };
+
+/** USD 금액 표시. null 이면 '—'. */
+function fmtUsd(n: number | null): string {
+  if (n == null) return '—';
+  return `$${n.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+/**
+ * 항목 17: 제품/운임 인보이스 합계(USD) — 기존 파이프라인(parseInvoicePDF) 재사용해 rows[].amount 합.
+ * 파싱 실패/빈 결과면 null(=금액 확인 필요, 에러로 막지 않음).
+ */
+async function extractInvoiceTotalUsd(file: File): Promise<number | null> {
+  try {
+    const parsed = await parseInvoicePDF(file);
+    if (!parsed.rows.length) return null;
+    const sum = parsed.rows.reduce(
+      (s, r) => s + (Number.isFinite(r.amount) ? r.amount : 0),
+      0,
+    );
+    return sum > 0 ? sum : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 항목 17: Statement PDF 의 "Amount Due" 금액(USD) — 클라이언트 pdfjs 텍스트에서 추출.
+ * "$6,403.03" 형식(통화기호/콤마 포함) 고려. 실패 시 null.
+ */
+async function extractStatementAmountDue(file: File): Promise<number | null> {
+  try {
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buf) })
+      .promise;
+    let text = '';
+    for (let i = 1; i <= doc.numPages; i += 1) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      text += ` ${content.items
+        .map((it) => (it as { str?: string }).str ?? '')
+        .join(' ')}`;
+    }
+    await doc.destroy();
+    const m = text.match(/Amount\s*Due[^$\d-]*\$?\s*([\d,]+\.\d{2})/i);
+    if (!m) return null;
+    const n = Number(m[1].replace(/,/g, ''));
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 export function EtdEtaStampTab() {
   const { showToast } = useToast();
   const [file, setFile] = useState<File | null>(null);
@@ -59,6 +118,12 @@ export function EtdEtaStampTab() {
   // 항목 12: Statement PDF 를 맨 앞 페이지로 삽입.
   const [addStatement, setAddStatement] = useState(false);
   const [statementFile, setStatementFile] = useState<File | null>(null);
+  // 항목 17: 금액 요약 — 제품/운임 합계 + Statement Amount Due(우선).
+  const [productAmount, setProductAmount] = useState<AmountInfo | null>(null);
+  const [freightAmount, setFreightAmount] = useState<AmountInfo | null>(null);
+  const [statementAmount, setStatementAmount] = useState<AmountInfo | null>(
+    null,
+  );
 
   // 원본 PDF 바이트(pdf-lib 생성용) — state 로 안 두고 ref (재렌더 불필요).
   const bytesRef = useRef<ArrayBuffer | null>(null);
@@ -98,6 +163,38 @@ export function EtdEtaStampTab() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
     ctx.fillText(stampText, canvasX, canvasY);
+  };
+
+  /** 항목 17: 파일에서 금액 추출 → 상태 반영(로딩→ok/fail). */
+  const runAmountExtract = (
+    f: File,
+    extractor: (file: File) => Promise<number | null>,
+    setter: (v: AmountInfo | null) => void,
+  ) => {
+    setter({ status: 'loading', value: null });
+    void extractor(f).then((v) =>
+      setter(
+        v == null ? { status: 'fail', value: null } : { status: 'ok', value: v },
+      ),
+    );
+  };
+
+  const handlePickFreight = (f: File | null) => {
+    setFreightFile(f);
+    if (!f) {
+      setFreightAmount(null);
+      return;
+    }
+    runAmountExtract(f, extractInvoiceTotalUsd, setFreightAmount);
+  };
+
+  const handlePickStatement = (f: File | null) => {
+    setStatementFile(f);
+    if (!f) {
+      setStatementAmount(null);
+      return;
+    }
+    runAmountExtract(f, extractStatementAmountDue, setStatementAmount);
   };
 
   const handleFile = async (f: File) => {
@@ -141,6 +238,8 @@ export function EtdEtaStampTab() {
       setPageInfo(info);
       setUseAuto(billToYPts != null);
       setFile(f);
+      // 항목 17: 제품 인보이스 합계 추출(비동기, 미리보기 블로킹 안 함).
+      runAmountExtract(f, extractInvoiceTotalUsd, setProductAmount);
       // 다음 렌더 프레임에서 오버레이(문구는 아직 빈 값이어도 위치 확인용).
       requestAnimationFrame(() => redrawPreview(info));
 
@@ -304,6 +403,17 @@ export function EtdEtaStampTab() {
         </button>
       </div>
 
+      {/* 항목 17: 금액 요약 (제품/운임 합계 + Statement Amount Due 우선) */}
+      {productAmount && (
+        <AmountSummaryCard
+          productAmount={productAmount}
+          freightAmount={freightAmount}
+          statementAmount={statementAmount}
+          showFreight={mergeFreight && Boolean(freightFile)}
+          showStatement={addStatement && Boolean(statementFile)}
+        />
+      )}
+
       {/* 위치 조정 */}
       {pageInfo && (
         <div
@@ -374,14 +484,14 @@ export function EtdEtaStampTab() {
           checked={addStatement}
           onToggleChecked={setAddStatement}
           file={statementFile}
-          onPickFile={setStatementFile}
+          onPickFile={handlePickStatement}
         />
         <MergePdfRow
           label="페덱스 운임 인보이스 병합 (제품 인보이스 뒤에 추가)"
           checked={mergeFreight}
           onToggleChecked={setMergeFreight}
           file={freightFile}
-          onPickFile={setFreightFile}
+          onPickFile={handlePickFreight}
         />
       </div>
 
@@ -413,6 +523,146 @@ export function EtdEtaStampTab() {
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+/** AmountInfo → 표시 문자열. 항목 17. */
+function amountText(a: AmountInfo | null): string {
+  if (!a) return '—';
+  if (a.status === 'loading') return '계산 중…';
+  if (a.status === 'fail') return '금액 확인 필요';
+  return fmtUsd(a.value);
+}
+
+/** 금액 요약 한 줄. */
+function AmountRow({
+  label,
+  value,
+  strong,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        fontSize: 12.5,
+      }}
+    >
+      <span style={{ color: 'var(--ink-2)' }}>{label}</span>
+      <span
+        style={{
+          color: 'var(--ink)',
+          fontWeight: strong ? 700 : 500,
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/** 항목 17: 금액 요약 카드 — 제품/운임 합계 + 소계, Statement 있으면 Amount Due 우선 강조. */
+function AmountSummaryCard({
+  productAmount,
+  freightAmount,
+  statementAmount,
+  showFreight,
+  showStatement,
+}: {
+  productAmount: AmountInfo | null;
+  freightAmount: AmountInfo | null;
+  statementAmount: AmountInfo | null;
+  showFreight: boolean;
+  showStatement: boolean;
+}) {
+  const okVals: number[] = [];
+  if (productAmount?.status === 'ok' && productAmount.value != null) {
+    okVals.push(productAmount.value);
+  }
+  if (
+    showFreight &&
+    freightAmount?.status === 'ok' &&
+    freightAmount.value != null
+  ) {
+    okVals.push(freightAmount.value);
+  }
+  const subtotal = okVals.length
+    ? okVals.reduce((s, v) => s + v, 0)
+    : null;
+
+  return (
+    <div
+      style={{
+        padding: '12px 16px',
+        background: 'var(--surface)',
+        border: '1px solid var(--line)',
+        borderRadius: 'var(--radius-lg)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)' }}>
+        금액 요약
+      </div>
+      <AmountRow label="제품 인보이스 합계" value={amountText(productAmount)} />
+      {showFreight && (
+        <AmountRow label="운임 인보이스 합계" value={amountText(freightAmount)} />
+      )}
+      <AmountRow
+        label="소계 (제품 + 운임)"
+        value={subtotal != null ? fmtUsd(subtotal) : '—'}
+        strong
+      />
+      {showStatement && (
+        <div
+          style={{
+            marginTop: 4,
+            padding: '10px 12px',
+            background: 'var(--accent-wash, var(--surface-2))',
+            border: '1px solid var(--accent, #6b7cff)',
+            borderRadius: 8,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <span
+              style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink)' }}
+            >
+              실제 송금 금액 (Statement 기준)
+            </span>
+            <span
+              style={{
+                fontSize: 14,
+                fontWeight: 700,
+                color: 'var(--ink)',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {amountText(statementAmount)}
+            </span>
+          </div>
+          <span style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+            Statement 기준 금액이 우선 적용됩니다. 개별 인보이스 합계와 차이가 있을
+            수 있습니다.
+          </span>
+        </div>
+      )}
     </div>
   );
 }
