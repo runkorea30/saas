@@ -27,7 +27,7 @@ const STORAGE_BUCKET = 'documents';
 const SEARCH_PLACEHOLDER: Record<'doc_no' | 'file_name' | 'line_item', string> = {
   doc_no: '인보이스번호 검색',
   file_name: '파일명 검색',
-  line_item: '제품코드 또는 제품명 검색',
+  line_item: '제품코드/명 검색 (쉼표·공백으로 여러 개 가능)',
 };
 
 /** 항목 14: 제품코드 비교용 정규화 — 하이픈 제거 + 소문자('-' 무시 검색, 코드 전용). */
@@ -35,33 +35,50 @@ function normCode(s: string): string {
   return s.toLowerCase().replace(/-/g, '');
 }
 
-/** 라인아이템 하나가 검색어에 매칭하는지(코드=하이픈무시, 명=부분일치). q 는 소문자 가정. */
-function lineItemMatches(code: string, name: string, q: string): boolean {
-  if (!q) return false;
-  return name.toLowerCase().includes(q) || normCode(code).includes(normCode(q));
+/** 항목 15: 검색어를 텀 배열로 파싱 — 쉼표/공백 구분 다중검색. 소문자, 빈 텀 제외. */
+function parseSearchTerms(raw: string): string[] {
+  return raw
+    .toLowerCase()
+    .split(/[\s,]+/)
+    .map((t) => t.trim())
+    .filter(Boolean);
 }
 
-/** 인보이스 extracted_metadata.line_items 에 검색어(코드=하이픈무시/명 부분일치) 매칭 여부. */
-function rowLineItemsMatch(meta: unknown, q: string): boolean {
-  if (!q || !meta || typeof meta !== 'object') return false;
+/** 라인아이템 하나가 검색 텀 중 하나라도 매칭하는지(코드=하이픈무시, 명=부분일치, OR). */
+function lineItemMatchesTerms(
+  code: string,
+  name: string,
+  terms: string[],
+): boolean {
+  if (terms.length === 0) return false;
+  const codeN = normCode(code);
+  const nameL = name.toLowerCase();
+  return terms.some((t) => nameL.includes(t) || codeN.includes(normCode(t)));
+}
+
+/** 인보이스 extracted_metadata.line_items 가 검색 텀 중 하나라도 매칭하는지. */
+function rowLineItemsMatch(meta: unknown, terms: string[]): boolean {
+  if (terms.length === 0 || !meta || typeof meta !== 'object') return false;
   const items = (meta as { line_items?: unknown }).line_items;
   if (!Array.isArray(items)) return false;
   for (const it of items) {
     if (!it || typeof it !== 'object') continue;
     const o = it as Record<string, unknown>;
-    if (lineItemMatches(String(o.code ?? ''), String(o.name ?? ''), q)) {
+    if (
+      lineItemMatchesTerms(String(o.code ?? ''), String(o.name ?? ''), terms)
+    ) {
       return true;
     }
   }
   return false;
 }
 
-/** 항목 8: 검색어에 매칭되는 line_items 만 추출(카드 chip 강조용). q 없으면 빈 배열. */
+/** 항목 8: 검색 텀에 매칭되는 line_items 만 추출(카드 chip 강조용). 텀 없으면 빈 배열. */
 function matchedLineItems(
   meta: unknown,
-  q: string | null,
+  terms: string[],
 ): { code: string; name: string }[] {
-  if (!q || !meta || typeof meta !== 'object') return [];
+  if (terms.length === 0 || !meta || typeof meta !== 'object') return [];
   const items = (meta as { line_items?: unknown }).line_items;
   if (!Array.isArray(items)) return [];
   const out: { code: string; name: string }[] = [];
@@ -70,7 +87,7 @@ function matchedLineItems(
     const o = it as Record<string, unknown>;
     const code = String(o.code ?? '');
     const name = String(o.name ?? '');
-    if (lineItemMatches(code, name, q)) {
+    if (lineItemMatchesTerms(code, name, terms)) {
       out.push({ code, name });
     }
   }
@@ -172,15 +189,17 @@ export function AngelusInvoiceTab({ companyId }: Props) {
     if (searchType === 'line_item') {
       // PO 그룹 단위: 그룹 내 제품 인보이스 line_items 가 매칭되면 그 그룹(제품+운임) 전체 표시.
       // line_items 없는 인보이스는 검색 시에만 제외(그룹 매칭으로는 함께 노출됨).
+      const terms = parseSearchTerms(searchText);
+      if (terms.length === 0) return rows;
       const matchingPoRefs = new Set<string>();
       for (const r of rows) {
-        if (rowLineItemsMatch(r.extracted_metadata, q)) {
+        if (rowLineItemsMatch(r.extracted_metadata, terms)) {
           const po = r.related_po_reference?.trim();
           if (po) matchingPoRefs.add(po);
         }
       }
       return rows.filter((r) => {
-        if (rowLineItemsMatch(r.extracted_metadata, q)) return true;
+        if (rowLineItemsMatch(r.extracted_metadata, terms)) return true;
         const po = r.related_po_reference?.trim();
         return Boolean(po && matchingPoRefs.has(po));
       });
@@ -192,11 +211,9 @@ export function AngelusInvoiceTab({ companyId }: Props) {
 
   const hasActiveSearch = searchText.trim().length > 0;
 
-  // 항목 8: 제품코드/명 필터 활성 시에만 매칭 라인아이템 chip 강조. 그 외엔 null(=chip 없음).
-  const highlightQuery =
-    searchType === 'line_item' && searchText.trim()
-      ? searchText.trim().toLowerCase()
-      : null;
+  // 항목 8/15: 제품코드/명 필터 활성 시 매칭 라인아이템 chip 강조. 빈 배열이면 chip 없음.
+  const highlightTerms =
+    searchType === 'line_item' ? parseSearchTerms(searchText) : [];
 
   const { groups, unassigned } = useMemo(
     () => groupByPo(filteredRows),
@@ -534,7 +551,7 @@ export function AngelusInvoiceTab({ companyId }: Props) {
               title={`PO ${g.poRef}`}
               rows={g.items}
               knownPoRefs={knownPoRefs}
-              highlightQuery={highlightQuery}
+              highlightTerms={highlightTerms}
               onOpen={handleOpen}
               onDelete={setDeleteTarget}
               onSubtypeChange={handleSubtypeChange}
@@ -546,7 +563,7 @@ export function AngelusInvoiceTab({ companyId }: Props) {
               title="미분류 (PO 참조번호 없음)"
               rows={unassigned}
               knownPoRefs={knownPoRefs}
-              highlightQuery={highlightQuery}
+              highlightTerms={highlightTerms}
               onOpen={handleOpen}
               onDelete={setDeleteTarget}
               onSubtypeChange={handleSubtypeChange}
@@ -581,7 +598,7 @@ function GroupBlock({
   title,
   rows,
   knownPoRefs,
-  highlightQuery,
+  highlightTerms,
   onOpen,
   onDelete,
   onSubtypeChange,
@@ -591,8 +608,8 @@ function GroupBlock({
   title: string;
   rows: AngelusRow[];
   knownPoRefs: string[];
-  /** 항목 8: 설정 시 매칭 라인아이템을 chip 으로 강조. null 이면 chip 없음. */
-  highlightQuery: string | null;
+  /** 항목 8/15: 매칭 라인아이템을 chip 으로 강조. 빈 배열이면 chip 없음. */
+  highlightTerms: string[];
   onOpen: (row: AngelusRow) => void;
   onDelete: (row: AngelusRow) => void;
   onSubtypeChange: (row: AngelusRow, next: Subtype) => void;
@@ -666,7 +683,7 @@ function GroupBlock({
         </thead>
         <tbody>
           {rows.map((row) => {
-            const matched = matchedLineItems(row.extracted_metadata, highlightQuery);
+            const matched = matchedLineItems(row.extracted_metadata, highlightTerms);
             return (
             <tr key={row.id} style={{ borderBottom: '1px solid var(--line)' }}>
               <td style={tdStyle('left')}>
