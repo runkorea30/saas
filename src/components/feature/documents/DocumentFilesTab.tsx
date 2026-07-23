@@ -15,6 +15,7 @@ import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import type { DocFileCategory } from '@/pages/documents/DocumentsPage';
+import { parseSearchTerms, metaLineItemsMatch } from '@/utils/lineItemSearch';
 
 const CATEGORY_LABELS: Record<DocFileCategory, string> = {
   import_declaration: '수입면장',
@@ -22,6 +23,14 @@ const CATEGORY_LABELS: Record<DocFileCategory, string> = {
   chemical: '화학물질관련',
   other: '기타서류',
 };
+
+/** 수입면장 검색 텍스트 입력형 검색 타입별 placeholder(연도별조회 제외). */
+const DECL_TEXT_PLACEHOLDER: Record<'file_name' | 'doc_no' | 'product', string> =
+  {
+    file_name: '파일명 검색',
+    doc_no: '신고번호 검색',
+    product: '제품코드/명 검색 (쉼표·공백으로 여러 개)',
+  };
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const STORAGE_BUCKET = 'documents';
@@ -59,8 +68,9 @@ export function DocumentFilesTab({ companyId, category }: Props) {
   const [uploading, setUploading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DocumentFileRow | null>(null);
   const [busyDelete, setBusyDelete] = useState(false);
-  const [searchType, setSearchType] =
-    useState<'file_name' | 'doc_no' | 'year'>('file_name');
+  const [searchType, setSearchType] = useState<
+    'file_name' | 'doc_no' | 'year' | 'product'
+  >('file_name');
   const [searchText, setSearchText] = useState('');
   const [searchYear, setSearchYear] = useState('');
 
@@ -82,11 +92,13 @@ export function DocumentFilesTab({ companyId, category }: Props) {
     staleTime: 30_000,
   });
 
-  // 🟠 (항목 5) 수입면장 전용 — 매칭 제품 인보이스의 total_usd 맵.
-  //   수입합계금액(KRW) 계산에 사용. 다른 카테고리에서는 조회하지 않음.
+  // 🟠 (항목 5·10) 수입면장 전용 — 매칭 제품 인보이스 원본(번호 + metadata).
+  //   총액(항목 5 수입합계금액)과 line_items(항목 10 제품 간접검색)에 공용. 다른 카테고리에서는 조회 안 함.
   const isDeclaration = category === 'import_declaration';
-  const { data: productTotals } = useQuery<Map<string, number>>({
-    queryKey: ['angelus-product-totals', companyId],
+  const { data: productInvoices = [], isFetched: productsFetched } = useQuery<
+    { no: string; meta: unknown }[]
+  >({
+    queryKey: ['angelus-product-invoices', companyId],
     enabled: Boolean(companyId) && isDeclaration,
     staleTime: 60_000,
     queryFn: async () => {
@@ -101,16 +113,24 @@ export function DocumentFilesTab({ companyId, category }: Props) {
           .eq('category', 'angelus_invoice')
           .eq('doc_subtype', 'product'),
       );
-      const map = new Map<string, number>();
-      for (const r of prodRows) {
-        const no = r.extracted_doc_no?.trim();
-        if (!no) continue;
-        const total = parseTotalUsd(r.extracted_metadata);
-        if (total != null) map.set(no, total);
-      }
-      return map;
+      return prodRows
+        .map((r) => ({
+          no: r.extracted_doc_no?.trim() ?? '',
+          meta: r.extracted_metadata,
+        }))
+        .filter((r) => r.no);
     },
   });
+
+  // (항목 5) 인보이스번호 → total_usd 맵.
+  const productTotals = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of productInvoices) {
+      const total = parseTotalUsd(r.meta);
+      if (total != null) map.set(r.no, total);
+    }
+    return map;
+  }, [productInvoices]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -252,17 +272,41 @@ export function DocumentFilesTab({ companyId, category }: Props) {
     if (searchType === 'file_name') {
       return rows.filter((r) => r.file_name.toLowerCase().includes(q));
     }
+    if (searchType === 'product') {
+      // (항목 10) 제품코드/명 → 매칭 제품 인보이스(line_items) 의 invoice_no 집합을 구하고,
+      //   수입면장 중 matched_product_invoice_no 가 그 집합에 포함되는 건만 표시.
+      //   매칭 정보 없는 수입면장은 검색 시에만 제외(검색어 없으면 위에서 전체 반환).
+      const terms = parseSearchTerms(searchText);
+      if (terms.length === 0) return rows;
+      const matchedNos = new Set<string>();
+      for (const p of productInvoices) {
+        if (metaLineItemsMatch(p.meta, terms)) matchedNos.add(p.no);
+      }
+      if (matchedNos.size === 0) return [];
+      return rows.filter((r) => {
+        const m = r.extracted_metadata as {
+          matched_product_invoice_no?: unknown;
+        } | null;
+        const no =
+          typeof m?.matched_product_invoice_no === 'string'
+            ? m.matched_product_invoice_no.trim()
+            : '';
+        return no.length > 0 && matchedNos.has(no);
+      });
+    }
     return rows.filter((r) =>
       (r.extracted_doc_no ?? '').toLowerCase().includes(q),
     );
-  }, [rows, showSearchBar, searchType, searchText, searchYear]);
+  }, [rows, showSearchBar, searchType, searchText, searchYear, productInvoices]);
 
   const hasActiveSearch =
     showSearchBar &&
     ((searchType === 'year' && Boolean(searchYear)) ||
       (searchType !== 'year' && searchText.trim().length > 0));
 
-  const handleSearchTypeChange = (next: 'file_name' | 'doc_no' | 'year') => {
+  const handleSearchTypeChange = (
+    next: 'file_name' | 'doc_no' | 'year' | 'product',
+  ) => {
     setSearchType(next);
     setSearchText('');
     setSearchYear('');
@@ -345,7 +389,7 @@ export function DocumentFilesTab({ companyId, category }: Props) {
             value={searchType}
             onChange={(e) =>
               handleSearchTypeChange(
-                e.target.value as 'file_name' | 'doc_no' | 'year',
+                e.target.value as 'file_name' | 'doc_no' | 'year' | 'product',
               )
             }
             style={{
@@ -361,6 +405,7 @@ export function DocumentFilesTab({ companyId, category }: Props) {
           >
             <option value="file_name">파일명</option>
             <option value="doc_no">신고번호</option>
+            <option value="product">제품코드/명</option>
             <option value="year">연도별조회</option>
           </select>
 
@@ -393,7 +438,9 @@ export function DocumentFilesTab({ companyId, category }: Props) {
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder={
-                searchType === 'file_name' ? '파일명 검색' : '신고번호 검색'
+                DECL_TEXT_PLACEHOLDER[
+                  searchType as 'file_name' | 'doc_no' | 'product'
+                ]
               }
               style={{
                 height: 34,
@@ -567,7 +614,7 @@ export function DocumentFilesTab({ companyId, category }: Props) {
                             productTotals,
                           )}
                         >
-                          {importKrwLabel(Boolean(productTotals), importKrw)}
+                          {importKrwLabel(productsFetched, importKrw)}
                         </td>
                       </>
                     )}

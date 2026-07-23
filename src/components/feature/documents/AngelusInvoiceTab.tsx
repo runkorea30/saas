@@ -20,6 +20,11 @@ import { supabase } from '@/lib/supabase';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import {
+  parseSearchTerms,
+  lineItemMatchesTerms,
+  metaLineItemsMatch,
+} from '@/utils/lineItemSearch';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const STORAGE_BUCKET = 'documents';
@@ -29,49 +34,6 @@ const SEARCH_PLACEHOLDER: Record<'doc_no' | 'file_name' | 'line_item', string> =
   file_name: '파일명 검색',
   line_item: '제품코드/명 검색 (쉼표·공백으로 여러 개 가능)',
 };
-
-/** 항목 14: 제품코드 비교용 정규화 — 하이픈 제거 + 소문자('-' 무시 검색, 코드 전용). */
-function normCode(s: string): string {
-  return s.toLowerCase().replace(/-/g, '');
-}
-
-/** 항목 15: 검색어를 텀 배열로 파싱 — 쉼표/공백 구분 다중검색. 소문자, 빈 텀 제외. */
-function parseSearchTerms(raw: string): string[] {
-  return raw
-    .toLowerCase()
-    .split(/[\s,]+/)
-    .map((t) => t.trim())
-    .filter(Boolean);
-}
-
-/** 라인아이템 하나가 검색 텀 중 하나라도 매칭하는지(코드=하이픈무시, 명=부분일치, OR). */
-function lineItemMatchesTerms(
-  code: string,
-  name: string,
-  terms: string[],
-): boolean {
-  if (terms.length === 0) return false;
-  const codeN = normCode(code);
-  const nameL = name.toLowerCase();
-  return terms.some((t) => nameL.includes(t) || codeN.includes(normCode(t)));
-}
-
-/** 인보이스 extracted_metadata.line_items 가 검색 텀 중 하나라도 매칭하는지. */
-function rowLineItemsMatch(meta: unknown, terms: string[]): boolean {
-  if (terms.length === 0 || !meta || typeof meta !== 'object') return false;
-  const items = (meta as { line_items?: unknown }).line_items;
-  if (!Array.isArray(items)) return false;
-  for (const it of items) {
-    if (!it || typeof it !== 'object') continue;
-    const o = it as Record<string, unknown>;
-    if (
-      lineItemMatchesTerms(String(o.code ?? ''), String(o.name ?? ''), terms)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
 
 /** 항목 8: 검색 텀에 매칭되는 line_items 만 추출(카드 chip 강조용). 텀 없으면 빈 배열. */
 function matchedLineItems(
@@ -193,13 +155,13 @@ export function AngelusInvoiceTab({ companyId }: Props) {
       if (terms.length === 0) return rows;
       const matchingPoRefs = new Set<string>();
       for (const r of rows) {
-        if (rowLineItemsMatch(r.extracted_metadata, terms)) {
+        if (metaLineItemsMatch(r.extracted_metadata, terms)) {
           const po = r.related_po_reference?.trim();
           if (po) matchingPoRefs.add(po);
         }
       }
       return rows.filter((r) => {
-        if (rowLineItemsMatch(r.extracted_metadata, terms)) return true;
+        if (metaLineItemsMatch(r.extracted_metadata, terms)) return true;
         const po = r.related_po_reference?.trim();
         return Boolean(po && matchingPoRefs.has(po));
       });
