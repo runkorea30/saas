@@ -167,6 +167,15 @@
 - 23. internal_note 있는 주문에 목록 배지(StickyNote, warning 계열 CSS 변수) + hover 툴팁 미리보기 — `b3efc24`
   - `internal_note`는 이미 useOrders/Order 타입에 존재. OrderListTable 거래처명 옆에 배지, 값 없으면 미표시(회귀 없음).
 
+### 엔젤러스인보이스 연도필터 + 통합조회 — 신규 2건 (24~25, 지시서 011, 완료·push 2026-07-24)
+- 24. 연도별 다중선택 필터 — `e305a4b`
+  - Ship Date 연도(`invoiceYear`)에서 동적 추출(하드코딩 X). `MultiChip`(orders/primitives) 재사용, 선택 개수 배지.
+  - 연도(OR) + 제품코드/명 검색(AND) 조합. 미선택 시 전체(회귀 없음).
+- 25. 통합 조회 팝업 + ZIP 다운로드 — `2570571`
+  - `CombinedMatchModal`(신규): line_item 검색+연도필터로 매칭된 모든 인보이스 라인을 한 팝업에(코드/명/수량/단가/금액 + 전체 합계). 검색바에 "통합 조회 (N건)" 버튼.
+  - ZIP: `jszip` 동적 import(코드분할됨), storage/base64 PDF 수집 → 단일 zip, 로딩상태 표시. **jszip 을 package.json 직접 의존성으로 추가**(지시서 사전 승인).
+  - `fmtUsd`/`unitPrice` 는 MatchDetailModal 에서 export 해 공용화. 개별 상세보기(19번)는 그대로 유지.
+
 ### 별도 검토 대기 항목
 - 인보이스 76474 total_usd 불일치(§ "알려진 데이터 이슈" 참조, 원본 PDF 수동 확인 후 처리).
 - 백필 스크립트 `scripts/phase7-*.mjs` 커밋 여부 확인(재현성용).
