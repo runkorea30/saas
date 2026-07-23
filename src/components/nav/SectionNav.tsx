@@ -15,19 +15,32 @@ export function SectionNav() {
   return (
     <div className="sticky top-14 z-10 border-b border-line bg-surface">
       <nav className="max-w-[1400px] mx-auto px-6 h-11 flex items-center gap-1">
-        {activeSection.items.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            className={({ isActive }) =>
-              isActive
-                ? 'px-3 h-8 flex items-center rounded-md text-sm font-medium transition-colors bg-brand-wash text-brand'
-                : 'px-3 h-8 flex items-center rounded-md text-sm transition-colors text-ink-3 hover:bg-surface-2 hover:text-ink'
-            }
-          >
-            {item.label}
-          </NavLink>
-        ))}
+        {activeSection.items.map((item) =>
+          item.external ? (
+            // 외부/포털 링크 — 새 탭으로 열고 현재 섹션 탭 활성상태는 유지.
+            <a
+              key={item.path}
+              href={item.path}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 h-8 flex items-center rounded-md text-sm transition-colors text-ink-3 hover:bg-surface-2 hover:text-ink"
+            >
+              {item.label}
+            </a>
+          ) : (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              className={({ isActive }) =>
+                isActive
+                  ? 'px-3 h-8 flex items-center rounded-md text-sm font-medium transition-colors bg-brand-wash text-brand'
+                  : 'px-3 h-8 flex items-center rounded-md text-sm transition-colors text-ink-3 hover:bg-surface-2 hover:text-ink'
+              }
+            >
+              {item.label}
+            </NavLink>
+          ),
+        )}
       </nav>
     </div>
   );

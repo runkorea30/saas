@@ -11,6 +11,11 @@
 export interface NavItem {
   path: string;
   label: string;
+  /**
+   * true 면 라우트 전환이 아니라 새 탭으로 여는 외부/포털 링크.
+   * SectionNav 가 NavLink 대신 `<a target="_blank">` 로 렌더 → 현재 탭 활성상태 유지.
+   */
+  external?: boolean;
 }
 
 export interface NavSection {
@@ -40,6 +45,7 @@ export const navSections: NavSection[] = [
       { path: '/sales/order-entry', label: '수동주문입력' },
       { path: '/sales/analysis', label: '매출분석' },
       { path: '/sales/invoices', label: '송장대장' },
+      { path: '/customer-order', label: '주문시스템', external: true },
     ],
   },
   {
