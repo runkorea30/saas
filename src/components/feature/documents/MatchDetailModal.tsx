@@ -38,6 +38,7 @@ export function MatchDetailModal({
   lines,
   totalUsd,
   onDownload,
+  linkedDeclaration,
 }: {
   open: boolean;
   onClose: () => void;
@@ -47,6 +48,8 @@ export function MatchDetailModal({
   lines: MatchDetailLine[];
   totalUsd: number | null;
   onDownload?: () => void;
+  /** 항목 29: 연관 수입면장(있으면 파일명 클릭 → 새 탭 PDF). */
+  linkedDeclaration?: { fileName: string; onOpen: () => void } | null;
 }) {
   return (
     <Modal
@@ -72,6 +75,32 @@ export function MatchDetailModal({
           <SummaryRow label="파일명" value={fileName} />
           <SummaryRow label="인보이스번호" value={docNo ?? '—'} />
           <SummaryRow label="Ship Date" value={shipDate} />
+          {linkedDeclaration && (
+            <div style={{ display: 'flex', gap: 10, fontSize: 13 }}>
+              <span
+                style={{ color: 'var(--ink-3)', minWidth: 84, flexShrink: 0 }}
+              >
+                연관 수입면장
+              </span>
+              <button
+                type="button"
+                onClick={linkedDeclaration.onOpen}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  color: 'var(--accent, #6b7cff)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  textDecoration: 'underline',
+                  wordBreak: 'break-all',
+                  fontSize: 13,
+                }}
+              >
+                {linkedDeclaration.fileName}
+              </button>
+            </div>
+          )}
         </div>
 
         <div>

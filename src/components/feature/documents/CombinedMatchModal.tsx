@@ -13,6 +13,8 @@ export interface CombinedMatchEntry {
   shipDate: string;
   fileName: string;
   lines: MatchedLine[];
+  /** 항목 29: 연관 수입면장(있으면 파일명 클릭 → 새 탭 PDF). */
+  linkedDeclaration?: { fileName: string; onOpen: () => void } | null;
 }
 
 export function CombinedMatchModal({
@@ -107,6 +109,26 @@ export function CombinedMatchModal({
                 {e.fileName}
               </span>
             </div>
+            {e.linkedDeclaration && (
+              <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>
+                연관 수입면장:{' '}
+                <button
+                  type="button"
+                  onClick={e.linkedDeclaration.onOpen}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    color: 'var(--accent, #6b7cff)',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    fontSize: 11.5,
+                  }}
+                >
+                  {e.linkedDeclaration.fileName}
+                </button>
+              </div>
+            )}
             <table
               style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}
             >

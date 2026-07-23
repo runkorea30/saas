@@ -146,6 +146,41 @@ export function AngelusInvoiceTab({ companyId }: Props) {
     staleTime: 30_000,
   });
 
+  // 항목 29: 인보이스번호 → 연관 수입면장 맵. matched_product_invoice_no === 인보이스 extracted_doc_no.
+  const { data: declByInvoiceNo } = useQuery<
+    Map<string, { fileName: string; filePath: string }>
+  >({
+    queryKey: ['declaration-by-invoice', companyId],
+    enabled: Boolean(companyId),
+    staleTime: 60_000,
+    queryFn: async () => {
+      const decls = await fetchAllRows<{
+        file_name: string;
+        file_path: string;
+        extracted_metadata: unknown;
+      }>(() =>
+        supabase
+          .from('document_files')
+          .select('file_name, file_path, extracted_metadata')
+          .eq('company_id', companyId!)
+          .eq('category', 'import_declaration'),
+      );
+      const map = new Map<string, { fileName: string; filePath: string }>();
+      for (const d of decls) {
+        const meta = d.extracted_metadata;
+        const no =
+          meta && typeof meta === 'object'
+            ? (meta as { matched_product_invoice_no?: unknown })
+                .matched_product_invoice_no
+            : null;
+        if (typeof no === 'string' && no.trim()) {
+          map.set(no.trim(), { fileName: d.file_name, filePath: d.file_path });
+        }
+      }
+      return map;
+    },
+  });
+
   // 항목 24: 데이터에 존재하는 Ship Date 연도 목록(desc). 하드코딩 금지.
   const availableYears = useMemo(() => {
     const set = new Set<string>();
@@ -285,12 +320,12 @@ export function AngelusInvoiceTab({ companyId }: Props) {
    *    네트워크 호출이 없어, await 없이 클릭 제스처 안에서 window.open 을 호출한다.
    *    (await 뒤 window.open 은 크롬 팝업 차단 대상이 되므로 동기 유지가 중요.)
    */
-  const handleOpen = (row: AngelusRow) => {
+  const openFilePathNewTab = (filePath: string) => {
     try {
-      if (!row.file_path) throw new Error('파일 데이터 없음');
+      if (!filePath) throw new Error('파일 데이터 없음');
       // 수동 업로드(base64): data: 최상위 내비게이션은 크롬이 차단하므로 Blob URL 로 변환.
-      if (row.file_path.startsWith('data:')) {
-        const url = URL.createObjectURL(dataUriToBlob(row.file_path));
+      if (filePath.startsWith('data:')) {
+        const url = URL.createObjectURL(dataUriToBlob(filePath));
         window.open(url, '_blank', 'noopener,noreferrer');
         // 새 탭이 로드할 시간을 준 뒤 해제 (즉시 revoke 하면 빈 탭이 됨).
         window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -299,13 +334,27 @@ export function AngelusInvoiceTab({ companyId }: Props) {
       // Storage 파일(documents 버킷 public) → 공개 URL 새 탭 열기.
       const { data: pub } = supabase.storage
         .from(STORAGE_BUCKET)
-        .getPublicUrl(row.file_path);
+        .getPublicUrl(filePath);
       if (!pub?.publicUrl) throw new Error('공개 URL 생성 실패');
       window.open(pub.publicUrl, '_blank', 'noopener,noreferrer');
     } catch (err) {
       const msg = err instanceof Error ? err.message : '열기 실패';
       showToast({ kind: 'error', text: msg });
     }
+  };
+
+  const handleOpen = (row: AngelusRow) => openFilePathNewTab(row.file_path);
+
+  /** 항목 29: 인보이스 doc_no → 연관 수입면장 { fileName, onOpen } (없으면 null). */
+  const linkedDeclFor = (docNo: string | null) => {
+    const no = docNo?.trim();
+    if (!no) return null;
+    const d = declByInvoiceNo?.get(no);
+    if (!d) return null;
+    return {
+      fileName: d.fileName,
+      onOpen: () => openFilePathNewTab(d.filePath),
+    };
   };
 
   /** 항목 19: 상세보기 팝업에서 원본 PDF 다운로드(open 로직 재사용, 새 탭 대신 다운로드). */
@@ -691,6 +740,7 @@ export function AngelusInvoiceTab({ companyId }: Props) {
           lines={matchModal.matched}
           totalUsd={invoiceTotalUsd(matchModal.row.extracted_metadata)}
           onDownload={() => downloadRow(matchModal.row)}
+          linkedDeclaration={linkedDeclFor(matchModal.row.extracted_doc_no)}
         />
       )}
 
@@ -705,6 +755,7 @@ export function AngelusInvoiceTab({ companyId }: Props) {
             shipDate: invoiceShipDate(m.row),
             fileName: m.row.file_name,
             lines: m.lines,
+            linkedDeclaration: linkedDeclFor(m.row.extracted_doc_no),
           }))}
           onDownloadZip={() => void handleDownloadZip()}
           zipBusy={zipBusy}
