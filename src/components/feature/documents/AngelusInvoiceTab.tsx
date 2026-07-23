@@ -21,6 +21,7 @@ import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { MatchDetailModal } from '@/components/feature/documents/MatchDetailModal';
+import { MultiChip } from '@/components/feature/orders/primitives';
 import {
   parseSearchTerms,
   metaLineItemsMatch,
@@ -113,6 +114,8 @@ export function AngelusInvoiceTab({ companyId }: Props) {
     'doc_no' | 'file_name' | 'line_item'
   >('line_item');
   const [searchText, setSearchText] = useState('');
+  // 항목 24: 연도 다중선택 필터(OR). 빈 배열이면 전체.
+  const [yearSel, setYearSel] = useState<string[]>([]);
   // 항목 16: 매칭 chip 클릭 시 요약 팝업으로 보여줄 대상.
   const [matchModal, setMatchModal] = useState<{
     row: AngelusRow;
@@ -139,36 +142,51 @@ export function AngelusInvoiceTab({ companyId }: Props) {
     staleTime: 30_000,
   });
 
+  // 항목 24: 데이터에 존재하는 Ship Date 연도 목록(desc). 하드코딩 금지.
+  const availableYears = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) {
+      const y = invoiceYear(r);
+      if (y) set.add(y);
+    }
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [rows]);
+
   const filteredRows = useMemo(() => {
+    // 항목 24: 연도 다중선택(OR)을 먼저 적용, 그 위에 검색(AND).
+    const base = yearSel.length
+      ? rows.filter((r) => yearSel.includes(invoiceYear(r)))
+      : rows;
     const q = searchText.trim().toLowerCase();
-    if (!q) return rows;
+    if (!q) return base;
     if (searchType === 'file_name') {
-      return rows.filter((r) => r.file_name.toLowerCase().includes(q));
+      return base.filter((r) => r.file_name.toLowerCase().includes(q));
     }
     if (searchType === 'line_item') {
       // PO 그룹 단위: 그룹 내 제품 인보이스 line_items 가 매칭되면 그 그룹(제품+운임) 전체 표시.
       // line_items 없는 인보이스는 검색 시에만 제외(그룹 매칭으로는 함께 노출됨).
       const terms = parseSearchTerms(searchText);
-      if (terms.length === 0) return rows;
+      if (terms.length === 0) return base;
       const matchingPoRefs = new Set<string>();
-      for (const r of rows) {
+      for (const r of base) {
         if (metaLineItemsMatch(r.extracted_metadata, terms)) {
           const po = r.related_po_reference?.trim();
           if (po) matchingPoRefs.add(po);
         }
       }
-      return rows.filter((r) => {
+      return base.filter((r) => {
         if (metaLineItemsMatch(r.extracted_metadata, terms)) return true;
         const po = r.related_po_reference?.trim();
         return Boolean(po && matchingPoRefs.has(po));
       });
     }
-    return rows.filter((r) =>
+    return base.filter((r) =>
       (r.extracted_doc_no ?? '').toLowerCase().includes(q),
     );
-  }, [rows, searchType, searchText]);
+  }, [rows, searchType, searchText, yearSel]);
 
-  const hasActiveSearch = searchText.trim().length > 0;
+  const hasActiveSearch =
+    searchText.trim().length > 0 || yearSel.length > 0;
 
   // 항목 8/15: 제품코드/명 필터 활성 시 매칭 라인아이템 chip 강조. 빈 배열이면 chip 없음.
   const highlightTerms =
@@ -476,10 +494,20 @@ export function AngelusInvoiceTab({ companyId }: Props) {
           }}
         />
 
+        <MultiChip
+          label="연도"
+          selected={yearSel}
+          onChange={setYearSel}
+          options={availableYears.map((y) => ({ id: y, label: `${y}년` }))}
+        />
+
         {hasActiveSearch && (
           <button
             type="button"
-            onClick={() => setSearchText('')}
+            onClick={() => {
+              setSearchText('');
+              setYearSel([]);
+            }}
             className="btn-base"
           >
             초기화
@@ -1073,6 +1101,12 @@ function invoiceShipDate(row: AngelusRow): string {
   if (typeof shipDate === 'string' && shipDate.trim()) return shipDate;
   if (row.extracted_doc_date) return row.extracted_doc_date;
   return fmtDate(row.email_received_at ?? row.uploaded_at ?? row.created_at);
+}
+
+/** 항목 24: 인보이스의 Ship Date 연도('YYYY'). 추출 불가면 빈 문자열. */
+function invoiceYear(row: AngelusRow): string {
+  const m = invoiceShipDate(row).match(/^(\d{4})/);
+  return m ? m[1] : '';
 }
 
 /** extracted_metadata.total_usd 를 숫자로 파싱. 없거나 비정상이면 null. */
