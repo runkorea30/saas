@@ -105,6 +105,41 @@
 
 ---
 
+## 오늘 추가된 작업 요약 (2026-07-24, 발주서 기준토글·품절필터 + 수입 입고처리 자동화 + 문서관리 1~8)
+
+### 발주서 페이지 (2건)
+- **1/2/3개월 기준 토글** (완료, commit `754b2c0`) — `calcSalesQty2m(qty3m)=round(qty3m/3*2)` + `calcSalesQtyByBasis` 헬퍼 추가(`calculations.ts`). 조사 결과 기존 1m/3m도 실제 DB 집계가 아니라 6개월평균 파생값이었음 → 2m도 동일 파생 방식으로 통일.
+- **한달내 품절예상 필터** (완료, commit `3866bd1`) — 기존 `days_until_reorder <= 30`(리드타임+입고예정 반영됨) 재사용, 카테고리 필터 옆 토글, 제외카테고리와 독립.
+
+### 수입/매입 — 입고처리 (2건)
+- **운임 인보이스 PDF 업로드 → Shipping Cost 자동채움** (완료, commit `a0bc1f1`) — 기존 `parseInvoicePDF` 재사용, Σrows.amount 자동채움(수동수정 가능), 실패 시 fallback.
+- **입고확정 시 인보이스 2건 자동 업로드** (완료, commit `45cf576`) — 신규 헬퍼 `src/lib/angelusReceivingUpload.ts`. 제품 인보이스는 `invoice_verifications` 세션 파일 Storage `copy()` 재활용, 운임은 fresh 업로드 → `document_files`(category=angelus_invoice) INSERT, `related_po_reference`로 페어링. `AngelusInvoiceTab` SubtypeBadge graceful 폴백 포함(기존 118건 배지 정상화).
+
+### 문서관리 페이지 (1~8번, 전부 push 완료)
+1. 시험검사번호 탭 컬럼 클릭 정렬 — `a093f40`
+2. 엔젤러스인보이스 PDF 새 탭에서 열기(다운로드 대신) — `6716de6`
+3. 인보이스 합계(total_usd) 표시 — `1d45326`
+4. 수신일자 → Ship Date 로 변경 — `898af94`
+5. 수입면장 "수입합계금액(KRW)" = (제품_total_usd + 운임_usd) × 환율, 89/93건 계산됨 — `3418229`
+6. 화학제품관리시스템 링크(`0be717d`), 주문시스템 탭(`9e5dcd1`), ETD/ETA PDF삽입도구(`901c896`), 입고확정 안내삭제 확인창(`2fd2e78`), 거래처정보 우클릭 팝업(`e4b874a`), 주문내역 내부메모(`orders.internal_note`, 거래처 포털 미노출)(`b7f100d`)
+7. **엔젤러스인보이스 제품코드/명 필터** — `3d87520` (+ 백필 스크립트 `1852b28`). 제품 인보이스 60건 전체 `extracted_metadata.line_items` 백필 완료(2,377개 라인, DB 반영). 신규 입고분도 `angelusReceivingUpload`에서 자동 저장. 필터 UI(검색창, line_items 부분일치). 수입면장은 스캔이미지(textLen=0)라 직접 검색 제외.
+8. 매칭 품목 카드 UI chip 강조 — `ec228b9` (PDF 자체는 미수정). ✅ 커밋·push 확인 완료(2026-07-24 세션 시작 시 검증).
+
+### 다음 세션 할 일 (우선순위 순)
+- **신규 지시서 `documents_new_8features_prompt.md` (9~16번)** — ⚠️ 세션 시작 시점에 레포/홈/Downloads 어디에도 파일 없음. 재확보 필요. 항목 요약:
+  - 9. 송금용 PDF 편집 — ETD/ETA 마지막 입력값 기본값 저장
+  - 10. 수입면장 — 제품코드/명 간접 검색(엔젤러스 인보이스 line_items 경유, `matched_product_invoice_no` 연결)
+  - 11. 은행 송금용 PDF — 제품+운임 인보이스 병합(pdf-lib copyPages)
+  - 12. 은행 송금용 PDF — Statement 파일 맨 앞 페이지 선택적 삽입
+  - 13. 설정 페이지 — 거래처 탭 기본 선택
+  - 14. 제품코드 검색 시 "-" 무시
+  - 15. 제품명 다중 검색(쉼표/공백 구분)
+  - 16. 매칭 인보이스 요약 팝업(파일명/인보이스번호/Ship Date/제품/수량/금액)
+  - 권장 순서: 14 → 15 → 10 → 16 → 9 → 11 → 12 → 13
+- **별도 검토 대기**: 인보이스 76474 total_usd 불일치(§ "알려진 데이터 이슈" 참조, 원본 PDF 수동 확인 후 처리). 백필 스크립트 `scripts/phase7-*.mjs` 커밋 여부 확인.
+
+---
+
 ## 오늘 추가된 작업 요약 (2026-07-09~10, 주문상세 수량편집 개선 + 인보이스검증 대대적 버그수정 + OCR 오독 관리 신규)
 
 ### 1. 주문상세 패널 — 재고음수 방지 · 전체선택 · 자동저장 제거 (완료, commit `040759c`)
