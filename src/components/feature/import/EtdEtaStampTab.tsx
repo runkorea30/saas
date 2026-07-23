@@ -21,6 +21,33 @@ const GAP_ABOVE_BILLTO_PTS = 22;
 /** 미리보기 캔버스 최대 가로(px). */
 const PREVIEW_MAX_W = 520;
 
+/** 항목 9: 마지막 ETD/ETA 입력값 저장 키(다음 실행 시 기본값 프리필). */
+const ETD_ETA_STORAGE_KEY = 'etdEtaLastUsed';
+
+/** 저장된 마지막 ETD/ETA 읽기. 없거나 파싱 실패 시 빈 값. */
+function readLastEtdEta(): { etd: string; eta: string } {
+  try {
+    const raw = localStorage.getItem(ETD_ETA_STORAGE_KEY);
+    if (!raw) return { etd: '', eta: '' };
+    const p = JSON.parse(raw) as { etd?: unknown; eta?: unknown };
+    return {
+      etd: typeof p.etd === 'string' ? p.etd : '',
+      eta: typeof p.eta === 'string' ? p.eta : '',
+    };
+  } catch {
+    return { etd: '', eta: '' };
+  }
+}
+
+/** 현재 ETD/ETA 를 마지막 값으로 저장. localStorage 불가 환경이면 무시. */
+function saveLastEtdEta(etd: string, eta: string): void {
+  try {
+    localStorage.setItem(ETD_ETA_STORAGE_KEY, JSON.stringify({ etd, eta }));
+  } catch {
+    // 저장 실패는 기능에 영향 없음 — 조용히 무시.
+  }
+}
+
 interface PageInfo {
   widthPts: number;
   heightPts: number;
@@ -31,8 +58,9 @@ interface PageInfo {
 export function EtdEtaStampTab() {
   const { showToast } = useToast();
   const [file, setFile] = useState<File | null>(null);
-  const [etd, setEtd] = useState('');
-  const [eta, setEta] = useState('');
+  // 항목 9: 마지막 입력값을 기본값으로 프리필(수정 가능).
+  const [etd, setEtd] = useState(() => readLastEtdEta().etd);
+  const [eta, setEta] = useState(() => readLastEtdEta().eta);
   const [pageInfo, setPageInfo] = useState<PageInfo | null>(null);
   const [useAuto, setUseAuto] = useState(true);
   /** 수동 모드 수직 위치 — 위에서부터 %. */
@@ -174,6 +202,8 @@ export function EtdEtaStampTab() {
       a.click();
       a.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      // 항목 9: 성공 시 이번 입력값을 다음 실행 기본값으로 저장.
+      saveLastEtdEta(etd.trim(), eta.trim());
       showToast({ kind: 'success', text: 'PDF 생성 완료 (다운로드됨)' });
     } catch (e) {
       showToast({
