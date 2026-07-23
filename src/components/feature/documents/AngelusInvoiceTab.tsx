@@ -21,6 +21,7 @@ import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { MatchDetailModal } from '@/components/feature/documents/MatchDetailModal';
+import { CombinedMatchModal } from '@/components/feature/documents/CombinedMatchModal';
 import { MultiChip } from '@/components/feature/orders/primitives';
 import {
   parseSearchTerms,
@@ -121,6 +122,9 @@ export function AngelusInvoiceTab({ companyId }: Props) {
     row: AngelusRow;
     matched: MatchedLine[];
   } | null>(null);
+  // 항목 25: 통합 조회 팝업 + ZIP 다운로드.
+  const [combinedOpen, setCombinedOpen] = useState(false);
+  const [zipBusy, setZipBusy] = useState(false);
 
   const queryKey = ['document-files', companyId, 'angelus_invoice'];
 
@@ -191,6 +195,22 @@ export function AngelusInvoiceTab({ companyId }: Props) {
   // 항목 8/15: 제품코드/명 필터 활성 시 매칭 라인아이템 chip 강조. 빈 배열이면 chip 없음.
   const highlightTerms =
     searchType === 'line_item' ? parseSearchTerms(searchText) : [];
+
+  // 항목 25: 통합 조회 대상 — line_item 검색 + 연도필터로 실제 라인 매칭된 인보이스들.
+  const combinedMatches = useMemo(() => {
+    if (searchType !== 'line_item') return [];
+    const terms = parseSearchTerms(searchText);
+    if (terms.length === 0) return [];
+    const base = yearSel.length
+      ? rows.filter((r) => yearSel.includes(invoiceYear(r)))
+      : rows;
+    const out: { row: AngelusRow; lines: MatchedLine[] }[] = [];
+    for (const r of base) {
+      const lines = matchedLineDetails(r.extracted_metadata, terms);
+      if (lines.length) out.push({ row: r, lines });
+    }
+    return out;
+  }, [rows, searchType, searchText, yearSel]);
 
   const { groups, unassigned } = useMemo(
     () => groupByPo(filteredRows),
@@ -308,6 +328,53 @@ export function AngelusInvoiceTab({ companyId }: Props) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : '다운로드 실패';
       showToast({ kind: 'error', text: msg });
+    }
+  };
+
+  /** 항목 25: 통합 조회 매칭 인보이스들의 PDF 를 하나의 ZIP 으로 다운로드. */
+  const handleDownloadZip = async () => {
+    if (zipBusy || combinedMatches.length === 0) return;
+    setZipBusy(true);
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      const used = new Set<string>();
+      let added = 0;
+      for (const m of combinedMatches) {
+        const row = m.row;
+        if (!row.file_path) continue;
+        let blob: Blob | null = null;
+        if (row.file_path.startsWith('data:')) {
+          blob = dataUriToBlob(row.file_path);
+        } else {
+          const { data } = await supabase.storage
+            .from(STORAGE_BUCKET)
+            .download(row.file_path);
+          blob = data ?? null;
+        }
+        if (!blob) continue;
+        let name = row.file_name || `${row.extracted_doc_no ?? 'invoice'}.pdf`;
+        if (used.has(name)) name = `${row.extracted_doc_no ?? added}_${name}`;
+        used.add(name);
+        zip.file(name, blob);
+        added += 1;
+      }
+      if (added === 0) {
+        showToast({ kind: 'error', text: '다운로드할 PDF 를 찾지 못했습니다.' });
+        return;
+      }
+      const out = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(out);
+      triggerDownload(url, `엔젤러스인보이스_검색결과_${added}건.zip`);
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      showToast({ kind: 'success', text: `ZIP 다운로드 완료 (${added}개 PDF)` });
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: `ZIP 생성 실패: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      setZipBusy(false);
     }
   };
 
@@ -501,6 +568,17 @@ export function AngelusInvoiceTab({ companyId }: Props) {
           options={availableYears.map((y) => ({ id: y, label: `${y}년` }))}
         />
 
+        {combinedMatches.length > 0 && (
+          <button
+            type="button"
+            className="btn-base primary"
+            onClick={() => setCombinedOpen(true)}
+            style={{ height: 34 }}
+          >
+            통합 조회 ({combinedMatches.length}건)
+          </button>
+        )}
+
         {hasActiveSearch && (
           <button
             type="button"
@@ -613,6 +691,23 @@ export function AngelusInvoiceTab({ companyId }: Props) {
           lines={matchModal.matched}
           totalUsd={invoiceTotalUsd(matchModal.row.extracted_metadata)}
           onDownload={() => downloadRow(matchModal.row)}
+        />
+      )}
+
+      {combinedOpen && (
+        <CombinedMatchModal
+          open
+          onClose={() => setCombinedOpen(false)}
+          queryLabel={searchText.trim()}
+          years={[...yearSel].sort()}
+          entries={combinedMatches.map((m) => ({
+            docNo: m.row.extracted_doc_no,
+            shipDate: invoiceShipDate(m.row),
+            fileName: m.row.file_name,
+            lines: m.lines,
+          }))}
+          onDownloadZip={() => void handleDownloadZip()}
+          zipBusy={zipBusy}
         />
       )}
     </div>

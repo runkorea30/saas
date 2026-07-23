@@ -15,7 +15,7 @@ export interface MatchDetailLine {
 }
 
 /** USD 금액 표시 — null 이면 '—'. */
-function fmtUsd(n: number | null): string {
+export function fmtUsd(n: number | null): string {
   if (n == null) return '—';
   return `$${n.toLocaleString('en-US', {
     minimumFractionDigits: 2,
@@ -24,7 +24,7 @@ function fmtUsd(n: number | null): string {
 }
 
 /** 단가 = amount / qty (2자리 반올림). qty 없거나 0 이면 null. */
-function unitPrice(amount: number | null, qty: number | null): number | null {
+export function unitPrice(amount: number | null, qty: number | null): number | null {
   if (amount == null || qty == null || qty === 0) return null;
   return Math.round((amount / qty) * 100) / 100;
 }

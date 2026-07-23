@@ -24,6 +24,7 @@
     "html2canvas": "^1.4.1",
     "imapflow": "^1.4.3",
     "jspdf": "^4.2.1",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.453.0",
     "mailparser": "^3.9.12",
     "nodemailer": "^9.0.1",
