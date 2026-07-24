@@ -8,14 +8,44 @@
  *    가로는 항상 페이지 중앙 정렬.
  */
 import { useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { FileText, Loader2 } from 'lucide-react';
 import { useToast } from '@/components/ui/Toast';
 import { parseInvoicePDF } from '@/utils/invoiceParser';
+import { useCompany } from '@/hooks/useCompany';
+import { supabase } from '@/lib/supabase';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
+/** Phase 4: 이관/입고확정으로 등록된 인보이스 조회 버킷/카테고리. */
+const STORAGE_BUCKET = 'documents';
+
+/** Phase 4: 송금 도구에서 선택 가능한 등록 인보이스 1건(document_files angelus_invoice). */
+interface RegisteredInvoice {
+  id: string;
+  file_name: string;
+  file_path: string;
+  doc_subtype: string | null;
+  related_po_reference: string | null;
+  extracted_doc_no: string | null;
+  uploaded_at: string | null;
+}
+
+/** 등록 인보이스 드롭다운 표시 라벨. */
+function registeredLabel(r: RegisteredInvoice): string {
+  const ref = r.related_po_reference || r.extracted_doc_no || '—';
+  const kind =
+    r.doc_subtype === 'product'
+      ? '제품'
+      : r.doc_subtype === 'freight'
+        ? '운임'
+        : (r.doc_subtype ?? '기타');
+  return `${ref} · ${kind} · ${r.file_name}`;
+}
 
 /** 삽입 문구 폰트 크기(pt) 및 BILL TO 위 여백(pt). */
 const FONT_PTS = 10.5;
@@ -102,7 +132,10 @@ async function extractStatementAmountDue(file: File): Promise<number | null> {
 
 export function EtdEtaStampTab() {
   const { showToast } = useToast();
+  const { companyId } = useCompany();
   const [file, setFile] = useState<File | null>(null);
+  // Phase 4: 등록 인보이스 선택 후 Storage fetch 진행 중 여부.
+  const [pickBusy, setPickBusy] = useState(false);
   // 지시서 007: 고정 기본값으로 시작(수정 가능, 새로고침 시 다시 기본값).
   const [etd, setEtd] = useState(DEFAULT_ETD);
   const [eta, setEta] = useState(DEFAULT_ETA);
@@ -260,6 +293,58 @@ export function EtdEtaStampTab() {
     }
   };
 
+  // ───── Phase 4: 이관/입고확정으로 등록된 인보이스 목록(document_files angelus_invoice) ─────
+  const { data: registeredInvoices = [] } = useQuery<RegisteredInvoice[]>({
+    queryKey: ['remittance-registered-invoices', companyId],
+    enabled: Boolean(companyId),
+    staleTime: 30_000,
+    queryFn: async () =>
+      fetchAllRows<RegisteredInvoice>(() =>
+        supabase
+          .from('document_files')
+          .select(
+            'id, file_name, file_path, doc_subtype, related_po_reference, extracted_doc_no, uploaded_at',
+          )
+          .eq('company_id', companyId!)
+          .eq('category', 'angelus_invoice')
+          .order('uploaded_at', { ascending: false }),
+      ),
+  });
+
+  /**
+   * Phase 4: 등록 인보이스 선택 → Storage 에서 PDF 를 받아 File 로 만들어 기존 handleFile 에 태움.
+   * (직접 업로드 경로와 동일한 스탬프/병합 파이프라인 재사용.)
+   */
+  const handlePickRegistered = async (id: string) => {
+    const rec = registeredInvoices.find((r) => r.id === id);
+    if (!rec?.file_path) return;
+    setPickBusy(true);
+    try {
+      let blob: Blob | null = null;
+      if (rec.file_path.startsWith('data:')) {
+        blob = await (await fetch(rec.file_path)).blob();
+      } else {
+        const { data, error } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .download(rec.file_path);
+        if (error) throw error;
+        blob = data ?? null;
+      }
+      if (!blob) throw new Error('파일을 불러오지 못했습니다.');
+      const picked = new File([blob], rec.file_name || 'invoice.pdf', {
+        type: 'application/pdf',
+      });
+      await handleFile(picked);
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: `등록 인보이스 불러오기 실패: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      setPickBusy(false);
+    }
+  };
+
   const handleGenerate = async () => {
     if (!bytesRef.current || !pageInfo || !file) return;
     if (!etd.trim() || !eta.trim()) {
@@ -382,6 +467,41 @@ export function EtdEtaStampTab() {
             }}
           />
         </label>
+        {registeredInvoices.length > 0 && (
+          <select
+            value=""
+            disabled={loading || pickBusy}
+            onChange={(e) => {
+              const v = e.target.value;
+              e.target.value = '';
+              if (v) void handlePickRegistered(v);
+            }}
+            title="이관/입고확정으로 등록된 인보이스에서 선택"
+            style={{
+              height: 34,
+              padding: '0 10px',
+              borderRadius: 8,
+              border: '1px solid var(--line-strong)',
+              background: 'var(--surface)',
+              color: 'var(--ink)',
+              fontSize: 12.5,
+              maxWidth: 300,
+              fontFamily: 'var(--font-kr)',
+              cursor: loading || pickBusy ? 'not-allowed' : 'pointer',
+              opacity: loading || pickBusy ? 0.6 : 1,
+            }}
+          >
+            <option value="">
+              {pickBusy ? '불러오는 중…' : '등록된 인보이스에서 선택'}
+            </option>
+            {registeredInvoices.map((r) => (
+              <option key={r.id} value={r.id}>
+                {registeredLabel(r)}
+              </option>
+            ))}
+          </select>
+        )}
+
         {file && (
           <span style={{ fontSize: 12, color: 'var(--ink-3)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.name}>
             {file.name}
