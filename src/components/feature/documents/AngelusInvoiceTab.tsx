@@ -131,6 +131,9 @@ export function AngelusInvoiceTab({ companyId }: Props) {
   const [zipBusy, setZipBusy] = useState(false);
   const [declZipBusy, setDeclZipBusy] = useState(false);
   const [excelBusy, setExcelBusy] = useState(false);
+  // Phase 5: 리스트 체크박스 선택(행 id) → 선택 항목 일괄 ZIP 다운로드.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selZipBusy, setSelZipBusy] = useState(false);
 
   const queryKey = ['document-files', companyId, 'angelus_invoice'];
 
@@ -232,6 +235,80 @@ export function AngelusInvoiceTab({ companyId }: Props) {
 
   const hasActiveSearch =
     searchText.trim().length > 0 || yearSel.length > 0;
+
+  // ───── Phase 5: 체크박스 선택 + 선택 항목 일괄 ZIP ─────
+  const visibleIds = useMemo(() => filteredRows.map((r) => r.id), [filteredRows]);
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const selectedVisibleCount = visibleIds.filter((id) =>
+    selectedIds.has(id),
+  ).length;
+
+  const toggleSelect = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const toggleSelectAllVisible = () =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (visibleIds.every((id) => next.has(id))) {
+        visibleIds.forEach((id) => next.delete(id));
+      } else {
+        visibleIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+
+  /** Phase 5: 체크박스로 선택된(현재 보이는) 인보이스 PDF 를 하나의 ZIP 으로 다운로드. */
+  const handleDownloadSelectedZip = async () => {
+    const targets = filteredRows.filter((r) => selectedIds.has(r.id));
+    if (selZipBusy || targets.length === 0) return;
+    setSelZipBusy(true);
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      const used = new Set<string>();
+      let added = 0;
+      for (const row of targets) {
+        if (!row.file_path) continue;
+        let blob: Blob | null = null;
+        if (row.file_path.startsWith('data:')) {
+          blob = dataUriToBlob(row.file_path);
+        } else {
+          const { data } = await supabase.storage
+            .from(STORAGE_BUCKET)
+            .download(row.file_path);
+          blob = data ?? null;
+        }
+        if (!blob) continue;
+        let name = row.file_name || `${row.extracted_doc_no ?? 'invoice'}.pdf`;
+        if (used.has(name)) name = `${row.extracted_doc_no ?? added}_${name}`;
+        used.add(name);
+        zip.file(name, blob);
+        added += 1;
+      }
+      if (added === 0) {
+        showToast({ kind: 'error', text: '다운로드할 PDF 를 찾지 못했습니다.' });
+        return;
+      }
+      const out = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(out);
+      triggerDownload(url, `엔젤러스인보이스_선택_${added}건.zip`);
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      showToast({ kind: 'success', text: `ZIP 다운로드 완료 (${added}개 PDF)` });
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: `ZIP 생성 실패: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      setSelZipBusy(false);
+    }
+  };
 
   // 항목 8/15: 제품코드/명 필터 활성 시 매칭 라인아이템 chip 강조. 빈 배열이면 chip 없음.
   const highlightTerms =
@@ -734,6 +811,32 @@ export function AngelusInvoiceTab({ companyId }: Props) {
           </button>
         )}
 
+        {filteredRows.length > 0 && (
+          <button
+            type="button"
+            className="btn-base"
+            onClick={toggleSelectAllVisible}
+            style={{ height: 34 }}
+          >
+            {allVisibleSelected ? '선택 해제' : '전체 선택'}
+          </button>
+        )}
+
+        <button
+          type="button"
+          className="btn-base"
+          onClick={() => void handleDownloadSelectedZip()}
+          disabled={selZipBusy || selectedVisibleCount === 0}
+          style={{
+            height: 34,
+            opacity: selZipBusy || selectedVisibleCount === 0 ? 0.6 : 1,
+          }}
+        >
+          {selZipBusy
+            ? 'ZIP 생성 중…'
+            : `선택 항목 ZIP 다운로드 (${selectedVisibleCount})`}
+        </button>
+
         {hasActiveSearch && (
           <button
             type="button"
@@ -800,6 +903,8 @@ export function AngelusInvoiceTab({ companyId }: Props) {
               onSubtypeChange={handleSubtypeChange}
               onPoRefChange={handlePoRefChange}
               onShowMatch={(row, matched) => setMatchModal({ row, matched })}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
             />
           ))}
           {unassigned.length > 0 && (
@@ -813,6 +918,8 @@ export function AngelusInvoiceTab({ companyId }: Props) {
               onSubtypeChange={handleSubtypeChange}
               onPoRefChange={handlePoRefChange}
               onShowMatch={(row, matched) => setMatchModal({ row, matched })}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
               muted
             />
           )}
@@ -886,6 +993,8 @@ function GroupBlock({
   onSubtypeChange,
   onPoRefChange,
   onShowMatch,
+  selectedIds,
+  onToggleSelect,
   muted,
 }: {
   title: string;
@@ -899,6 +1008,9 @@ function GroupBlock({
   onPoRefChange: (row: AngelusRow, next: string) => void;
   /** 항목 16: 매칭 chip 클릭 시 요약 팝업 열기. */
   onShowMatch: (row: AngelusRow, matched: MatchedLine[]) => void;
+  /** Phase 5: 선택된 행 id 집합 + 토글 콜백(체크박스 일괄 다운로드용). */
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
   muted?: boolean;
 }) {
   // PO 그룹 합계 = 그룹 내 인보이스 total_usd 합. 하나라도 값이 있으면 헤더에 표시.
@@ -957,6 +1069,7 @@ function GroupBlock({
               borderBottom: '1px solid var(--line)',
             }}
           >
+            <th style={thStyle('center', 40)} />
             <th style={thStyle('left')}>파일명</th>
             <th style={thStyle('left', 130)}>인보이스번호</th>
             <th style={thStyle('center', 110)}>종류</th>
@@ -971,6 +1084,14 @@ function GroupBlock({
             const matched = matchedLineDetails(row.extracted_metadata, highlightTerms);
             return (
             <tr key={row.id} style={{ borderBottom: '1px solid var(--line)' }}>
+              <td style={{ ...tdStyle('center'), width: 40 }}>
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(row.id)}
+                  onChange={() => onToggleSelect(row.id)}
+                  style={{ cursor: 'pointer' }}
+                />
+              </td>
               <td style={tdStyle('left')}>
                 <div
                   style={{ display: 'flex', alignItems: 'center', gap: 6 }}
@@ -1320,16 +1441,17 @@ function groupByPo(rows: AngelusRow[]): {
       }),
     }))
     .sort((a, b) => {
-      const la =
-        a.items[a.items.length - 1]?.email_received_at ??
-        a.items[a.items.length - 1]?.uploaded_at ??
-        '';
-      const lb =
-        b.items[b.items.length - 1]?.email_received_at ??
-        b.items[b.items.length - 1]?.uploaded_at ??
-        '';
-      return lb.localeCompare(la);
+      // Phase 5: 기본 정렬 = 날짜 오름차순(가장 오래된 그룹 먼저). 그룹 대표값은 최초 항목.
+      const la = a.items[0]?.email_received_at ?? a.items[0]?.uploaded_at ?? '';
+      const lb = b.items[0]?.email_received_at ?? b.items[0]?.uploaded_at ?? '';
+      return la.localeCompare(lb);
     });
+  // 미분류(PO 없음)도 동일하게 날짜 오름차순.
+  unassigned.sort((a, b) => {
+    const ta = a.email_received_at ?? a.uploaded_at ?? a.created_at ?? '';
+    const tb = b.email_received_at ?? b.uploaded_at ?? b.created_at ?? '';
+    return ta.localeCompare(tb);
+  });
   return { groups, unassigned };
 }
 

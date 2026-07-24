@@ -119,6 +119,8 @@ export function DocumentFilesTab({ companyId, category }: Props) {
   // 항목 28: 통합 조회 팝업 + ZIP 다운로드(수입면장 PDF).
   const [combinedOpen, setCombinedOpen] = useState(false);
   const [zipBusy, setZipBusy] = useState(false);
+  // Phase 5: 리스트 체크박스 선택(행 id) → 선택 항목 일괄 ZIP 다운로드.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const queryKey = ['document-files', companyId, category];
 
@@ -411,12 +413,21 @@ export function DocumentFilesTab({ companyId, category }: Props) {
 
   const filteredRows = useMemo(() => {
     if (!showSearchBar) return rows;
+    // Phase 5: 기본 정렬 = 신고일자(extracted_doc_date) 오름차순, 값 없는 건 뒤로.
+    const byDateAsc = [...rows].sort((a, b) => {
+      const da = a.extracted_doc_date ?? '';
+      const db = b.extracted_doc_date ?? '';
+      if (!da && !db) return 0;
+      if (!da) return 1;
+      if (!db) return -1;
+      return da.localeCompare(db);
+    });
     // 항목 27: 연도 다중선택(OR, 신고일자 기준) 먼저 적용, 그 위에 검색(AND).
     const base = yearSel.length
-      ? rows.filter((r) =>
+      ? byDateAsc.filter((r) =>
           yearSel.includes((r.extracted_doc_date ?? '').slice(0, 4)),
         )
-      : rows;
+      : byDateAsc;
     const q = searchText.trim().toLowerCase();
     if (!q) return base;
     if (searchType === 'file_name') {
@@ -445,6 +456,87 @@ export function DocumentFilesTab({ companyId, category }: Props) {
 
   const hasActiveSearch =
     showSearchBar && (searchText.trim().length > 0 || yearSel.length > 0);
+
+  // ───── Phase 5: 체크박스 선택 + 선택 항목 일괄 ZIP (수입면장 전용) ─────
+  const visibleIds = useMemo(() => filteredRows.map((r) => r.id), [filteredRows]);
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const selectedVisibleCount = visibleIds.filter((id) =>
+    selectedIds.has(id),
+  ).length;
+
+  const toggleSelect = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const toggleSelectAllVisible = () =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (visibleIds.every((id) => next.has(id))) {
+        visibleIds.forEach((id) => next.delete(id));
+      } else {
+        visibleIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+
+  /** Phase 5: 체크박스로 선택된(현재 보이는) 수입면장 PDF 를 하나의 ZIP 으로 다운로드. */
+  const handleDownloadSelectedZip = async () => {
+    const targets = filteredRows.filter((r) => selectedIds.has(r.id));
+    if (zipBusy || targets.length === 0) return;
+    setZipBusy(true);
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      const used = new Set<string>();
+      let added = 0;
+      for (const row of targets) {
+        const fp = row.file_path;
+        if (!fp) continue;
+        let blob: Blob | null = null;
+        if (fp.startsWith('data:')) {
+          blob = await (await fetch(fp)).blob();
+        } else {
+          const { data } = await supabase.storage
+            .from(STORAGE_BUCKET)
+            .download(fp);
+          blob = data ?? null;
+        }
+        if (!blob) continue;
+        let name =
+          row.file_name || `${row.extracted_doc_no ?? 'declaration'}.pdf`;
+        if (used.has(name)) name = `${row.extracted_doc_no ?? added}_${name}`;
+        used.add(name);
+        zip.file(name, blob);
+        added += 1;
+      }
+      if (added === 0) {
+        showToast({ kind: 'error', text: '다운로드할 PDF 를 찾지 못했습니다.' });
+        return;
+      }
+      const out = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(out);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `수입면장_선택_${added}건.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      showToast({ kind: 'success', text: `ZIP 다운로드 완료 (${added}개 PDF)` });
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: `ZIP 생성 실패: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      setZipBusy(false);
+    }
+  };
 
   // 항목 28: 통합 조회 대상 — 제품 검색 + 연도필터로 매칭된 수입면장들(연결 제품 인보이스 라인 포함).
   const combinedMatches = useMemo(() => {
@@ -611,6 +703,21 @@ export function DocumentFilesTab({ companyId, category }: Props) {
             </button>
           )}
 
+          <button
+            type="button"
+            className="btn-base"
+            onClick={() => void handleDownloadSelectedZip()}
+            disabled={zipBusy || selectedVisibleCount === 0}
+            style={{
+              height: 34,
+              opacity: zipBusy || selectedVisibleCount === 0 ? 0.6 : 1,
+            }}
+          >
+            {zipBusy
+              ? 'ZIP 생성 중…'
+              : `선택 항목 ZIP 다운로드 (${selectedVisibleCount})`}
+          </button>
+
           {hasActiveSearch && (
             <button
               type="button"
@@ -677,6 +784,17 @@ export function DocumentFilesTab({ companyId, category }: Props) {
                   borderBottom: '1px solid var(--line)',
                 }}
               >
+                {showMetaColumns && (
+                  <th style={thStyle('center', 40)}>
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleSelectAllVisible}
+                      title="전체 선택/해제"
+                      style={{ cursor: 'pointer' }}
+                    />
+                  </th>
+                )}
                 <th style={thStyle('left')}>파일명</th>
                 {showMetaColumns && (
                   <>
@@ -710,6 +828,16 @@ export function DocumentFilesTab({ companyId, category }: Props) {
                     key={row.id}
                     style={{ borderBottom: '1px solid var(--line)' }}
                   >
+                    {showMetaColumns && (
+                      <td style={{ ...tdStyle('center'), width: 40 }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(row.id)}
+                          onChange={() => toggleSelect(row.id)}
+                          style={{ cursor: 'pointer' }}
+                        />
+                      </td>
+                    )}
                     <td style={tdStyle('left')}>
                       <div
                         style={{
