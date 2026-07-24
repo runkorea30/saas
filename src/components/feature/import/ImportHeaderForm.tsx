@@ -24,6 +24,13 @@ interface Props {
   freightFileName?: string | null;
   /** 운임 인보이스 파싱 진행 중 여부. */
   freightParsing?: boolean;
+  /**
+   * 수입면장(수입신고필증) PDF 선택 시 호출. 부모가 File 로 보관해 입고확정 시 저장.
+   * 미전달 시 업로드 UI 자체가 렌더되지 않음(하위호환).
+   */
+  onDeclarationPdfSelect?: (file: File) => void;
+  /** 현재 보관 중인 수입면장 파일명 (표시용). */
+  declarationFileName?: string | null;
 }
 
 export function ImportHeaderForm({
@@ -33,8 +40,11 @@ export function ImportHeaderForm({
   onFreightPdfSelect,
   freightFileName,
   freightParsing,
+  onDeclarationPdfSelect,
+  declarationFileName,
 }: Props) {
   const freightInputRef = useRef<HTMLInputElement>(null);
+  const declarationInputRef = useRef<HTMLInputElement>(null);
   const patch = (key: keyof ImportInvoiceHeader, v: string | number) => {
     onChange({ ...value, [key]: v });
   };
@@ -189,6 +199,60 @@ export function ImportHeaderForm({
           />
         </Field>
       </div>
+
+      {onDeclarationPdfSelect && (
+        <div
+          style={{
+            marginTop: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+        >
+          <span style={{ fontSize: 11.5, color: 'var(--ink-2)', fontWeight: 500 }}>
+            수입면장 PDF
+            <span style={{ color: 'var(--danger)', marginLeft: 3 }}>*</span>
+          </span>
+          <input
+            ref={declarationInputRef}
+            type="file"
+            accept=".pdf"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onDeclarationPdfSelect(file);
+              // 같은 파일 재선택도 onChange 발화되도록 값 초기화.
+              e.target.value = '';
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => declarationInputRef.current?.click()}
+            disabled={disabled}
+            className="btn-base"
+            style={{ height: 26, fontSize: 11, padding: '0 10px' }}
+            title="수입면장(수입신고필증) PDF 를 업로드해야 입고확정이 가능합니다"
+          >
+            수입면장 PDF 업로드
+          </button>
+          {declarationFileName && (
+            <span
+              style={{
+                fontSize: 11,
+                color: 'var(--ink-3)',
+                maxWidth: 220,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={declarationFileName}
+            >
+              {declarationFileName}
+            </span>
+          )}
+        </div>
+      )}
 
       <div style={{ marginTop: 12 }}>
         <Field label="Notes">

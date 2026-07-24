@@ -53,6 +53,7 @@ const EtdEtaStampTab = lazy(() =>
 );
 import { parseInvoicePDF } from '@/utils/invoiceParser';
 import { uploadReceivingInvoices } from '@/lib/angelusReceivingUpload';
+import { uploadImportDeclaration } from '@/lib/importDeclarationUpload';
 
 // ───────────────────────────────────────────────────────────
 
@@ -133,6 +134,18 @@ export function ImportReceivingPage() {
   const [freightParsing, setFreightParsing] = useState(false);
   // 운임 인보이스 파싱으로 얻은 문서번호 — 항목 4 업로드 시 freight row extracted_doc_no.
   const [freightInvoiceNo, setFreightInvoiceNo] = useState<string | null>(null);
+
+  // ───── 수입면장(수입신고필증) PDF ─────
+  // 🟠 입고확정 필수. 운임과 동일하게 File 로만 임시 보관 → 입고확정 성공 후 정식 업로드.
+  const [declarationFile, setDeclarationFile] = useState<File | null>(null);
+  // 수입면장 미첨부 상태로 입고확정 클릭 시 표시하는 경고창.
+  const [declWarnOpen, setDeclWarnOpen] = useState(false);
+
+  /** 수입면장 PDF 선택 핸들러 — 파싱 없이 File 보관(입고확정 시 저장). */
+  const handleDeclarationPdfSelect = (file: File) => {
+    setDeclarationFile(file);
+    showToast({ kind: 'success', text: `수입면장 첨부됨: ${file.name}` });
+  };
 
   /**
    * 운임 인보이스 PDF 업로드 핸들러 — 파싱해 shippingCostUsd 자동 채움.
@@ -476,6 +489,11 @@ export function ImportReceivingPage() {
   // ───── 제출 플로우 (사전 확인 체이닝) ─────
   const handleSubmitClick = () => {
     if (!canSubmit) return;
+    // 🔴 수입면장 필수 게이트 — 미첨부 시 경고 후 중단(재고 미반영).
+    if (!declarationFile) {
+      setDeclWarnOpen(true);
+      return;
+    }
     if (header.shippingCostUsd === 0) {
       setConfirmShipping(true);
       return;
@@ -596,6 +614,7 @@ export function ImportReceivingPage() {
     const capturedInvoiceNumber = header.invoiceNumber;
     const capturedFreightFile = freightFile;
     const capturedFreightNo = freightInvoiceNo;
+    const capturedDeclarationFile = declarationFile;
     createMut.mutate(
       { header, rows: rowsToSubmit },
       {
@@ -608,6 +627,7 @@ export function ImportReceivingPage() {
           setRowInputs([createEmptyRow()]);
           setFreightFile(null);
           setFreightInvoiceNo(null);
+          setDeclarationFile(null);
           // 항목 4: 거래처 포털 안내가 있으면 삭제 여부 확인창 표시(자동삭제 아님).
           if (fedexHasNotice || seaHasNotice) {
             setClearFedex(fedexHasNotice);
@@ -668,6 +688,29 @@ export function ImportReceivingPage() {
                   kind: 'error',
                   text: '재고는 반영됐으나 인보이스 문서 업로드 실패 — 문서관리에서 수동 업로드해주세요',
                 });
+              }
+
+              // ───── 수입면장 업로드 (document_files category='import_declaration') ─────
+              // 🔴 게이트에서 필수 확인 완료 상태 — 재고 반영 후 best-effort 저장.
+              if (capturedDeclarationFile) {
+                try {
+                  await uploadImportDeclaration({
+                    companyId,
+                    invoiceNumber: capturedInvoiceNumber,
+                    file: capturedDeclarationFile,
+                  });
+                  queryClient.invalidateQueries({
+                    queryKey: ['document-files', companyId, 'import_declaration'],
+                  });
+                  showToast({ kind: 'success', text: '수입면장 문서관리에 업로드됨' });
+                } catch (e) {
+                  // eslint-disable-next-line no-console
+                  console.error('[uploadImportDeclaration]', e);
+                  showToast({
+                    kind: 'error',
+                    text: '재고는 반영됐으나 수입면장 업로드 실패 — 문서관리에서 수동 업로드해주세요',
+                  });
+                }
               }
             })();
           }
@@ -1059,6 +1102,8 @@ export function ImportReceivingPage() {
               onFreightPdfSelect={handleFreightPdfSelect}
               freightFileName={freightFile?.name ?? null}
               freightParsing={freightParsing}
+              onDeclarationPdfSelect={handleDeclarationPdfSelect}
+              declarationFileName={declarationFile?.name ?? null}
             />
 
         <ImportSummaryBar
@@ -1594,6 +1639,24 @@ export function ImportReceivingPage() {
         confirmLabel="진행"
         onConfirm={onConfirmShipping}
         busy={busy}
+      />
+
+      {/* 수입면장 필수 경고 */}
+      <ConfirmDialog
+        open={declWarnOpen}
+        onClose={() => setDeclWarnOpen(false)}
+        title="수입면장 필요"
+        body={
+          <>
+            수입면장을 먼저 입력해주세요.
+            <br />
+            헤더의 <strong>수입면장 PDF 업로드</strong> 버튼으로 첨부한 뒤 입고확정을
+            진행할 수 있습니다.
+          </>
+        }
+        confirmLabel="확인"
+        cancelLabel="닫기"
+        onConfirm={() => setDeclWarnOpen(false)}
       />
 
       {/* 합계 차이 확인 */}
