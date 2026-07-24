@@ -22,6 +22,10 @@ import { useToast } from '@/components/ui/Toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { MatchDetailModal } from '@/components/feature/documents/MatchDetailModal';
 import { CombinedMatchModal } from '@/components/feature/documents/CombinedMatchModal';
+import {
+  exportCombinedInvoiceXlsx,
+  type CombinedXlsxLine,
+} from '@/utils/combinedInvoiceXlsx';
 import { MultiChip } from '@/components/feature/orders/primitives';
 import {
   parseSearchTerms,
@@ -125,6 +129,8 @@ export function AngelusInvoiceTab({ companyId }: Props) {
   // 항목 25: 통합 조회 팝업 + ZIP 다운로드.
   const [combinedOpen, setCombinedOpen] = useState(false);
   const [zipBusy, setZipBusy] = useState(false);
+  const [declZipBusy, setDeclZipBusy] = useState(false);
+  const [excelBusy, setExcelBusy] = useState(false);
 
   const queryKey = ['document-files', companyId, 'angelus_invoice'];
 
@@ -246,6 +252,21 @@ export function AngelusInvoiceTab({ companyId }: Props) {
     }
     return out;
   }, [rows, searchType, searchText, yearSel]);
+
+  // 작업2: 통합조회 매칭 인보이스들의 연관 수입면장(AWB) 파일 — filePath 기준 중복 제거.
+  const declZipTargets = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { fileName: string; filePath: string }[] = [];
+    for (const m of combinedMatches) {
+      const no = m.row.extracted_doc_no?.trim();
+      if (!no) continue;
+      const d = declByInvoiceNo?.get(no);
+      if (!d || seen.has(d.filePath)) continue;
+      seen.add(d.filePath);
+      out.push(d);
+    }
+    return out;
+  }, [combinedMatches, declByInvoiceNo]);
 
   const { groups, unassigned } = useMemo(
     () => groupByPo(filteredRows),
@@ -424,6 +445,91 @@ export function AngelusInvoiceTab({ companyId }: Props) {
       });
     } finally {
       setZipBusy(false);
+    }
+  };
+
+  /** 작업2: 연관 수입면장(AWB) PDF 들을 하나의 ZIP 으로 다운로드(파일명 기준 중복 제거). */
+  const handleDownloadDeclZip = async () => {
+    if (declZipBusy || declZipTargets.length === 0) return;
+    setDeclZipBusy(true);
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      const used = new Set<string>();
+      let added = 0;
+      for (const t of declZipTargets) {
+        if (!t.filePath) continue;
+        let blob: Blob | null = null;
+        if (t.filePath.startsWith('data:')) {
+          blob = dataUriToBlob(t.filePath);
+        } else {
+          // getPublicUrl 은 경로 특수문자(#, 공백)를 인코딩 — "새 탭 열기"에서 검증된 경로.
+          const { data: pub } = supabase.storage
+            .from(STORAGE_BUCKET)
+            .getPublicUrl(t.filePath);
+          if (pub?.publicUrl) {
+            const res = await fetch(pub.publicUrl);
+            if (res.ok) blob = await res.blob();
+          }
+        }
+        if (!blob) continue;
+        let name = t.fileName || `declaration_${added}.pdf`;
+        if (used.has(name)) name = `${added}_${name}`;
+        used.add(name);
+        zip.file(name, blob);
+        added += 1;
+      }
+      if (added === 0) {
+        showToast({ kind: 'error', text: '다운로드할 수입면장을 찾지 못했습니다.' });
+        return;
+      }
+      const out = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(out);
+      triggerDownload(url, `수입면장_검색결과_${added}건.zip`);
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      showToast({ kind: 'success', text: `수입면장 ZIP 다운로드 완료 (${added}개 PDF)` });
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: `ZIP 생성 실패: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      setDeclZipBusy(false);
+    }
+  };
+
+  /** 작업3: 통합조회 데이터를 엑셀(.xlsx) 로 export(라인 flat + 전체 합계). */
+  const handleExportExcel = async () => {
+    if (excelBusy || combinedMatches.length === 0) return;
+    setExcelBusy(true);
+    try {
+      const code = searchText.trim() || '전체';
+      const lines: CombinedXlsxLine[] = [];
+      for (const m of combinedMatches) {
+        const no = m.row.extracted_doc_no?.trim() ?? '';
+        const decl = no ? declByInvoiceNo?.get(no) : null;
+        for (const li of m.lines) {
+          lines.push({
+            invoiceNo: no,
+            shipDate: invoiceShipDate(m.row),
+            fileName: m.row.file_name,
+            declFileName: decl?.fileName ?? '',
+            code: li.code,
+            name: li.name,
+            qty: li.qty,
+            amount: li.amount,
+          });
+        }
+      }
+      await exportCombinedInvoiceXlsx(code, lines);
+      showToast({ kind: 'success', text: '엑셀 다운로드 완료' });
+    } catch (e) {
+      showToast({
+        kind: 'error',
+        text: `엑셀 생성 실패: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      setExcelBusy(false);
     }
   };
 
@@ -759,6 +865,11 @@ export function AngelusInvoiceTab({ companyId }: Props) {
           }))}
           onDownloadZip={() => void handleDownloadZip()}
           zipBusy={zipBusy}
+          onDownloadDeclZip={() => void handleDownloadDeclZip()}
+          declZipBusy={declZipBusy}
+          declCount={declZipTargets.length}
+          onExportExcel={() => void handleExportExcel()}
+          excelBusy={excelBusy}
         />
       )}
     </div>

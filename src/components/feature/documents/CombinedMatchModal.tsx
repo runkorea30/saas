@@ -3,7 +3,7 @@
  * 항목 19의 개별 상세보기(MatchDetailModal)와 별도 컴포넌트, 스타일 톤은 통일.
  * presentational only — ZIP 생성/다운로드는 onDownloadZip 으로 주입.
  */
-import { Download, Loader2 } from 'lucide-react';
+import { Download, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { fmtUsd, unitPrice } from '@/components/feature/documents/MatchDetailModal';
 import type { MatchedLine } from '@/utils/lineItemSearch';
@@ -25,6 +25,11 @@ export function CombinedMatchModal({
   entries,
   onDownloadZip,
   zipBusy,
+  onDownloadDeclZip,
+  declZipBusy,
+  declCount,
+  onExportExcel,
+  excelBusy,
 }: {
   open: boolean;
   onClose: () => void;
@@ -33,6 +38,14 @@ export function CombinedMatchModal({
   entries: CombinedMatchEntry[];
   onDownloadZip: () => void;
   zipBusy: boolean;
+  /** 작업2: 연관 수입면장(AWB) PDF 일괄 ZIP 다운로드(엔젤러스인보이스 탭 전용, 미주입 시 버튼 숨김). */
+  onDownloadDeclZip?: () => void;
+  declZipBusy?: boolean;
+  /** 팝업에 표시된 고유 AWB 파일 개수(0이거나 핸들러 없으면 버튼 숨김). */
+  declCount?: number;
+  /** 작업3: 통합조회 데이터 엑셀(.xlsx) export(미주입 시 버튼 숨김). */
+  onExportExcel?: () => void;
+  excelBusy?: boolean;
 }) {
   const total = entries.reduce(
     (s, e) => s + e.lines.reduce((x, l) => x + (l.amount ?? 0), 0),
@@ -48,20 +61,62 @@ export function CombinedMatchModal({
       title="통합 조회"
       width={760}
       footer={
-        <button
-          type="button"
-          className="btn-base primary"
-          onClick={onDownloadZip}
-          disabled={zipBusy || entries.length === 0}
-          style={{ opacity: zipBusy || entries.length === 0 ? 0.6 : 1 }}
-        >
-          {zipBusy ? (
-            <Loader2 className="ico-sm animate-spin" />
-          ) : (
-            <Download size={14} />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn-base primary"
+            onClick={onDownloadZip}
+            disabled={zipBusy || entries.length === 0}
+            style={{ opacity: zipBusy || entries.length === 0 ? 0.6 : 1 }}
+          >
+            {zipBusy ? (
+              <Loader2 className="ico-sm animate-spin" />
+            ) : (
+              <Download size={14} />
+            )}
+            <span>
+              {zipBusy
+                ? 'ZIP 생성 중…'
+                : `ZIP 인보이스 다운로드 (${entries.length}개 PDF)`}
+            </span>
+          </button>
+          {onDownloadDeclZip && (declCount ?? 0) > 0 && (
+            <button
+              type="button"
+              className="btn-base"
+              onClick={onDownloadDeclZip}
+              disabled={declZipBusy}
+              style={{ opacity: declZipBusy ? 0.6 : 1 }}
+            >
+              {declZipBusy ? (
+                <Loader2 className="ico-sm animate-spin" />
+              ) : (
+                <Download size={14} />
+              )}
+              <span>
+                {declZipBusy
+                  ? 'ZIP 생성 중…'
+                  : `수입면장 ZIP 다운로드 (${declCount ?? 0}개 PDF)`}
+              </span>
+            </button>
           )}
-          <span>{zipBusy ? 'ZIP 생성 중…' : `ZIP 다운로드 (${entries.length}개 PDF)`}</span>
-        </button>
+          {onExportExcel && (
+            <button
+              type="button"
+              className="btn-base"
+              onClick={onExportExcel}
+              disabled={excelBusy || entries.length === 0}
+              style={{ opacity: excelBusy || entries.length === 0 ? 0.6 : 1 }}
+            >
+              {excelBusy ? (
+                <Loader2 className="ico-sm animate-spin" />
+              ) : (
+                <FileSpreadsheet size={14} />
+              )}
+              <span>{excelBusy ? '엑셀 생성 중…' : '엑셀 다운로드'}</span>
+            </button>
+          )}
+        </div>
       }
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
