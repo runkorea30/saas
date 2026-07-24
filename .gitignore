@@ -56,6 +56,15 @@ supabase/.temp/
 # 로컬 개인 데이터 (이메일 백업 zip, 참고용 PDF/xlsx 등) — 레포에 넣지 않음
 samples/
 
+# 로컬 산출물/검증 스크린샷/임시 폴더 — 레포에 넣지 않음
+# (주의: .gitignore 는 줄 끝 인라인 주석을 지원하지 않으므로 패턴만 단독으로 둔다)
+# 루트에 생성되는 1회성 검증 스크린샷 (앱 asset 은 public/·src/ 에 위치)
+/*.png
+# 스크립트가 생성하는 산출물 폴더 (리포트 xlsx 등)
+outputs/
+# phase 스크립트 중간결과 temp 폴더 (_lineitems.json, dump-*.txt 등)
+scripts/_phase*_temp/
+
 # TypeScript
 *.tsbuildinfo
 
