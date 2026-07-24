@@ -31,6 +31,7 @@ import {
   fetchPendingSessions,
   type PendingSession,
 } from '@/lib/invoiceVerification';
+import { registerAngelusProductInvoice } from '@/lib/angelusReceivingUpload';
 
 // 주문서/인보이스/OPS 제품 코드 간 매칭용 정규화.
 // 공백·하이픈 제거 + 소문자 통일. (leading-zero 는 제거하지 않음 — 다른 SKU 가 충돌할 수 있음.)
@@ -967,6 +968,26 @@ export function InvoiceUploadCard({ companyId, onFill, disabled, products }: Pro
       } catch (e) {
         // eslint-disable-next-line no-console
         console.error('[notice-tag-sync] unexpected', e);
+      }
+
+      // Phase 3: 엔젤러스인보이스 탭에 product 인보이스 즉시 등록(중복 방지 가드 내장).
+      //  실패해도 이관 자체는 진행(best-effort). onFill 직전에 await 해 언마운트 전 커밋 보장.
+      try {
+        const prod = await registerAngelusProductInvoice({
+          companyId,
+          invoiceNumber: comparison.invoiceNo,
+        });
+        if (prod.error) {
+          // eslint-disable-next-line no-console
+          console.error('[angelus-product-register]', prod.error);
+        } else if (prod.uploaded) {
+          void queryClient.invalidateQueries({
+            queryKey: ['document-files', companyId, 'angelus_invoice'],
+          });
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('[angelus-product-register] unexpected', e);
       }
     }
     onFill(rows, {

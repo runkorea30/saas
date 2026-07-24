@@ -96,6 +96,87 @@ async function findSessionInvoiceFile(
   };
 }
 
+/**
+ * 이미 등록된 product angelus_invoice 가 있는지 확인 (중복 방지 가드).
+ * Phase 3: product 등록 시점이 이관/입고확정 두 곳이라 재등록을 막기 위해 사용.
+ */
+async function productInvoiceExists(
+  companyId: string,
+  invoiceNumber: string,
+): Promise<boolean> {
+  const key = invoiceNumber.trim();
+  if (!key) return false;
+  const { data, error } = await supabase
+    .from('document_files')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('category', 'angelus_invoice')
+    .eq('doc_subtype', 'product')
+    .eq('related_po_reference', key)
+    .limit(1);
+  if (error) throw error;
+  return (data?.length ?? 0) > 0;
+}
+
+export interface RegisterProductInvoiceResult {
+  uploaded: boolean;
+  /** 이미 등록돼 있어 건너뜀. */
+  skipped: boolean;
+  error?: string;
+}
+
+/**
+ * Phase 3: 제품 인보이스를 엔젤러스인보이스 탭(document_files category='angelus_invoice',
+ * doc_subtype='product')에 등록. 이관 시점과 입고확정 시점 양쪽에서 호출되며,
+ * 내부 중복 방지 가드로 같은 invoice_no 는 한 번만 등록된다. throw 하지 않고 결과 반환.
+ */
+export async function registerAngelusProductInvoice(params: {
+  companyId: string;
+  invoiceNumber: string;
+}): Promise<RegisterProductInvoiceResult> {
+  const { companyId, invoiceNumber } = params;
+  try {
+    if (await productInvoiceExists(companyId, invoiceNumber)) {
+      return { uploaded: false, skipped: true };
+    }
+    const sessionFile = await findSessionInvoiceFile(companyId, invoiceNumber);
+    if (!sessionFile) return { uploaded: false, skipped: false };
+
+    const safeInvoice = safeSegment(invoiceNumber);
+    const destPath = `import-receiving/${companyId}/${safeInvoice}/product.pdf`;
+    const { error: copyErr } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .copy(sessionFile.path, destPath);
+    if (copyErr) throw copyErr;
+    const { error: insErr } = await supabase.from('document_files').insert({
+      company_id: companyId,
+      category: 'angelus_invoice',
+      file_name: sessionFile.name,
+      file_path: destPath,
+      mime_type: 'application/pdf',
+      uploaded_at: new Date().toISOString(),
+      source: 'import_receiving',
+      doc_subtype: 'product',
+      subtype_confirmed: false,
+      related_po_reference: invoiceNumber.trim(),
+      extracted_doc_no: invoiceNumber.trim(),
+      // 항목 7: 제품코드/명 필터용 line_items 함께 저장(백필과 동일 형식).
+      extracted_metadata:
+        sessionFile.lineItems.length > 0
+          ? ({ line_items: sessionFile.lineItems } as unknown as Json)
+          : null,
+    });
+    if (insErr) throw insErr;
+    return { uploaded: true, skipped: false };
+  } catch (e) {
+    return {
+      uploaded: false,
+      skipped: false,
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
 export async function uploadReceivingInvoices(
   params: UploadReceivingInvoicesParams,
 ): Promise<UploadReceivingInvoicesResult> {
@@ -108,41 +189,10 @@ export async function uploadReceivingInvoices(
   const safeInvoice = safeSegment(invoiceNumber);
   const basePrefix = `import-receiving/${companyId}/${safeInvoice}`;
 
-  // ───── 1) 제품 인보이스 (세션 파일 Storage copy) ─────
-  try {
-    const sessionFile = await findSessionInvoiceFile(companyId, invoiceNumber);
-    if (sessionFile) {
-      const destPath = `${basePrefix}/product.pdf`;
-      const { error: copyErr } = await supabase.storage
-        .from(STORAGE_BUCKET)
-        .copy(sessionFile.path, destPath);
-      if (copyErr) throw copyErr;
-      const { error: insErr } = await supabase.from('document_files').insert({
-        company_id: companyId,
-        category: 'angelus_invoice',
-        file_name: sessionFile.name,
-        file_path: destPath,
-        mime_type: 'application/pdf',
-        uploaded_at: new Date().toISOString(),
-        source: 'import_receiving',
-        doc_subtype: 'product',
-        subtype_confirmed: false,
-        related_po_reference: invoiceNumber.trim(),
-        extracted_doc_no: invoiceNumber.trim(),
-        // 항목 7: 제품코드/명 필터용 line_items 함께 저장(백필과 동일 형식).
-        extracted_metadata:
-          sessionFile.lineItems.length > 0
-            ? ({ line_items: sessionFile.lineItems } as unknown as Json)
-            : null,
-      });
-      if (insErr) throw insErr;
-      result.productUploaded = true;
-    }
-  } catch (e) {
-    result.errors.push(
-      `제품 인보이스: ${e instanceof Error ? e.message : String(e)}`,
-    );
-  }
+  // ───── 1) 제품 인보이스 — 중복 방지 가드 내장 (이관 시점 등록됐으면 skip) ─────
+  const prod = await registerAngelusProductInvoice({ companyId, invoiceNumber });
+  if (prod.uploaded) result.productUploaded = true;
+  if (prod.error) result.errors.push(`제품 인보이스: ${prod.error}`);
 
   // ───── 2) 운임 인보이스 (File fresh 업로드) ─────
   if (freightFile) {
